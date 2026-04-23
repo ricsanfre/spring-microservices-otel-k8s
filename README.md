@@ -224,8 +224,9 @@ Stores product reviews. A review can only be submitted by a user who has a **del
 
 **Business rule validation (via Client Credentials):**
 
-1. Call `product-service` → verify the product exists
-2. Call `order-service` → verify the `userId` (from JWT `sub` claim) has a `DELIVERED` order containing `productId`
+1. Extract JWT `sub` → call `user-service` resolve endpoint → obtain internal `userId` (cached locally)
+2. Call `product-service` → verify the product exists
+3. Call `order-service` → verify the internal `userId` has a `DELIVERED` order containing `productId`
 
 ---
 
@@ -243,7 +244,9 @@ Pure Kafka consumer. No REST API. No database. Receives order events and dispatc
 
 ### user-service · port 8085 · PostgreSQL
 
-Stores user profile data. **Does not store passwords** — Keycloak manages credentials. The `keycloak_id` field links the profile to the Keycloak identity (JWT `sub` claim).
+Stores user profile data. **Does not store passwords** — Keycloak manages credentials. The `idp_subject` field stores the IAM provider's `sub` UUID, used only within this service for identity resolution.
+
+> **IAM portability:** `user-service` is the **only** service that knows about Keycloak's `sub`. All other services reference the internal `users.id` UUID. On a future IAM provider migration, only the `idp_subject` column in this one service needs updating. See [design/iam-portability.md](design/iam-portability.md).
 
 **REST API**
 
@@ -251,10 +254,13 @@ Stores user profile data. **Does not store passwords** — Keycloak manages cred
 |--------|------|-------------|---------------|
 | `GET` | `/api/v1/users/me` | Get own profile (resolved from JWT `sub`) | Any authenticated user |
 | `GET` | `/api/v1/users/{id}` | Get user profile by ID | Any authenticated user |
+| `GET` | `/api/v1/users/resolve?idp_subject={sub}` | Resolve IAM `sub` → internal user profile | Service account only |
 | `PUT` | `/api/v1/users/{id}` | Update own profile | Owner |
-| `POST` | `/api/v1/users` | Create user profile (post-registration hook) | Service account |
+| `POST` | `/api/v1/users` | Create user profile (lazy registration) | Any authenticated user |
 
-> **Profile registration flow:** After a user's first login through Keycloak, the client (or a Keycloak event listener) calls `POST /api/v1/users` to create the profile in user-service, linking it via the `keycloak_id` extracted from the JWT `sub` claim.
+> **Lazy registration flow:** On the first call to `GET /api/v1/users/me`, if no profile exists for the JWT `sub`, `user-service` auto-creates it using claims from the JWT (`email`, `given_name`, `family_name`, `preferred_username`). No explicit registration step required.
+
+> **Per-service lazy resolution:** When `order-service` or `reviews-service` needs to associate a user with data, they extract the JWT `sub`, call `GET /api/v1/users/resolve?idp_subject={sub}` to obtain the internal `users.id`, then cache the mapping locally (TTL: 5–15 min). Subsequent requests for the same user skip the resolution call.
 
 ---
 
@@ -312,17 +318,17 @@ erDiagram
 erDiagram
     USERS {
         uuid id PK
+        varchar idp_subject
         varchar username
         varchar email
         varchar first_name
         varchar last_name
-        varchar keycloak_id
         timestamp created_at
         timestamp updated_at
     }
 ```
 
-> `keycloak_id` — the `sub` UUID from Keycloak's JWT. This is the authoritative link between the user profile and the Keycloak identity.
+> `idp_subject` — the `sub` UUID issued by the IAM provider (Keycloak). Indexed for fast lookup. Used **only** inside `user-service` to link a JWT to the internal profile. Cross-service references always use `id` instead, keeping all other services IAM-agnostic.
 
 ---
 
@@ -349,7 +355,7 @@ erDiagram
   "_id":       "ObjectId",
   "productId": "string  (MongoDB ObjectId ref → products collection)",
   "orderId":   "string  (UUID ref → PostgreSQL orders.id)",
-  "userId":    "string  (Keycloak sub UUID — extracted from JWT)",
+  "userId":    "string  (internal users.id UUID — resolved via user-service)",
   "rating":    "int32   (1–5)",
   "comment":   "string",
   "createdAt": "Date"

@@ -129,19 +129,22 @@ Produce a `flowchart TD` diagram covering:
 
 #### user-service · port 8085 · PostgreSQL
 
-- **Entity:** `User { id, username, email, firstName, lastName, keycloak_id, createdAt, updatedAt }`
-- `keycloak_id` = the `sub` UUID from Keycloak's JWT — links profile to Keycloak identity
+- **Entity:** `User { id, idp_subject, username, email, firstName, lastName, createdAt, updatedAt }`
+- `idp_subject` = the `sub` UUID from the IAM provider's JWT — IAM-agnostic name; only used inside this service
 - **No password storage** — Keycloak owns credentials
+- **IAM portability:** This is the **only** service that stores the IAM provider's `sub`. All other services use the internal `id` (UUID). On IAM migration, only this service's `idp_subject` column needs updating. See `design/iam-portability.md`.
 - **REST API:**
 
   | Method | Path | Required Role |
   |--------|------|---------------|
   | `GET` | `/api/v1/users/me` | Any authenticated user (resolved from JWT `sub`) |
   | `GET` | `/api/v1/users/{id}` | Any authenticated user |
+  | `GET` | `/api/v1/users/resolve?idp_subject={sub}` | Service account only |
   | `PUT` | `/api/v1/users/{id}` | Owner |
-  | `POST` | `/api/v1/users` | Service account (post-registration hook) |
+  | `POST` | `/api/v1/users` | Any authenticated user (lazy registration) |
 
-- **Profile registration flow:** After first Keycloak login, client (or Keycloak event listener) calls `POST /api/v1/users` to create the local profile, linked via `keycloak_id`
+- **Lazy registration flow:** On first `GET /api/v1/users/me`, if no profile exists for the JWT `sub`, `user-service` auto-creates it from JWT claims (`email`, `given_name`, `family_name`, `preferred_username`)
+- **Per-service lazy resolution:** Other services call `GET /api/v1/users/resolve?idp_subject={sub}` on first encounter with a user, cache the result (TTL 5–15 min), and use the internal `users.id` UUID for all data storage
 
 ---
 
@@ -234,7 +237,9 @@ Tables: `orders`, `order_items` (FK `order_id → orders.id`)
 
 #### PostgreSQL — users DB
 
-Table: `users` (with `keycloak_id` as external identity reference)
+Table: `users` columns: `id` (PK, internal UUID), `idp_subject` (IAM provider `sub`, indexed), `email` (UNIQUE), `username`, `first_name`, `last_name`, `created_at`, `updated_at`
+
+> `idp_subject` replaces the former `keycloak_id` name. The IAM-agnostic name signals that this column belongs to the external identity provider, not to the application's own data model.
 
 #### MongoDB — products collection
 
@@ -242,7 +247,7 @@ Fields: `_id`, `name`, `description`, `price`, `category`, `imageUrl`, `stockQty
 
 #### MongoDB — reviews collection
 
-Fields: `_id`, `productId` (ref products), `orderId` (ref orders), `userId` (Keycloak `sub`), `rating`, `comment`, `createdAt`
+Fields: `_id`, `productId` (ref products), `orderId` (ref orders), `userId` (internal `users.id` UUID — resolved via user-service lazy resolution), `rating`, `comment`, `createdAt`
 
 ---
 
@@ -291,17 +296,22 @@ OTLP endpoints (HTTP): `:4318` — gRPC: `:4317` — Grafana UI: `:3000`
 - [ ] DB assignments consistent (Products/Reviews → MongoDB, Orders/Users → PostgreSQL)
 - [ ] Kafka topic name `order.created.v1` used consistently
 - [ ] OAuth2 token flows cover both user-facing and service-to-service scenarios
-- [ ] `keycloak_id` linkage documented in both User Service and security sections
+- [ ] `idp_subject` column documented in User Service; all other services reference internal `users.id`
+- [ ] Per-service lazy resolution documented (resolve endpoint + local cache)
 
 ---
 
 ## Key Design Notes
 
-1. **User Service vs Keycloak separation:** Keycloak owns credentials/authentication. User Service stores enriched profile data (username, email, names). The `keycloak_id` field is the authoritative link between the two systems.
+1. **User Service vs Keycloak separation:** Keycloak owns credentials/authentication. User Service stores enriched profile data (username, email, names). The `idp_subject` field links the local profile to the IAM provider identity — but this link stays inside `user-service` only.
 
-2. **Token relay vs re-fetch:** API Gateway uses Spring Cloud Gateway's `TokenRelay` filter to forward the original user JWT downstream — services don't re-fetch tokens for user-context calls. Only service-to-service background calls (Reviews → Order validation) use Client Credentials.
+2. **IAM portability via internal UUID:** All services store the internal `users.id` UUID, NOT the IAM provider's `sub`. On an IAM migration, only `user-service`'s `idp_subject` column needs updating. See `design/iam-portability.md`.
 
-3. **Reviews user identity:** Reviews Service reads the `sub` claim from the JWT to identify the reviewer — no `userId` is passed in the request body. This prevents spoofing.
+3. **Per-service lazy resolution:** When a service first encounters a JWT `sub` it hasn't seen, it calls `GET /api/v1/users/resolve?idp_subject={sub}` and caches the returned internal UUID locally (Caffeine / Spring `@Cacheable`, TTL 5–15 min).
+
+4. **Token relay vs re-fetch:** API Gateway uses Spring Cloud Gateway's `TokenRelay` filter to forward the original user JWT downstream — services don't re-fetch tokens for user-context calls. Only service-to-service background calls (Reviews → Order validation) use Client Credentials.
+
+5. **Reviews user identity:** Reviews Service resolves the reviewer's internal `userId` from the JWT `sub` via lazy resolution — no `userId` is passed in the request body. This prevents spoofing.
 
 4. **Two PostgreSQL instances:** `db-orders` and `db-users` are independent containers, each owned exclusively by one service — a core microservice isolation principle (database-per-service pattern).
 
@@ -315,7 +325,7 @@ OTLP endpoints (HTTP): `:4318` — gRPC: `:4317` — Grafana UI: `:3000`
 |------|------|
 | Stock management | Order Service calls Product Service to decrement `stockQty` synchronously, or via a `stock.reserved` Kafka event |
 | Review coupling | Reviews Service keeps a local `completed-orders` projection (from `order.completed.v1` Kafka event) instead of synchronous calls to Order Service |
-| Keycloak event listener | Automatically create user-service profile on first Keycloak login (SPI extension), removing the need for a manual `POST /api/v1/users` call |
+| Keycloak event listener | Replace lazy registration (Option A) with a Keycloak SPI EventListenerProvider (Option C) to guarantee profile existence before first API call |
 | Kafka security | Add SASL/SCRAM authentication for Kafka in production |
 | Container orchestration | Kubernetes with Helm charts for each service |
 | CI/CD | GitHub Actions pipeline — build, test, publish Docker images |
