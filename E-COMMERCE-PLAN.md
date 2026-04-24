@@ -364,6 +364,50 @@ Each service includes `spring-cloud-starter-kubernetes-client-discovery`. This a
 
 ---
 
+### Phase 10 — CI/CD with GitHub Actions
+
+#### Strategy
+
+| Decision | Choice |
+|---|---|
+| Registry | `ghcr.io` (GitHub Container Registry) — `GITHUB_TOKEN`, no extra secrets |
+| Scope | CI (build + test + publish) + CD (ephemeral k3d staging cluster in runner) |
+| Triggers | Push to `main` + Pull Requests |
+| Build strategy | `dorny/paths-filter` change detection + matrix per changed service |
+
+#### Workflow files
+
+```
+.github/
+└── workflows/
+    ├── ci.yaml   ← detect changes → matrix build → unit tests → jib:build → ghcr.io
+    └── cd.yaml   ← workflow_run on CI success (main only) → k3d deploy → smoke tests
+```
+
+#### CI job flow (per changed service)
+
+1. `dorny/paths-filter` — detect which service directories (or `common/` / root `pom.xml`) changed
+2. Matrix over changed services (`fromJson(outputs.changes)`)
+3. `actions/setup-java@v4` — temurin, Java 25, Maven cache
+4. `mvn -pl {service} -am verify` — compile + unit tests (runs on PRs and `main`)
+5. `mvn -pl {service} compile jib:build` — push `ghcr.io/{owner}/{service}:{sha}` + `latest` tag (main only)
+6. Authenticate via `GITHUB_TOKEN` + `permissions.packages: write` — no Docker daemon needed
+
+#### CD job flow (main only, after CI succeeds)
+
+1. Install k3d + kubectl + Helm
+2. `k3d cluster create e-commerce --port 80:80@loadbalancer --port 8180:8180@loadbalancer --wait`
+3. `helm install eg oci://docker.io/envoyproxy/gateway-helm --version v1.3.0 --namespace envoy-gateway-system --wait`
+4. `kubectl apply -f k8s/infra/` + wait for rollouts
+5. For each service: `envsubst < k8s/{svc}/deployment.yaml | kubectl apply -f -` (substitutes `${IMAGE}` = `ghcr.io/{owner}/{svc}:{sha}`)
+6. `kubectl apply -f k8s/envoy-gateway/`
+7. `kubectl rollout status` per service
+8. `curl` smoke tests against `http://localhost/api/v1/products` etc.
+
+> See [design/development-guidelines.md](design/development-guidelines.md) Section 17 for full YAML workflow examples.
+
+---
+
 ## Relevant Workspace Files
 
 | File | Purpose |
@@ -388,6 +432,10 @@ Each service includes `spring-cloud-starter-kubernetes-client-discovery`. This a
 - [ ] k3d cluster creation command includes port mappings for Envoy Gateway and Keycloak
 - [ ] Envoy Gateway `SecurityPolicy` references Keycloak JWKS endpoint
 - [ ] All services have `ServiceAccount` RBAC for Kubernetes DiscoveryClient
+- [ ] CI workflow uses `dorny/paths-filter` change detection with matrix build
+- [ ] `jib:build` step authenticates to `ghcr.io` via `GITHUB_TOKEN` (no extra secrets)
+- [ ] CD workflow creates k3d cluster + installs Envoy Gateway + deploys via `envsubst`
+- [ ] `k8s/{service}/deployment.yaml` uses `${IMAGE}` placeholder for tag substitution
 
 ---
 
@@ -399,7 +447,7 @@ Each service includes `spring-cloud-starter-kubernetes-client-discovery`. This a
 
 3. **Per-service lazy resolution:** When a service first encounters a JWT `sub` it hasn't seen, it calls `GET /api/v1/users/resolve?idp_subject={sub}` and caches the returned internal UUID locally (Caffeine / Spring `@Cacheable`, TTL 5–15 min).
 
-4. **Token relay vs re-fetch:** API Gateway uses Spring Cloud Gateway's `TokenRelay` filter to forward the original user JWT downstream — services don't re-fetch tokens for user-context calls. Only service-to-service background calls (Reviews → Order validation) use Client Credentials.
+4. **JWT forwarding:** Envoy Gateway forwards the original `Authorization: Bearer` header downstream after JWT validation. Services receive the full JWT and validate it independently as OAuth2 Resource Servers. Only service-to-service background calls (Reviews → Order validation) use Client Credentials.
 
 5. **Reviews user identity:** Reviews Service resolves the reviewer's internal `userId` from the JWT `sub` via lazy resolution — no `userId` is passed in the request body. This prevents spoofing.
 
@@ -418,4 +466,4 @@ Each service includes `spring-cloud-starter-kubernetes-client-discovery`. This a
 | Keycloak event listener | Replace lazy registration (Option A) with a Keycloak SPI EventListenerProvider (Option C) to guarantee profile existence before first API call |
 | Kafka security | Add SASL/SCRAM authentication for Kafka in production |
 | Container orchestration | Kubernetes with Helm charts for each service |
-| CI/CD | GitHub Actions pipeline — build, test, publish Docker images |
+| Kafka security | Add SASL/SCRAM authentication for Kafka in production |

@@ -22,6 +22,8 @@
 13. [Testing Strategy](#13-testing-strategy)
 14. [Virtual Threads](#14-virtual-threads)
 15. [Quick Reference Checklist](#15-quick-reference-checklist)
+16. [Kubernetes Deployment](#16-kubernetes-deployment)
+17. [CI/CD — GitHub Actions](#17-cicd--github-actions)
 
 ---
 
@@ -1310,3 +1312,240 @@ spring:
 ```
 
 Start services with `-Dspring-boot.run.profiles=local` to activate this profile.
+
+---
+
+## 17. CI/CD — GitHub Actions
+
+### Pipeline overview
+
+| Workflow | File | Trigger | Purpose |
+|---|---|---|---|
+| CI | `.github/workflows/ci.yaml` | Push to `main`, Pull Requests | Change detection, unit tests, Jib image publish to `ghcr.io` |
+| CD | `.github/workflows/cd.yaml` | CI completes on `main` | Deploy to k3d staging cluster; curl smoke tests |
+
+**No extra secrets required** — Jib authenticates to `ghcr.io` using the auto-provided `GITHUB_TOKEN`.
+
+### Change detection — only build what changed
+
+Use `dorny/paths-filter` to detect which service directories changed. The matrix job runs only for changed services, keeping CI fast for single-service PRs. Changes to `common/` or the root `pom.xml` mark **all** services as changed (conservative).
+
+```yaml
+- uses: dorny/paths-filter@v3
+  id: filter
+  with:
+    filters: |
+      product-service:
+        - 'product-service/**'
+        - 'common/**'
+        - 'pom.xml'
+      order-service:
+        - 'order-service/**'
+        - 'common/**'
+        - 'pom.xml'
+      reviews-service:
+        - 'reviews-service/**'
+        - 'common/**'
+        - 'pom.xml'
+      notification-service:
+        - 'notification-service/**'
+        - 'common/**'
+        - 'pom.xml'
+      user-service:
+        - 'user-service/**'
+        - 'common/**'
+        - 'pom.xml'
+```
+
+### CI workflow — `.github/workflows/ci.yaml`
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            product-service:
+              - 'product-service/**'
+              - 'common/**'
+              - 'pom.xml'
+            order-service:
+              - 'order-service/**'
+              - 'common/**'
+              - 'pom.xml'
+            reviews-service:
+              - 'reviews-service/**'
+              - 'common/**'
+              - 'pom.xml'
+            notification-service:
+              - 'notification-service/**'
+              - 'common/**'
+              - 'pom.xml'
+            user-service:
+              - 'user-service/**'
+              - 'common/**'
+              - 'pom.xml'
+
+  build:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.services != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changes.outputs.services) }}
+      fail-fast: false
+    permissions:
+      contents: read
+      packages: write       # required to push to ghcr.io
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Run unit tests
+        run: mvn -pl ${{ matrix.service }} -am verify --no-transfer-progress
+
+      - name: Build and push image to ghcr.io
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          mvn -pl ${{ matrix.service }} compile jib:build \
+            --no-transfer-progress \
+            -Ddocker.registry=ghcr.io/${{ github.repository_owner }} \
+            -Djib.to.tags=${{ github.sha }},latest \
+            -Djib.to.auth.username=${{ github.actor }} \
+            -Djib.to.auth.password=${{ secrets.GITHUB_TOKEN }}
+```
+
+> The `jib:build` step runs only on `push` to `main` — not on pull requests — to avoid publishing images from unreviewed code. Unit tests still run on PRs via the `verify` goal.
+
+### CD workflow — `.github/workflows/cd.yaml`
+
+Deploys the newly published images to a **k3d cluster running inside the GitHub Actions runner**. The cluster is ephemeral (destroyed at the end of the run) and functions as a staging smoke-test environment.
+
+```yaml
+name: CD — Staging
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k3d
+        run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Create k3d cluster
+        run: |
+          k3d cluster create e-commerce \
+            --port "80:80@loadbalancer" \
+            --port "8180:8180@loadbalancer" \
+            --wait
+
+      - name: Install Envoy Gateway
+        run: |
+          helm install eg oci://docker.io/envoyproxy/gateway-helm \
+            --version v1.3.0 \
+            --namespace envoy-gateway-system \
+            --create-namespace \
+            --wait
+
+      - name: Deploy infrastructure
+        run: kubectl apply -f k8s/infra/
+
+      - name: Wait for infrastructure
+        run: |
+          kubectl rollout status deployment/keycloak -n e-commerce-infra --timeout=120s
+          kubectl rollout status deployment/kafka     -n e-commerce-infra --timeout=120s
+          kubectl rollout status deployment/mongodb   -n e-commerce-infra --timeout=60s
+
+      - name: Deploy services
+        env:
+          IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+          REGISTRY: ghcr.io/${{ github.repository_owner }}
+        run: |
+          for svc in product-service order-service reviews-service notification-service user-service; do
+            export IMAGE="${REGISTRY}/${svc}:${IMAGE_TAG}"
+            envsubst < k8s/${svc}/deployment.yaml | kubectl apply -f -
+            kubectl apply -f k8s/${svc}/service.yaml
+            kubectl apply -f k8s/${svc}/configmap.yaml
+            kubectl apply -f k8s/${svc}/serviceaccount.yaml
+          done
+          kubectl apply -f k8s/envoy-gateway/
+
+      - name: Wait for service rollouts
+        run: |
+          for svc in product-service order-service reviews-service user-service; do
+            kubectl rollout status deployment/${svc} -n e-commerce --timeout=120s
+          done
+
+      - name: Smoke tests
+        run: |
+          sleep 10
+          curl -sf http://localhost/api/v1/products -w "\nHTTP %{http_code}\n"
+          curl -sf http://localhost/api/v1/users/me  -w "\nHTTP %{http_code}\n" || true
+```
+
+> **Image tag patching:** `k8s/{service}/deployment.yaml` uses `image: ${IMAGE}` as a placeholder. `envsubst` substitutes the `$IMAGE` environment variable before applying, pinning each deployment to the exact commit SHA built by CI.
+
+### Deployment YAML image placeholder convention
+
+In every `k8s/{service}/deployment.yaml`, use the `${IMAGE}` shell variable as the image reference so `envsubst` can substitute it in CI:
+
+```yaml
+# k8s/product-service/deployment.yaml (excerpt)
+spec:
+  template:
+    spec:
+      containers:
+        - name: product-service
+          image: ${IMAGE}             # substituted by envsubst in CD workflow
+          ports:
+            - containerPort: 8081
+```
+
+### Secrets and permissions
+
+| Secret / Permission | Source | Required for |
+|---|---|---|
+| `secrets.GITHUB_TOKEN` | Auto-provided by GitHub Actions | Authenticating Jib to push to `ghcr.io` |
+| `permissions.packages: write` | Declared in CI `build` job | Authorising `GITHUB_TOKEN` to publish packages |
+
+No manually configured repository secrets are needed for the standard CI/CD pipeline.
+
+### Branch protection (recommended)
+
+In **Settings → Branches → Branch protection rules** for `main`:
+
+- ✅ Require status checks to pass — add `build` (CI job) as required check
+- ✅ Require branches to be up to date before merging
+- ✅ Require at least 1 pull request review before merging
+- ✅ Do not allow bypassing the above settings
