@@ -114,10 +114,10 @@ Shared library (not a Spring Boot app — no `@SpringBootApplication`). Contains
     <optional>true</optional>
 </dependency>
 
-<!-- Service discovery (Kubernetes) -->
+<!-- Service discovery + load balancer (Kubernetes) -->
 <dependency>
     <groupId>org.springframework.cloud</groupId>
-    <artifactId>spring-cloud-starter-kubernetes-client-discovery</artifactId>
+    <artifactId>spring-cloud-starter-kubernetes-client-loadbalancer</artifactId>
 </dependency>
 
 <!-- Resilience4j -->
@@ -324,7 +324,7 @@ public class HttpClientConfig {
 ```
 
 Key rules:
-- Use `lb://service-name` URIs — Spring Cloud LoadBalancer resolves via **Kubernetes DiscoveryClient** (`spring-cloud-starter-kubernetes-client-discovery`), which reads `Service` and `Endpoints` resources from the Kubernetes API. No Eureka server is used.
+- Use `lb://service-name` URIs — Spring Cloud LoadBalancer resolves via **Kubernetes DiscoveryClient** (`spring-cloud-starter-kubernetes-client-loadbalancer`), which reads `Service` and `Endpoints` resources from the Kubernetes API. No Eureka server is used.
 - Each service requires a `ServiceAccount` with RBAC permissions to `get/list/watch` on `services`, `endpoints`, and `pods` in its namespace (see [Section 16](#16-kubernetes-deployment))
 - In the `local` Spring profile (`spring.cloud.kubernetes.enabled=false`), `lb://` falls back to a static URL configured via `spring.cloud.discovery.client.simple.instances`
 - Inject an `OAuth2ClientHttpRequestInterceptor` to attach a Client Credentials token on every request
@@ -1008,11 +1008,11 @@ class OrderEventPublisherIntegrationTest {
 </dependency>
 <dependency>
     <groupId>org.testcontainers</groupId>
-    <artifactId>junit-jupiter</artifactId>
+    <artifactId>testcontainers-junit-jupiter</artifactId>
     <scope>test</scope>
 </dependency>
 <!-- Add the specific module for this service's DB / broker: -->
-<!-- org.testcontainers:postgresql  OR  mongodb  OR  kafka -->
+<!-- org.testcontainers:testcontainers-postgresql  OR  testcontainers-mongodb  OR  testcontainers-kafka -->
 ```
 
 ### Mock security in tests
@@ -1080,7 +1080,7 @@ When adding a new microservice, ensure all of the following are in place before 
 - [ ] `spring.threads.virtual.enabled: true` in `application.yaml`
 
 ### Infrastructure
-- [ ] `spring-cloud-starter-kubernetes-client-discovery` dependency present
+- [ ] `spring-cloud-starter-kubernetes-client-loadbalancer` dependency present
 - [ ] `spring.cloud.kubernetes.discovery.enabled: true` in `application.yaml`
 - [ ] `ServiceAccount` defined in `k8s/{service}/serviceaccount.yaml` with discovery RBAC role bound
 - [ ] `local` Spring profile disables Kubernetes discovery (`spring.cloud.kubernetes.enabled: false`) and provides static URLs for local dev

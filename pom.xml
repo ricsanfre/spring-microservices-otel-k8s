@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.0.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.ricsanfre</groupId>
+    <artifactId>e-commerce</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>e-commerce</name>
+    <description>E-Commerce Microservice Platform — Spring Boot 4 · Java 25 · Kubernetes</description>
+
+    <modules>
+        <module>common</module>
+        <module>product-service</module>
+        <module>order-service</module>
+        <module>reviews-service</module>
+        <module>notification-service</module>
+        <module>user-service</module>
+    </modules>
+
+    <!-- ─────────────────────────────────────────────────────────────────
+         Properties — all version pins live here; nowhere else
+         ───────────────────────────────────────────────────────────────── -->
+    <properties>
+        <!-- Language -->
+        <java.version>25</java.version>
+
+        <!-- Spring Cloud BOM (release train aligned with Spring Boot 4.x) -->
+        <spring-cloud.version>2025.1.1</spring-cloud.version>
+
+        <!-- OpenTelemetry Logback appender (alpha — not managed by Spring Boot BOM) -->
+        <otel-logback-appender.version>2.21.0-alpha</otel-logback-appender.version>
+
+        <!-- Springdoc OpenAPI UI -->
+        <springdoc.version>3.0.0</springdoc.version>
+
+        <!-- OpenAPI Generator (API-first code generation) -->
+        <openapi-generator.version>7.12.0</openapi-generator.version>
+
+        <!-- Jib — OCI image builds without Docker daemon -->
+        <jib.version>3.4.4</jib.version>
+
+        <!-- Default image registry (override on command line for CI / k3d) -->
+        <!--   Local k3d:   -Ddocker.registry=localhost:5000             -->
+        <!--   CI ghcr.io:  -Ddocker.registry=ghcr.io/<owner>           -->
+        <docker.registry>localhost:5000</docker.registry>
+    </properties>
+
+    <!-- ─────────────────────────────────────────────────────────────────
+         Dependency Management — versions for all child modules
+         ───────────────────────────────────────────────────────────────── -->
+    <dependencyManagement>
+        <dependencies>
+
+            <!-- Spring Cloud BOM — manages spring-cloud-* and resilience4j versions -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- OpenTelemetry Logback appender (alpha — version pinned here) -->
+            <dependency>
+                <groupId>io.opentelemetry.instrumentation</groupId>
+                <artifactId>opentelemetry-logback-appender-1.0</artifactId>
+                <version>${otel-logback-appender.version}</version>
+            </dependency>
+
+            <!-- Springdoc OpenAPI UI -->
+            <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+                <version>${springdoc.version}</version>
+            </dependency>
+
+            <!-- Internal common module — shared DTOs, exceptions, security helpers -->
+            <dependency>
+                <groupId>com.ricsanfre</groupId>
+                <artifactId>common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+        </dependencies>
+    </dependencyManagement>
+
+    <!-- ─────────────────────────────────────────────────────────────────
+         Plugin Management — configuration inherited by all child modules
+         Child modules add the plugin to their <build><plugins> block
+         but do NOT repeat version or configuration.
+         ───────────────────────────────────────────────────────────────── -->
+    <build>
+        <pluginManagement>
+            <plugins>
+
+                <!-- Maven Compiler — Lombok annotation processor path.
+                     Child modules inherit this; no per-module repetition needed. -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <configuration>
+                        <annotationProcessorPaths>
+                            <path>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                            </path>
+                        </annotationProcessorPaths>
+                    </configuration>
+                </plugin>
+
+                <!-- Spring Boot Maven Plugin — exclude Lombok from fat jar repackage.
+                     Only Spring Boot app modules activate the repackage goal;
+                     the common module skips repackage automatically. -->
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <configuration>
+                        <excludes>
+                            <exclude>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                            </exclude>
+                        </excludes>
+                    </configuration>
+                </plugin>
+
+                <!-- Jib — OCI image builds without Docker daemon.
+                     Service modules add jib-maven-plugin to their <plugins>;
+                     the common module does not. -->
+                <plugin>
+                    <groupId>com.google.cloud.tools</groupId>
+                    <artifactId>jib-maven-plugin</artifactId>
+                    <version>${jib.version}</version>
+                    <configuration>
+                        <from>
+                            <!-- Slim JRE matching java.version property -->
+                            <image>eclipse-temurin:25-jre-alpine</image>
+                        </from>
+                        <to>
+                            <image>${docker.registry}/${project.artifactId}:${project.version}</image>
+                            <tags>
+                                <tag>latest</tag>
+                            </tags>
+                        </to>
+                        <container>
+                            <jvmFlags>
+                                <!-- Enable virtual threads (Project Loom) -->
+                                <jvmFlag>-Dspring.threads.virtual.enabled=true</jvmFlag>
+                                <!-- Container-aware heap: use 75% of cgroup memory limit -->
+                                <jvmFlag>-XX:MaxRAMPercentage=75.0</jvmFlag>
+                                <jvmFlag>-XX:+UseContainerSupport</jvmFlag>
+                            </jvmFlags>
+                            <ports>
+                                <port>8080</port>
+                            </ports>
+                            <labels>
+                                <maintainer>ricsanfre</maintainer>
+                            </labels>
+                            <creationTime>USE_CURRENT_TIMESTAMP</creationTime>
+                        </container>
+                    </configuration>
+                </plugin>
+
+                <!-- OpenAPI Generator — API-first code generation.
+                     Service modules configure inputSpec and package names
+                     in their own <plugin> block; version is managed here. -->
+                <plugin>
+                    <groupId>org.openapitools</groupId>
+                    <artifactId>openapi-generator-maven-plugin</artifactId>
+                    <version>${openapi-generator.version}</version>
+                </plugin>
+
+            </plugins>
+        </pluginManagement>
+    </build>
+
+</project>

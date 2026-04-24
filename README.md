@@ -167,7 +167,7 @@ sequenceDiagram
 |---|---|---|
 | Resource Server (all services) | `spring-boot-starter-oauth2-resource-server` | `spring.security.oauth2.resourceserver.jwt.jwk-set-uri` |
 | OAuth2 Client (service accounts) | `spring-boot-starter-oauth2-client` | `spring.security.oauth2.client.registration.<id>.grant-type=client_credentials` |
-| Kubernetes service discovery (all services) | `spring-cloud-starter-kubernetes-client-discovery` | `spring.cloud.kubernetes.discovery.enabled=true` |
+| Kubernetes service discovery (all services) | `spring-cloud-starter-kubernetes-client-loadbalancer` | `spring.cloud.kubernetes.discovery.enabled=true` |
 
 ---
 
@@ -497,7 +497,7 @@ spec:
 
 #### Spring Cloud Kubernetes DiscoveryClient
 
-Each service uses `spring-cloud-starter-kubernetes-client-discovery` so that `lb://service-name` URIs (used by `RestClient` for peer-to-peer calls) are resolved via the Kubernetes API instead of Eureka. Each service must have a `ServiceAccount` with the following RBAC permissions:
+Each service uses `spring-cloud-starter-kubernetes-client-loadbalancer` so that `lb://service-name` URIs (used by `RestClient` for peer-to-peer calls) are resolved via the Kubernetes API instead of Eureka. Each service must have a `ServiceAccount` with the following RBAC permissions:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1

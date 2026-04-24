@@ -16,7 +16,7 @@
 | User profiles database | PostgreSQL |
 | Notification service storage | Stateless (no DB) |
 | Async messaging | Apache Kafka — topic `order.created.v1` |
-| Service discovery | Kubernetes native — `spring-cloud-starter-kubernetes-client-discovery` |
+| Service discovery | Kubernetes native — `spring-cloud-starter-kubernetes-client-loadbalancer` |
 | Entry point / API Gateway | Envoy Gateway (Kubernetes Gateway API) |
 | Authentication / Authorization | OAuth2.0 + Keycloak (OIDC) |
 | Observability | OpenTelemetry → Grafana LGTM (traces, metrics, logs) |
@@ -197,7 +197,7 @@ reviews-service → Keycloak (client_id + client_secret) → service account JWT
 |---|---|---|
 | Resource Server (all services) | `spring-boot-starter-oauth2-resource-server` | `spring.security.oauth2.resourceserver.jwt.jwk-set-uri` |
 | OAuth2 Client (service accounts) | `spring-boot-starter-oauth2-client` | `grant-type: client_credentials` per registration |
-| Kubernetes service discovery (all services) | `spring-cloud-starter-kubernetes-client-discovery` | `spring.cloud.kubernetes.discovery.enabled=true` |
+| Kubernetes service discovery (all services) | `spring-cloud-starter-kubernetes-client-loadbalancer` | `spring.cloud.kubernetes.discovery.enabled=true` |
 
 ---
 
@@ -360,7 +360,7 @@ kubectl apply -f k8s/envoy-gateway/
 
 #### Spring Cloud Kubernetes DiscoveryClient
 
-Each service includes `spring-cloud-starter-kubernetes-client-discovery`. This allows `lb://service-name` URIs in `RestClient` to be resolved against Kubernetes `Service` resources instead of Eureka. A `ServiceAccount` with RBAC `get/list/watch` on `services`, `endpoints`, and `pods` is required for each deployment.
+Each service includes `spring-cloud-starter-kubernetes-client-loadbalancer`. This allows `lb://service-name` URIs in `RestClient` to be resolved against Kubernetes `Service` resources instead of Eureka. A `ServiceAccount` with RBAC `get/list/watch` on `services`, `endpoints`, and `pods` is required for each deployment.
 
 ---
 
