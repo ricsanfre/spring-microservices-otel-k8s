@@ -145,9 +145,12 @@ Shared library (not a Spring Boot app — no `@SpringBootApplication`). Contains
     <artifactId>postgresql</artifactId>
     <scope>runtime</scope>
 </dependency>
+<!-- spring-boot-starter-flyway provides spring-boot-flyway (autoconfigure module)
+     + flyway-core. In Spring Boot 4, flyway-core alone does NOT register
+     FlywayAutoConfiguration — the starter is required. -->
 <dependency>
-    <groupId>org.flywaydb</groupId>
-    <artifactId>flyway-core</artifactId>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-flyway</artifactId>
 </dependency>
 <dependency>
     <groupId>org.flywaydb</groupId>
@@ -1013,21 +1016,54 @@ class OrderEventPublisherIntegrationTest {
 </dependency>
 <!-- Add the specific module for this service's DB / broker: -->
 <!-- org.testcontainers:testcontainers-postgresql  OR  testcontainers-mongodb  OR  testcontainers-kafka -->
+
+<!-- MockMvc support (Spring Boot 4 split this out of spring-boot-test): -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-webmvc-test</artifactId>
+    <scope>test</scope>
+</dependency>
+<dependency>
+    <groupId>org.springframework.security</groupId>
+    <artifactId>spring-security-test</artifactId>
+    <scope>test</scope>
+</dependency>
 ```
 
 ### Mock security in tests
 
-```java
-@Test
-@WithMockUser(roles = "ADMIN")
-void deleteProduct_givenAdminRole_returns204() { ... }
+Use the `jwt()` MockMvc post-processor from `spring-security-test` to inject pre-built JWT tokens without a real Keycloak instance:
 
-@Test
-@WithMockUser(roles = "USER")
-void deleteProduct_givenUserRole_returns403() { ... }
+```java
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+
+mockMvc.perform(get("/users/me").with(jwt()
+        .jwt(j -> j
+            .subject("test-sub-1")
+            .claim("email", "user@example.com")
+            .claim("preferred_username", "testuser")
+            .claim("given_name", "Test")
+            .claim("family_name", "User")
+            .claim("roles", List.of("user")))
+        .authorities(new SimpleGrantedAuthority("ROLE_user"))))
+    .andExpect(status().isOk());
 ```
 
-For full JWT tests, create a test `SecurityContext` with a mocked `Jwt` principal using `SecurityContextHolder` or a custom `@WithMockJwt` annotation backed by `WithSecurityContextFactory`.
+Also mock the `JwtDecoder` bean to prevent Spring Boot from fetching the JWK Set URI at context startup:
+
+```java
+@MockitoBean
+JwtDecoder jwtDecoder;
+```
+
+### Spring Boot 4 — key testing changes
+
+| Concern | Spring Boot 3 | Spring Boot 4 |
+|---|---|---|
+| `@AutoConfigureMockMvc` package | `org.springframework.boot.test.autoconfigure.web.servlet` | `org.springframework.boot.webmvc.test.autoconfigure` |
+| MockMvc dependency | included in `spring-boot-test` | separate `spring-boot-webmvc-test` artifact |
+| `ObjectMapper` bean type | `com.fasterxml.jackson.databind.ObjectMapper` | `tools.jackson.databind.ObjectMapper` (Jackson 3.x, groupId `tools.jackson.core`) |
+| Flyway autoconfiguration | `flyway-core` triggers `FlywayAutoConfiguration` | requires `spring-boot-starter-flyway` (brings `spring-boot-flyway` module); `flyway-core` alone does **not** register the auto-configuration |
 
 ---
 

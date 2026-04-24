@@ -1,0 +1,149 @@
+openapi: 3.1.0
+info:
+  title: User Service API
+  description: User profile management — lazy registration from Keycloak JWT claims
+  version: "1.0.0"
+
+servers:
+  - url: /api/v1
+
+tags:
+  - name: Users
+    description: User profile operations
+
+paths:
+
+  /users/me:
+    get:
+      tags: [Users]
+      operationId: getCurrentUser
+      summary: Get current user profile (auto-registers on first call)
+      description: |
+        Returns the profile of the currently authenticated user.
+        If no profile exists for the JWT `sub`, one is created automatically
+        from the JWT claims (email, given_name, family_name, preferred_username).
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        "401":
+          description: Unauthorized
+
+  /users/{id}:
+    get:
+      tags: [Users]
+      operationId: getUserById
+      summary: Get user profile by internal UUID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        "404":
+          description: User not found
+
+    put:
+      tags: [Users]
+      operationId: updateUser
+      summary: Update own user profile (owner only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        "200":
+          description: Updated user profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        "403":
+          description: Forbidden — not the profile owner
+        "404":
+          description: User not found
+
+  /users/resolve:
+    get:
+      tags: [Users]
+      operationId: resolveUser
+      summary: Resolve internal UUID from IDP subject (service accounts only)
+      description: |
+        Used by other services to resolve a Keycloak `sub` to an internal user UUID.
+        Requires the caller's JWT to carry the `service-account` realm role.
+        Results should be cached locally (TTL 5–15 min) by the calling service.
+      parameters:
+        - name: idp_subject
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Keycloak `sub` claim value
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        "404":
+          description: User not found
+
+components:
+  schemas:
+
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 50
+        firstName:
+          type: string
+          maxLength: 100
+        lastName:
+          type: string
+          maxLength: 100

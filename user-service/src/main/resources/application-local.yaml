@@ -1,0 +1,16 @@
+# Local development profile — activate with -Dspring-boot.run.profiles=local
+# Disables Kubernetes discovery; provides static service URLs for local Docker Compose.
+spring:
+  cloud:
+    kubernetes:
+      enabled: false
+    discovery:
+      client:
+        simple:
+          instances:
+            order-service:
+              - uri: http://localhost:8082
+            product-service:
+              - uri: http://localhost:8081
+            reviews-service:
+              - uri: http://localhost:8083
