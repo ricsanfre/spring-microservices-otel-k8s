@@ -32,13 +32,12 @@
 ```
 e-commerce/
 ├── pom.xml                        ← root (BOM + plugin management)
-├── api-gateway/
-├── eureka-server/
 ├── product-service/
 ├── order-service/
 ├── reviews-service/
 ├── notification-service/
 ├── user-service/
+├── k8s/                           ← Kubernetes manifests
 └── common/                        ← shared DTOs, exceptions, security helpers
 ```
 
@@ -113,10 +112,10 @@ Shared library (not a Spring Boot app — no `@SpringBootApplication`). Contains
     <optional>true</optional>
 </dependency>
 
-<!-- Service discovery client -->
+<!-- Service discovery (Kubernetes) -->
 <dependency>
     <groupId>org.springframework.cloud</groupId>
-    <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+    <artifactId>spring-cloud-starter-kubernetes-client-discovery</artifactId>
 </dependency>
 
 <!-- Resilience4j -->
@@ -323,7 +322,9 @@ public class HttpClientConfig {
 ```
 
 Key rules:
-- Use `lb://service-name` URIs — Spring Cloud LoadBalancer resolves via Eureka
+- Use `lb://service-name` URIs — Spring Cloud LoadBalancer resolves via **Kubernetes DiscoveryClient** (`spring-cloud-starter-kubernetes-client-discovery`), which reads `Service` and `Endpoints` resources from the Kubernetes API. No Eureka server is used.
+- Each service requires a `ServiceAccount` with RBAC permissions to `get/list/watch` on `services`, `endpoints`, and `pods` in its namespace (see [Section 16](#16-kubernetes-deployment))
+- In the `local` Spring profile (`spring.cloud.kubernetes.enabled=false`), `lb://` falls back to a static URL configured via `spring.cloud.discovery.client.simple.instances`
 - Inject an `OAuth2ClientHttpRequestInterceptor` to attach a Client Credentials token on every request
 - Use `RestClient` (not `RestTemplate` or `WebClient`) — it is the preferred synchronous client in Spring Boot 4
 
@@ -1077,8 +1078,10 @@ When adding a new microservice, ensure all of the following are in place before 
 - [ ] `spring.threads.virtual.enabled: true` in `application.yaml`
 
 ### Infrastructure
-- [ ] Eureka client dependency present + `spring.application.name` set
-- [ ] `@EnableDiscoveryClient` on application class (or auto-configured via starter)
+- [ ] `spring-cloud-starter-kubernetes-client-discovery` dependency present
+- [ ] `spring.cloud.kubernetes.discovery.enabled: true` in `application.yaml`
+- [ ] `ServiceAccount` defined in `k8s/{service}/serviceaccount.yaml` with discovery RBAC role bound
+- [ ] `local` Spring profile disables Kubernetes discovery (`spring.cloud.kubernetes.enabled: false`) and provides static URLs for local dev
 
 ### Security
 - [ ] OAuth2 Resource Server configured with Keycloak JWKS URI
@@ -1094,3 +1097,216 @@ When adding a new microservice, ensure all of the following are in place before 
 - [ ] Unit tests for all service-layer methods (> 80% branch coverage)
 - [ ] Integration test with TestContainers `@ServiceConnection` for primary DB / broker
 - [ ] Security role tests (`@WithMockUser`) for at least one protected endpoint
+
+---
+
+## 16. Kubernetes Deployment
+
+### Local Kubernetes environment — k3d
+
+[k3d](https://k3d.io) runs k3s (a lightweight Kubernetes distribution) inside Docker. It is the recommended local Kubernetes environment for this project.
+
+```bash
+# Create cluster with Envoy Gateway port (80) and Keycloak port (8180) exposed,
+# plus a built-in local image registry on port 5000
+k3d cluster create e-commerce \
+  --port "80:80@loadbalancer" \
+  --port "8180:8180@loadbalancer" \
+  --registry-create e-commerce-registry:0.0.0.0:5000
+```
+
+### Install Envoy Gateway
+
+```bash
+helm install eg oci://docker.io/envoyproxy/gateway-helm \
+  --version v1.3.0 \
+  --namespace envoy-gateway-system \
+  --create-namespace
+
+kubectl wait --namespace envoy-gateway-system \
+  --for=condition=Available deployment/envoy-gateway \
+  --timeout=90s
+```
+
+### Manifests structure
+
+```
+k8s/
+├── namespace.yaml
+├── envoy-gateway/
+│   ├── gateway.yaml            ← GatewayClass + Gateway
+│   ├── httproutes.yaml         ← HTTPRoute per business service
+│   └── security-policy.yaml   ← JWT SecurityPolicy (Keycloak JWKS)
+├── {service-name}/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── configmap.yaml
+│   └── serviceaccount.yaml
+└── infra/
+    ├── keycloak/
+    ├── kafka/
+    ├── mongodb/
+    └── postgres/
+```
+
+### Build and import images with Jib
+
+```bash
+# Build all service images and push to the k3d local registry
+mvn compile jib:build -Ddocker.registry=localhost:5000
+
+# Import images into k3d cluster nodes
+for svc in product-service order-service reviews-service notification-service user-service; do
+  k3d image import localhost:5000/${svc}:latest -c e-commerce
+done
+```
+
+In `pom.xml` (root `<pluginManagement>`), set `docker.registry` default to `localhost:5000` for k3d:
+
+```xml
+<properties>
+    <docker.registry>localhost:5000</docker.registry>
+</properties>
+```
+
+### Envoy Gateway — GatewayClass and Gateway
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: envoy-gateway-system
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: All
+```
+
+### Envoy Gateway — JWT SecurityPolicy
+
+Apply once per gateway. Validates all JWTs using the Keycloak JWKS endpoint before routing.
+
+```yaml
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: jwt-authn
+  namespace: envoy-gateway-system
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: eg
+    namespace: envoy-gateway-system
+  jwt:
+    providers:
+      - name: keycloak
+        issuer: http://keycloak.e-commerce-infra.svc.cluster.local:8180/realms/e-commerce
+        remoteJWKS:
+          uri: http://keycloak.e-commerce-infra.svc.cluster.local:8180/realms/e-commerce/protocol/openid-connect/certs
+```
+
+### Envoy Gateway — HTTPRoute example
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: product-service
+  namespace: e-commerce
+spec:
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/products
+      backendRefs:
+        - name: product-service
+          port: 8081
+```
+
+Repeat for each business service (`/api/v1/orders`, `/api/v1/reviews`, `/api/v1/users`).
+
+### Spring Cloud Kubernetes DiscoveryClient — RBAC
+
+Each service deployment must reference a `ServiceAccount` that has permission to list Kubernetes services and endpoints:
+
+```yaml
+# serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: product-service
+  namespace: e-commerce
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: product-service-discovery
+  namespace: e-commerce
+rules:
+  - apiGroups: [""]
+    resources: ["services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: product-service-discovery
+  namespace: e-commerce
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: product-service-discovery
+subjects:
+  - kind: ServiceAccount
+    name: product-service
+    namespace: e-commerce
+```
+
+```yaml
+# deployment.yaml (excerpt)
+spec:
+  template:
+    spec:
+      serviceAccountName: product-service
+```
+
+### Local dev profile — disabling Kubernetes discovery
+
+When running services locally with Docker Compose (no cluster), disable Kubernetes discovery in `src/main/resources/application-local.yaml`:
+
+```yaml
+spring:
+  cloud:
+    kubernetes:
+      enabled: false
+    discovery:
+      client:
+        simple:
+          instances:
+            order-service:
+              - uri: http://localhost:8082
+            product-service:
+              - uri: http://localhost:8081
+            user-service:
+              - uri: http://localhost:8085
+```
+
+Start services with `-Dspring-boot.run.profiles=local` to activate this profile.

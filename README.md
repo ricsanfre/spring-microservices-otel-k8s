@@ -25,14 +25,14 @@ Spring Boot microservice-based e-commerce platform implementing:
 
 | Service | Port | Database | Responsibility |
 |---------|------|----------|----------------|
-| `api-gateway` | 8080 | — | Routes all external traffic; JWT validation and token relay |
-| `eureka-server` | 8761 | — | Service registration and discovery (Netflix Eureka) |
 | `keycloak` | 8180 | H2 (dev) / PostgreSQL (prod) | OAuth2/OIDC IAM — authentication, authorization, token issuance |
 | `product-service` | 8081 | MongoDB | Product catalog — CRUD and inventory quantities |
 | `order-service` | 8082 | PostgreSQL | Order lifecycle management; Kafka producer |
 | `reviews-service` | 8083 | MongoDB | Product reviews and ratings — validated against order history |
 | `notification-service` | 8084 | stateless | Order event notifications — Kafka consumer |
 | `user-service` | 8085 | PostgreSQL | User profile management; delegates identity to Keycloak |
+
+> **Entry point:** External traffic enters through **Envoy Gateway** (Kubernetes Gateway API). There is no Spring Cloud Gateway service — Envoy handles JWT validation via a `SecurityPolicy` referencing the Keycloak JWKS endpoint, then routes directly to Kubernetes services. Service-to-service calls use Spring Cloud Kubernetes DiscoveryClient (`lb://` URIs).
 
 ---
 
@@ -46,54 +46,49 @@ flowchart TD
         KC["Keycloak :8180\nOAuth2 / OIDC IAM"]
     end
 
-    subgraph INFRA["Infrastructure Services"]
-        GW["API Gateway :8080\nSpring Cloud Gateway\n+ TokenRelay filter"]
-        EUR["Eureka Server :8761\nService Discovery"]
+    subgraph K3D["k3d Kubernetes Cluster"]
+        EG["Envoy Gateway\nKubernetes Gateway API\nJWT validation via SecurityPolicy"]
+
+        subgraph SERVICES["Business Services"]
+            PS["product-service :8081\nMongoDB"]
+            OS["order-service :8082\nPostgreSQL"]
+            RS["reviews-service :8083\nMongoDB"]
+            NS["notification-service :8084\nstateless"]
+            US["user-service :8085\nPostgreSQL"]
+        end
+
+        subgraph MESSAGING["Async Messaging"]
+            KAFKA[["Apache Kafka\norder.created.v1"]]
+        end
+
+        subgraph STORAGE["Storage"]
+            MDB[("MongoDB\nproducts · reviews")]
+            PG_O[("PostgreSQL\norders DB")]
+            PG_U[("PostgreSQL\nusers DB")]
+        end
     end
 
-    subgraph SERVICES["Business Services"]
-        PS["product-service :8081\nMongoDB"]
-        OS["order-service :8082\nPostgreSQL"]
-        RS["reviews-service :8083\nMongoDB"]
-        NS["notification-service :8084\nstateless"]
-        US["user-service :8085\nPostgreSQL"]
-    end
-
-    subgraph MESSAGING["Async Messaging"]
-        KAFKA[["Apache Kafka\norder.created.v1"]]
-    end
-
-    subgraph STORAGE["Storage"]
-        MDB[("MongoDB\nproducts · reviews")]
-        PG_O[("PostgreSQL\norders DB")]
-        PG_U[("PostgreSQL\nusers DB")]
-    end
-
-    Client -- "1. Authenticate" --> KC
-    Client -- "2. Bearer JWT" --> GW
-    GW -. "validate JWT via JWKS" .-> KC
-    GW -- "route + relay JWT" --> PS
-    GW -- "route + relay JWT" --> OS
-    GW -- "route + relay JWT" --> RS
-    GW -- "route + relay JWT" --> US
-
-    PS <-.-> EUR
-    OS <-.-> EUR
-    RS <-.-> EUR
-    US <-.-> EUR
-    NS <-.-> EUR
+    Client -- "1. Authenticate (OIDC)" --> KC
+    Client -- "2. Bearer JWT" --> EG
+    EG -. "validate JWT\nvia JWKS (SecurityPolicy)" .-> KC
+    EG -- "HTTPRoute" --> PS
+    EG -- "HTTPRoute" --> OS
+    EG -- "HTTPRoute" --> RS
+    EG -- "HTTPRoute" --> US
 
     OS -- "publish\norder.created.v1" --> KAFKA
     KAFKA -- "consume" --> NS
 
-    RS -. "Client Credentials\nverify order" .-> OS
-    RS -. "Client Credentials\nverify product" .-> PS
+    RS -. "Client Credentials\n(lb://order-service)" .-> OS
+    RS -. "Client Credentials\n(lb://product-service)" .-> PS
 
     PS --- MDB
     RS --- MDB
     OS --- PG_O
     US --- PG_U
 ```
+
+> `lb://service-name` URIs in service-to-service calls are resolved by **Spring Cloud Kubernetes DiscoveryClient**, which reads Kubernetes `Service` and `Endpoints` resources from the cluster API — no Eureka server required.
 
 ---
 
@@ -115,20 +110,21 @@ One Keycloak client per service (all confidential, with service accounts enabled
 
 | Keycloak Client ID | Grant Types | Used By |
 |--------------------|-------------|---------|
-| `api-gateway` | Authorization Code + PKCE | API Gateway (public-facing) |
 | `product-service` | Client Credentials | product-service resource server + service account |
 | `order-service` | Client Credentials | order-service resource server + service account |
 | `reviews-service` | Client Credentials | reviews-service resource server + service account |
 | `user-service` | Client Credentials | user-service resource server + service account |
 | `notification-service` | Client Credentials | notification-service resource server |
 
+> **No `api-gateway` Keycloak client** — the frontend SPA handles the OIDC Authorization Code + PKCE flow directly with Keycloak. Envoy Gateway validates the resulting JWT via the Keycloak JWKS endpoint (no client secret required on the gateway).
+
 ### Token Flow 1 — User Authentication (Authorization Code + PKCE)
 
 ```mermaid
 sequenceDiagram
-    participant C as Client App
+    participant C as Client App (SPA)
     participant KC as Keycloak :8180
-    participant GW as API Gateway :8080
+    participant EG as Envoy Gateway
     participant SVC as Microservice
 
     C->>KC: Authorization request (redirect to login)
@@ -138,13 +134,13 @@ sequenceDiagram
     C->>KC: POST /token (code + PKCE verifier)
     KC-->>C: access_token (JWT) + refresh_token
 
-    C->>GW: HTTP request + Authorization: Bearer JWT
-    GW->>KC: GET /certs (JWKS) — cached on startup
-    GW-->>GW: Validate JWT signature + expiry + audience
-    GW->>SVC: Forward request + Bearer JWT (TokenRelay filter)
+    C->>EG: HTTP request + Authorization: Bearer JWT
+    EG->>KC: GET /certs (JWKS) — SecurityPolicy, cached
+    EG-->>EG: Validate JWT signature + expiry + audience
+    EG->>SVC: Forward request + Authorization: Bearer JWT (header forwarded)
     SVC-->>SVC: Validate JWT (OAuth2 Resource Server)
-    SVC-->>GW: Response
-    GW-->>C: Response
+    SVC-->>EG: Response
+    EG-->>C: Response
 ```
 
 ### Token Flow 2 — Service-to-Service (Client Credentials Grant)
@@ -171,7 +167,7 @@ sequenceDiagram
 |---|---|---|
 | Resource Server (all services) | `spring-boot-starter-oauth2-resource-server` | `spring.security.oauth2.resourceserver.jwt.jwk-set-uri` |
 | OAuth2 Client (service accounts) | `spring-boot-starter-oauth2-client` | `spring.security.oauth2.client.registration.<id>.grant-type=client_credentials` |
-| Token Relay (API Gateway) | `spring-cloud-starter-gateway` | `TokenRelay` filter on all routes |
+| Kubernetes service discovery (all services) | `spring-cloud-starter-kubernetes-client-discovery` | `spring.cloud.kubernetes.discovery.enabled=true` |
 
 ---
 
@@ -397,7 +393,9 @@ All services export traces, metrics, and logs via the **OTLP protocol** to the G
 
 ## Infrastructure
 
-### Docker Compose Services
+### Local Development — Docker Compose
+
+For local development without Kubernetes, all infrastructure runs via Docker Compose and services run directly with `mvn spring-boot:run`.
 
 | Container | Image | Host Port | Description |
 |-----------|-------|-----------|-------------|
@@ -414,15 +412,117 @@ All services export traces, metrics, and logs via the **OTLP protocol** to the G
 
 ---
 
+### Kubernetes Deployment — k3d
+
+The target deployment environment is a **k3d** cluster (k3s running inside Docker). k3d provides a full Kubernetes environment locally without a cloud provider.
+
+#### Cluster layout
+
+| Namespace | Contents |
+|-----------|----------|
+| `e-commerce` | All business microservices |
+| `e-commerce-infra` | Keycloak, Kafka, MongoDB, PostgreSQL (staging/prod) |
+| `envoy-gateway-system` | Envoy Gateway controller (installed via Helm) |
+| `monitoring` | Grafana LGTM stack |
+
+#### Kubernetes resources per service
+
+```
+k8s/
+├── namespace.yaml
+├── envoy-gateway/
+│   ├── gateway.yaml            ← GatewayClass + Gateway resource
+│   ├── httproutes.yaml         ← HTTPRoute per business service
+│   └── security-policy.yaml   ← JWT SecurityPolicy (Keycloak JWKS)
+├── product-service/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── configmap.yaml
+│   └── serviceaccount.yaml    ← RBAC for Kubernetes DiscoveryClient
+├── order-service/
+├── reviews-service/
+├── notification-service/
+├── user-service/
+└── infra/                      ← staging/prod only
+    ├── keycloak/
+    ├── kafka/
+    ├── mongodb/
+    └── postgres/
+```
+
+#### Envoy Gateway routing
+
+Envoy Gateway implements the [Kubernetes Gateway API](https://gateway-api.sigs.k8s.io/). JWT validation is enforced cluster-wide via a `SecurityPolicy` resource pointing to the Keycloak JWKS endpoint:
+
+```yaml
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: jwt-authn
+  namespace: e-commerce
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: eg
+  jwt:
+    providers:
+      - name: keycloak
+        issuer: http://keycloak.e-commerce-infra.svc.cluster.local:8180/realms/e-commerce
+        remoteJWKS:
+          uri: http://keycloak.e-commerce-infra.svc.cluster.local:8180/realms/e-commerce/protocol/openid-connect/certs
+```
+
+Each business service has an `HTTPRoute` entry:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: product-service
+  namespace: e-commerce
+spec:
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/products
+      backendRefs:
+        - name: product-service
+          port: 8081
+```
+
+#### Spring Cloud Kubernetes DiscoveryClient
+
+Each service uses `spring-cloud-starter-kubernetes-client-discovery` so that `lb://service-name` URIs (used by `RestClient` for peer-to-peer calls) are resolved via the Kubernetes API instead of Eureka. Each service must have a `ServiceAccount` with the following RBAC permissions:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: discovery-role
+  namespace: e-commerce
+rules:
+  - apiGroups: [""]
+    resources: ["services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+```
+
+---
+
 ## How to Run
 
-### Prerequisites
+### Option A — Local Development (Docker Compose)
 
+#### Prerequisites
 - Docker & Docker Compose
 - Java 25+
 - Maven 3.9+
 
-### 1. Start Infrastructure
+#### 1. Start Infrastructure
 
 ```bash
 docker compose up -d
@@ -430,43 +530,120 @@ docker compose up -d
 
 Starts: Kafka, MongoDB, PostgreSQL (×2), Keycloak, and Grafana LGTM.
 
-### 2. Configure Keycloak
+#### 2. Configure Keycloak
 
-1. Open `http://localhost:8180` → Admin Console (admin / admin)
+1. Open `http://localhost:8180` → Admin Console (`admin` / `admin`)
 2. Create realm: **`e-commerce`**
 3. Create one confidential client per service (enable *Service Accounts Enabled*)
 4. Create a test user and assign the `USER` role
 5. Update each service's `application.yaml` with its `client-id` and `client-secret`
 
-### 3. Start Services (local dev)
+#### 3. Start Business Services
 
 ```bash
-# 1. Service discovery first
-cd eureka-server        && mvn spring-boot:run &
-
-# 2. API Gateway
-cd api-gateway          && mvn spring-boot:run &
-
-# 3. Business services (any order)
-cd user-service         && mvn spring-boot:run &
-cd product-service      && mvn spring-boot:run &
-cd order-service        && mvn spring-boot:run &
-cd reviews-service      && mvn spring-boot:run &
-cd notification-service && mvn spring-boot:run &
+# Any order — Kubernetes discovery is disabled in local dev profile
+cd user-service         && mvn spring-boot:run -Dspring-boot.run.profiles=local &
+cd product-service      && mvn spring-boot:run -Dspring-boot.run.profiles=local &
+cd order-service        && mvn spring-boot:run -Dspring-boot.run.profiles=local &
+cd reviews-service      && mvn spring-boot:run -Dspring-boot.run.profiles=local &
+cd notification-service && mvn spring-boot:run -Dspring-boot.run.profiles=local &
 ```
 
-### 4. Access Points
+> The `local` Spring profile disables Kubernetes DiscoveryClient (`spring.cloud.kubernetes.enabled=false`) and falls back to static `application.yaml` URLs.
+
+#### 4. Access Points (local dev)
 
 | URL | Description |
 |-----|-------------|
-| `http://localhost:8080/swagger-ui.html` | API Gateway — Swagger UI |
-| `http://localhost:8761` | Eureka Dashboard |
+| `http://localhost:8081/swagger-ui.html` | product-service Swagger UI |
+| `http://localhost:8082/swagger-ui.html` | order-service Swagger UI |
 | `http://localhost:8180` | Keycloak Admin Console |
 | `http://localhost:3000` | Grafana Dashboards |
 
 ---
 
-*Built with Java 25 · Spring Boot 4 · Spring Cloud · Apache Kafka · MongoDB · PostgreSQL · Keycloak · OpenTelemetry*
+### Option B — Kubernetes Deployment (k3d)
+
+#### Prerequisites
+- [k3d](https://k3d.io) and `kubectl` installed
+- Docker
+- Java 25+ and Maven 3.9+
+
+#### 1. Create k3d Cluster
+
+```bash
+# Create cluster with port mappings for Envoy Gateway (80) and Keycloak (8180)
+k3d cluster create e-commerce \
+  --port "80:80@loadbalancer" \
+  --port "8180:8180@loadbalancer" \
+  --registry-create e-commerce-registry:0.0.0.0:5000
+```
+
+#### 2. Install Envoy Gateway
+
+```bash
+helm install eg oci://docker.io/envoyproxy/gateway-helm \
+  --version v1.3.0 \
+  --namespace envoy-gateway-system \
+  --create-namespace
+
+# Wait for the controller to be ready
+kubectl wait --namespace envoy-gateway-system \
+  --for=condition=Available deployment/envoy-gateway \
+  --timeout=90s
+```
+
+#### 3. Build and Import Images
+
+```bash
+# Build all service images and push to the k3d local registry
+mvn compile jib:build -Ddocker.registry=localhost:5000
+
+# Import into k3d cluster nodes
+for svc in product-service order-service reviews-service notification-service user-service; do
+  k3d image import localhost:5000/${svc}:latest -c e-commerce
+done
+```
+
+#### 4. Configure Keycloak
+
+```bash
+# Deploy infra namespace and Keycloak
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/infra/keycloak/
+
+# Wait for Keycloak, then configure realm via Admin Console at http://localhost:8180
+# (same Keycloak setup as local dev — realm e-commerce, one client per service)
+```
+
+#### 5. Deploy Services
+
+```bash
+# Create namespaces + apply all service manifests
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/infra/
+kubectl apply -f k8s/product-service/
+kubectl apply -f k8s/order-service/
+kubectl apply -f k8s/reviews-service/
+kubectl apply -f k8s/notification-service/
+kubectl apply -f k8s/user-service/
+kubectl apply -f k8s/envoy-gateway/
+```
+
+#### 6. Access Points (k3d)
+
+| URL | Description |
+|-----|-------------|
+| `http://localhost/api/v1/products` | product-service via Envoy Gateway |
+| `http://localhost/api/v1/orders` | order-service via Envoy Gateway |
+| `http://localhost/api/v1/users` | user-service via Envoy Gateway |
+| `http://localhost/api/v1/reviews` | reviews-service via Envoy Gateway |
+| `http://localhost:8180` | Keycloak Admin Console |
+| `http://localhost:3000` | Grafana Dashboards |
+
+---
+
+*Built with Java 25 · Spring Boot 4 · Spring Cloud · Apache Kafka · MongoDB · PostgreSQL · Keycloak · Envoy Gateway · OpenTelemetry · k3d*
 
 
 
