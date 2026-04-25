@@ -1,0 +1,186 @@
+# Grafana LGTM Distributed — Helm values for k3d staging (single-node laptop)
+# Chart   : grafana/lgtm-distributed
+# Repo    : https://grafana.github.io/helm-charts
+#
+# Design goals for k3d:
+#   - All storage uses local filesystem / emptyDir  (no MinIO / S3)
+#   - Single replica for every component
+#   - OTLP ingestion on Tempo (gRPC :4317 and HTTP :4318)
+#   - Grafana datasources pre-wired to Mimir, Loki, Tempo
+#   - Grafana admin credentials from a k8s Secret (grafana-admin-secret)
+#
+# Required secret (create once before `make k8s-infra-monitoring`):
+#   kubectl create secret generic grafana-admin-secret \
+#     --from-literal=username=admin \
+#     --from-literal=password=<CHANGE_ME> \
+#     --namespace monitoring
+#
+# Internal OTLP endpoints for Spring Boot services:
+#   Traces  → lgtm-tempo-distributor.monitoring.svc.cluster.local:4317 (gRPC)
+#   Logs    → lgtm-loki-gateway.monitoring.svc.cluster.local:3100 (HTTP)
+#   Metrics → lgtm-mimir-distributed-nginx.monitoring.svc.cluster.local:80/otlp
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Grafana UI ────────────────────────────────────────────────────────────────
+grafana:
+  replicas: 1
+
+  admin:
+    existingSecret: grafana-admin-secret
+    userKey: username
+    passwordKey: password
+
+  grafana.ini:
+    server:
+      root_url: "https://grafana.local.test"
+
+  persistence:
+    enabled: false
+
+  # Pre-configured datasources pointing at the in-cluster endpoints
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Mimir
+          type: prometheus
+          uid: mimir
+          url: http://lgtm-mimir-distributed-nginx.monitoring.svc.cluster.local/prometheus
+          isDefault: true
+          jsonData:
+            httpMethod: POST
+
+        - name: Loki
+          type: loki
+          uid: loki
+          url: http://lgtm-loki-gateway.monitoring.svc.cluster.local
+
+        - name: Tempo
+          type: tempo
+          uid: tempo
+          url: http://lgtm-tempo-query-frontend.monitoring.svc.cluster.local:3100
+          jsonData:
+            tracesToLogsV2:
+              datasourceUid: loki
+            lokiSearch:
+              datasourceUid: loki
+            serviceMap:
+              datasourceUid: mimir
+
+# ── Loki — simple scalable mode, filesystem storage ───────────────────────────
+loki:
+  loki:
+    auth_enabled: false
+    commonConfig:
+      replication_factor: 1
+    storage:
+      type: filesystem
+    schemaConfig:
+      configs:
+        - from: "2024-01-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+
+  # Disable single-binary mode; use the simple-scalable read/write/backend split
+  singleBinary:
+    replicas: 0
+  write:
+    replicas: 1
+  read:
+    replicas: 1
+  backend:
+    replicas: 1
+
+  # Disable bundled MinIO — filesystem storage is used instead
+  minio:
+    enabled: false
+
+  gateway:
+    enabled: true
+
+# ── Tempo — distributed, local filesystem storage ─────────────────────────────
+tempo:
+  replicas: 1
+
+  tempo:
+    reportingEnabled: false
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:4317"
+          http:
+            endpoint: "0.0.0.0:4318"
+
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+
+  persistence:
+    enabled: false
+
+# ── Mimir Distributed — filesystem storage, minimal replicas ──────────────────
+mimir-distributed:
+  # Disable bundled MinIO — filesystem storage is used instead
+  minio:
+    enabled: false
+
+  mimir:
+    structuredConfig:
+      common:
+        storage:
+          backend: filesystem
+          filesystem:
+            dir: /data/mimir
+      blocks_storage:
+        backend: filesystem
+        filesystem:
+          dir: /data/mimir/blocks
+      ruler_storage:
+        backend: filesystem
+        filesystem:
+          dir: /data/mimir/ruler
+      alertmanager_storage:
+        backend: filesystem
+        filesystem:
+          dir: /data/mimir/alertmanager
+      ingester:
+        ring:
+          replication_factor: 1
+
+  # Single replica for every component
+  ingester:
+    replicas: 1
+    persistentVolume:
+      enabled: false
+  store_gateway:
+    replicas: 1
+    persistentVolume:
+      enabled: false
+  compactor:
+    replicas: 1
+    persistentVolume:
+      enabled: false
+  distributor:
+    replicas: 1
+  querier:
+    replicas: 1
+  query_frontend:
+    replicas: 1
+  query_scheduler:
+    replicas: 1
+  ruler:
+    replicas: 1
+  alertmanager:
+    replicas: 0
+    enabled: false
+  rollout_operator:
+    enabled: false

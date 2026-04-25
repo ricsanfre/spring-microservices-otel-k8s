@@ -1,0 +1,34 @@
+# Strimzi — KafkaTopic CRs
+# One topic per inter-service event stream.
+# Namespace: kafka
+#
+# Apply:
+#   kubectl apply -f k8s/infra/kafka/topics.yaml
+---
+# Published by order-service; consumed by notification-service
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: order-events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: "604800000"    # 7 days
+---
+# Published by user-service; consumed by notification-service
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: user-events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: "604800000"    # 7 days

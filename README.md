@@ -362,32 +362,83 @@ erDiagram
 
 ## Observability
 
-All services export traces, metrics, and logs via the **OTLP protocol** to the Grafana LGTM all-in-one stack already configured in `compose.yaml`.
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                      Grafana :3000                           │
-│   Loki (Logs)    Tempo (Distributed Traces)    Prometheus    │
-└──────────────────────────┬───────────────────────────────────┘
-                           │ OTLP  HTTP :4318  /  gRPC :4317
-              ┌────────────▼──────────────┐
-              │   grafana/otel-lgtm       │
-              │   (all-in-one collector)  │
-              └────────────▲──────────────┘
-                           │ OTLP export
-  ┌────────────────────────┴──────────────────────────────────┐
-  │  Spring Boot service (each microservice)                  │
-  │  spring-boot-starter-opentelemetry                        │
-  │  management.otlp.metrics.export.url = http://…:4318/v1/… │
-  │  management.tracing.sampling.probability = 1.0            │
-  └───────────────────────────────────────────────────────────┘
-```
+All services export traces, metrics, and logs via the **OTLP protocol**. The pipeline differs between the two environments but the Spring Boot configuration remains the same in both — only the OTLP endpoint URL changes.
 
 | Signal | Backend | Spring Boot integration |
 |--------|---------|------------------------|
 | **Traces** | Grafana Tempo | `spring-boot-starter-opentelemetry` — W3C TraceContext propagation |
 | **Logs** | Grafana Loki | Logback `OpenTelemetryAppender` — logs correlated with trace IDs |
-| **Metrics** | Prometheus | Micrometer via OTLP — JVM, HTTP server, Kafka consumer lag |
+| **Metrics** | Grafana Mimir | Micrometer via OTLP — JVM, HTTP server, Kafka consumer lag |
+
+---
+
+### Local Development — `grafana/otel-lgtm` (all-in-one)
+
+In the Docker Compose environment a single `grafana/otel-lgtm` container provides the full OTLP receiver, Loki, Tempo, Mimir (Prometheus-compatible), and Grafana UI. Services send OTLP directly to it.
+
+```
+  ┌──────────────────────────────────────────┐
+  │  Spring Boot service                     │
+  │  OTLP endpoint: http://localhost:4318    │
+  └────────────────────┬─────────────────────┘
+                       │ OTLP HTTP :4318 / gRPC :4317
+          ┌────────────▼────────────┐
+          │   grafana/otel-lgtm     │  ← Docker Compose  (profile: observability)
+          │   all-in-one image      │
+          │                         │
+          │  ┌─────┐ ┌─────┐ ┌───┐ │
+          │  │Loki │ │Tempo│ │ M │ │  M = Mimir (Prometheus-compatible)
+          │  └─────┘ └─────┘ └───┘ │
+          │       Grafana :3000     │
+          └─────────────────────────┘
+```
+
+OTLP endpoint used by Spring Boot services: `http://localhost:4318`
+
+---
+
+### Staging (k3d) — OpenTelemetry Operator + lgtm-distributed
+
+In the Kubernetes staging cluster, the **OpenTelemetry Operator** manages a central `OpenTelemetryCollector` deployment. Services send a single OTLP stream to the collector, which fans it out to the dedicated backends provided by the **`lgtm-distributed`** Helm chart.
+
+```
+  ┌──────────────────────────────────────────────────────┐
+  │  Spring Boot service (namespace: e-commerce)         │
+  │  OTLP endpoint: otel-collector.monitoring:4317       │
+  └──────────────────────────┬───────────────────────────┘
+                             │ OTLP gRPC :4317
+          ┌──────────────────▼──────────────────────────┐
+          │   OpenTelemetryCollector  (namespace: monitoring)  │
+          │   managed by opentelemetry-operator          │
+          │                                              │
+          │  receivers:  otlp (gRPC :4317, HTTP :4318)  │
+          │  processors: memory_limiter → batch          │
+          │              → resource/staging              │
+          └────┬────────────────┬──────────────┬─────────┘
+               │ traces         │ logs         │ metrics
+               ▼                ▼              ▼
+  ┌────────────────┐  ┌──────────────┐  ┌────────────────────┐
+  │ Tempo          │  │ Loki         │  │ Mimir              │
+  │ distributor    │  │ gateway      │  │ nginx              │
+  │ :4317 (gRPC)   │  │ :3100 (HTTP) │  │ :80/otlp (HTTP)    │
+  └───────┬────────┘  └──────┬───────┘  └────────┬───────────┘
+          └──────────────────┴──────────────────┘
+                             │
+                    ┌────────▼────────┐
+                    │  Grafana UI     │
+                    │  grafana.local.test  │
+                    └─────────────────┘
+```
+
+All components run in the `monitoring` namespace:
+
+| Component | Helm release | Service (cluster-internal) |
+|-----------|-------------|---------------------------|
+| OTel Collector | `opentelemetry-operator` (CR: `otel`) | `otel-collector.monitoring:4317/4318` |
+| Loki gateway | `lgtm` (lgtm-distributed) | `lgtm-loki-gateway.monitoring:3100` |
+| Tempo distributor | `lgtm` (lgtm-distributed) | `lgtm-tempo-distributor.monitoring:4317` |
+| Mimir nginx | `lgtm` (lgtm-distributed) | `lgtm-mimir-distributed-nginx.monitoring:80` |
+| Grafana UI | `lgtm` (lgtm-distributed) | `https://grafana.local.test` (via Envoy Gateway) |
 
 ---
 
@@ -416,100 +467,203 @@ For local development without Kubernetes, all infrastructure runs via Docker Com
 
 The target deployment environment is a **k3d** cluster (k3s running inside Docker). k3d provides a full Kubernetes environment locally without a cloud provider.
 
+#### Architecture diagram
+
+```mermaid
+flowchart TD
+    Dev(["Developer laptop\n(Jib / Maven)"])
+    Client(["Browser / curl"])
+
+    subgraph LOCAL["Local machine"]
+
+        subgraph K3D_ENV["k3d environment"]
+            REG[("k3d registry\ne-commerce-registry\npush: localhost:5000\npull: e-commerce-registry:5000")]
+
+            subgraph K3D["k3d cluster — e-commerce (1 server + 2 agents)"]
+                LB["Load Balancer\n:80 → HTTP  /  :443 → HTTPS"]
+
+                subgraph NS_EG["envoy-gateway-system"]
+                    CM["cert-manager\nself-signed CA\n*.local.test wildcard cert"]
+                    GW["Gateway eg\nHTTP redirect + TLS termination"]
+                end
+
+                subgraph NS_APP["e-commerce"]
+                    US["user-service :8085"]
+                    PS["product-service :8081"]
+                    OS["order-service :8082"]
+                    RS["reviews-service :8083"]
+                    NS_SVC["notification-service :8084"]
+                end
+
+                subgraph NS_KC["keycloak"]
+                    KC["Keycloak\nOAuth2 / OIDC IAM\nkeycloak.local.test"]
+                end
+
+                subgraph NS_KAFKA["kafka"]
+                    KF[["Strimzi Kafka\nKRaft mode\norder-events / user-events"]]
+                end
+
+                subgraph NS_PG["postgres"]
+                    PG[("CloudNativePG\nPostgreSQL\nusers DB · orders DB")]
+                end
+
+                subgraph NS_MDB["mongodb"]
+                    MDB[("MongoDB Community\nreviews DB · notifications DB")]
+                end
+
+                subgraph NS_MON["monitoring"]
+                    OTELCOL["OTel Collector\n(OTel Operator)\n:4317 / :4318"]
+                    LOKI["Loki"]
+                    TEMPO["Tempo"]
+                    MIMIR["Mimir"]
+                    GRAFANA["Grafana\ngrafana.local.test"]
+                end
+            end
+        end
+
+    end
+
+    %% ── Image registry ─────────────────────────────────────────────────────
+    Dev -- "mvn jib:build\n→ localhost:5000" --> REG
+    REG -- "pull e-commerce-registry:5000\nimagePullPolicy: Always" --> US
+    REG -- "pull e-commerce-registry:5000\nimagePullPolicy: Always" --> PS
+    REG -- "pull e-commerce-registry:5000\nimagePullPolicy: Always" --> OS
+    REG -- "pull e-commerce-registry:5000\nimagePullPolicy: Always" --> RS
+    REG -- "pull e-commerce-registry:5000\nimagePullPolicy: Always" --> NS_SVC
+
+    %% ── External traffic ────────────────────────────────────────────────────
+    Client -- "HTTPS *.local.test" --> LB
+    LB --> GW
+    CM -- "issues wildcard cert" --> GW
+    GW -. "JWT validate\n(SecurityPolicy → JWKS)" .-> KC
+    GW -- "HTTPRoute /api/v1/users" --> US
+    GW -- "HTTPRoute /api/v1/products" --> PS
+    GW -- "HTTPRoute /api/v1/orders" --> OS
+    GW -- "HTTPRoute keycloak.local.test" --> KC
+    GW -- "HTTPRoute grafana.local.test" --> GRAFANA
+
+    %% ── Service-to-service (DiscoveryClient lb://) ──────────────────────────
+    RS -. "lb://order-service" .-> OS
+    RS -. "lb://product-service" .-> PS
+
+    %% ── Async messaging ─────────────────────────────────────────────────────
+    OS -- "publish order-events" --> KF
+    KF -- "consume" --> NS_SVC
+
+    %% ── Persistence ─────────────────────────────────────────────────────────
+    US --- PG
+    OS --- PG
+    PS --- MDB
+    RS --- MDB
+
+    %% ── Observability (OTLP) ─────────────────────────────────────────────────
+    US -- "OTLP :4317" --> OTELCOL
+    PS -- "OTLP :4317" --> OTELCOL
+    OS -- "OTLP :4317" --> OTELCOL
+    RS -- "OTLP :4317" --> OTELCOL
+    NS_SVC -- "OTLP :4317" --> OTELCOL
+    OTELCOL -- "traces" --> TEMPO
+    OTELCOL -- "logs" --> LOKI
+    OTELCOL -- "metrics" --> MIMIR
+    TEMPO --> GRAFANA
+    LOKI --> GRAFANA
+    MIMIR --> GRAFANA
+```
+    PS --- MDB
+    RS --- MDB
+
+    US -- "OTLP :4317" --> OTELCOL
+    PS -- "OTLP :4317" --> OTELCOL
+    OS -- "OTLP :4317" --> OTELCOL
+    RS -- "OTLP :4317" --> OTELCOL
+    NS_SVC -- "OTLP :4317" --> OTELCOL
+
+    OTELCOL -- "traces" --> TEMPO
+    OTELCOL -- "logs" --> LOKI
+    OTELCOL -- "metrics" --> MIMIR
+    TEMPO --> GRAFANA
+    LOKI --> GRAFANA
+    MIMIR --> GRAFANA
+```
+
 #### Cluster layout
 
 | Namespace | Contents |
 |-----------|----------|
 | `e-commerce` | All business microservices |
-| `e-commerce-infra` | Keycloak, Kafka, MongoDB, PostgreSQL (staging/prod) |
-| `envoy-gateway-system` | Envoy Gateway controller (installed via Helm) |
-| `monitoring` | Grafana LGTM stack |
+| `envoy-gateway-system` | Envoy Gateway controller + cert-manager |
+| `keycloak` | Keycloak operator + instance |
+| `kafka` | Strimzi operator + Kafka cluster |
+| `mongodb` | MongoDB Community operator + replica set |
+| `postgres` | CloudNativePG operator + PostgreSQL cluster |
+| `monitoring` | OTel Operator, OTel Collector, Grafana LGTM stack |
 
-#### Kubernetes resources per service
+#### `k8s/` directory layout
 
 ```
 k8s/
-├── namespace.yaml
-├── envoy-gateway/
-│   ├── gateway.yaml            ← GatewayClass + Gateway resource
-│   ├── httproutes.yaml         ← HTTPRoute per business service
-│   └── security-policy.yaml   ← JWT SecurityPolicy (Keycloak JWKS)
-├── product-service/
-│   ├── deployment.yaml
-│   ├── service.yaml
-│   ├── configmap.yaml
-│   └── serviceaccount.yaml    ← RBAC for Kubernetes DiscoveryClient
-├── order-service/
-├── reviews-service/
-├── notification-service/
-├── user-service/
-└── infra/                      ← staging/prod only
-    ├── keycloak/
-    ├── kafka/
-    ├── mongodb/
-    └── postgres/
+├── k3d-cluster.yaml                    ← k3d cluster definition (1 server, 2 agents)
+├── namespaces.yaml                     ← all namespaces
+├── helm/                               ← Helm values for each operator
+│   ├── cert-manager-values.yaml
+│   ├── envoy-gateway-values.yaml
+│   ├── strimzi-operator-values.yaml
+│   ├── cnpg-operator-values.yaml
+│   ├── mongodb-operator-values.yaml
+│   ├── keycloak-operator-values.yaml   ← install notes (no Helm chart)
+│   ├── lgtm-distributed-values.yaml   ← Grafana LGTM (Loki + Tempo + Mimir + Grafana)
+│   └── otel-operator-values.yaml      ← OpenTelemetry Operator
+├── infra/                              ← Kustomize apps — operator-managed CRs
+│   ├── cert-manager/
+│   │   ├── kustomization.yaml
+│   │   ├── cluster-issuer.yaml         ← self-signed bootstrap issuer + CA ClusterIssuer
+│   │   └── wildcard-certificate.yaml   ← *.local.test wildcard TLS cert
+│   ├── postgres/
+│   │   ├── kustomization.yaml
+│   │   ├── cluster.yaml                ← CNPG Cluster CR
+│   │   └── databases.yaml              ← CNPG Database CRs (one per service)
+│   ├── mongodb/
+│   │   ├── kustomization.yaml
+│   │   └── community.yaml              ← MongoDBCommunity CR
+│   ├── kafka/
+│   │   ├── kustomization.yaml
+│   │   ├── cluster.yaml                ← Strimzi Kafka CR (KRaft mode)
+│   │   └── topics.yaml                 ← KafkaTopic CRs
+│   ├── keycloak/
+│   │   ├── kustomization.yaml
+│   │   ├── operator/                   ← Kustomize app — Keycloak Operator (CRDs + Deployment)
+│   │   │   ├── kustomization.yaml
+│   │   │   └── namespace.yaml
+│   │   ├── keycloak.yaml               ← Keycloak CR
+│   │   └── realm-import.yaml           ← KeycloakRealmImport CR
+│   └── otel-collector/
+│       ├── kustomization.yaml
+│       └── collector.yaml              ← OpenTelemetryCollector CR (OTLP → Tempo/Loki/Mimir)
+├── envoy-gateway/                      ← Kustomize app — Gateway API resources
+│   ├── kustomization.yaml
+│   ├── gateway-class.yaml
+│   ├── gateway.yaml                    ← HTTP redirect + HTTPS TLS termination
+│   ├── httproutes.yaml                 ← HTTPRoute per business service
+│   └── security-policy.yaml           ← JWT SecurityPolicy (Keycloak JWKS)
+└── apps/                               ← Kustomize apps — business services
+    └── user-service/
+        ├── base/                       ← Deployment, Service, ConfigMap, ServiceAccount, RBAC
+        └── overlays/
+            └── staging/               ← image tag patch + env-specific config
 ```
 
 #### Envoy Gateway routing
 
-Envoy Gateway implements the [Kubernetes Gateway API](https://gateway-api.sigs.k8s.io/). JWT validation is enforced cluster-wide via a `SecurityPolicy` resource pointing to the Keycloak JWKS endpoint:
+Envoy Gateway implements the [Kubernetes Gateway API](https://gateway-api.sigs.k8s.io/). A single `Gateway` resource in `envoy-gateway-system` terminates TLS (wildcard cert `*.local.test` issued by cert-manager) and exposes two listeners:
 
-```yaml
-apiVersion: gateway.envoyproxy.io/v1alpha1
-kind: SecurityPolicy
-metadata:
-  name: jwt-authn
-  namespace: e-commerce
-spec:
-  targetRef:
-    group: gateway.networking.k8s.io
-    kind: Gateway
-    name: eg
-  jwt:
-    providers:
-      - name: keycloak
-        issuer: http://keycloak.e-commerce-infra.svc.cluster.local:8180/realms/e-commerce
-        remoteJWKS:
-          uri: http://keycloak.e-commerce-infra.svc.cluster.local:8180/realms/e-commerce/protocol/openid-connect/certs
-```
+- **HTTP (:80)** — redirects all traffic to HTTPS
+- **HTTPS (:443)** — terminates TLS and routes to services in the `e-commerce` namespace
 
-Each business service has an `HTTPRoute` entry:
-
-```yaml
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: product-service
-  namespace: e-commerce
-spec:
-  parentRefs:
-    - name: eg
-      namespace: envoy-gateway-system
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /api/v1/products
-      backendRefs:
-        - name: product-service
-          port: 8081
-```
+JWT validation is enforced per `HTTPRoute` via a `SecurityPolicy` pointing to the Keycloak JWKS endpoint at `https://keycloak.local.test/realms/e-commerce/protocol/openid-connect/certs`. Each business service has a dedicated `HTTPRoute` matching its `/api/v1/<resource>` prefix.
 
 #### Spring Cloud Kubernetes DiscoveryClient
 
-Each service uses `spring-cloud-starter-kubernetes-client-loadbalancer` so that `lb://service-name` URIs (used by `RestClient` for peer-to-peer calls) are resolved via the Kubernetes API instead of Eureka. Each service must have a `ServiceAccount` with the following RBAC permissions:
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: discovery-role
-  namespace: e-commerce
-rules:
-  - apiGroups: [""]
-    resources: ["services", "endpoints", "pods"]
-    verbs: ["get", "list", "watch"]
-```
+Each service uses `spring-cloud-starter-kubernetes-client-loadbalancer` so that `lb://service-name` URIs (used by `RestClient` for peer-to-peer calls) are resolved via the Kubernetes API instead of Eureka. Each service `ServiceAccount` is bound to a `Role` granting `get/list/watch` on `services`, `endpoints`, and `pods`.
 
 ---
 
@@ -581,84 +735,136 @@ make us-infra-clean   # stop containers AND delete data volumes
 
 ---
 
-### Option B — Kubernetes Deployment (k3d)
+### Option B — Kubernetes Staging (k3d)
+
+The staging environment runs a full **k3d** cluster (k3s inside Docker) on your laptop. The cluster definition lives in `k8s/k3d-cluster.yaml`. All services are exposed via the `.local.test` domain, which resolves automatically on the local machine.
 
 #### Prerequisites
-- [k3d](https://k3d.io) and `kubectl` installed
-- Docker
-- Java 25+ and Maven 3.9+
 
-#### 1. Create k3d Cluster
+| Tool | Min version |
+|------|-------------|
+| Docker | 24+ |
+| k3d | 5.x |
+| kubectl | 1.30+ |
+| helm | 3.15+ |
+| kustomize | 5.x |
+| Java 25 + Maven 3.9+ | (for building service images) |
 
-```bash
-# Create cluster with port mappings for Envoy Gateway (80) and Keycloak (8180)
-k3d cluster create e-commerce \
-  --port "80:80@loadbalancer" \
-  --port "8180:8180@loadbalancer" \
-  --registry-create e-commerce-registry:0.0.0.0:5000
-```
-
-#### 2. Install Envoy Gateway
+#### 1. Create the cluster
 
 ```bash
-helm install eg oci://docker.io/envoyproxy/gateway-helm \
-  --version v1.3.0 \
-  --namespace envoy-gateway-system \
-  --create-namespace
-
-# Wait for the controller to be ready
-kubectl wait --namespace envoy-gateway-system \
-  --for=condition=Available deployment/envoy-gateway \
-  --timeout=90s
+make k3d-create
 ```
 
-#### 3. Build and Import Images
+This creates cluster `e-commerce` (1 control-plane + 2 worker nodes) with:
+- Ports 80/443 mapped to the k3d load-balancer (Envoy Gateway)
+- Local image registry at `localhost:5000`
+- Traefik disabled
+- Host aliases for `api.local.test`, `keycloak.local.test`, `grafana.local.test`
+
+#### 2. Install operators (once per cluster)
 
 ```bash
-# Build all service images and push to the k3d local registry
-mvn compile jib:build -Ddocker.registry=localhost:5000
-
-# Import into k3d cluster nodes
-for svc in product-service order-service reviews-service notification-service user-service; do
-  k3d image import localhost:5000/${svc}:latest -c e-commerce
-done
+make k8s-operators
 ```
 
-#### 4. Configure Keycloak
+Installs via Helm / kubectl:
+
+| Operator | Namespace | Method |
+|----------|-----------|--------|
+| cert-manager | `cert-manager` | Helm (`jetstack/cert-manager`) |
+| Envoy Gateway | `envoy-gateway-system` | Helm OCI (`gateway-helm`) |
+| Strimzi Kafka | `kafka` | Helm OCI (`strimzi-kafka-operator`) |
+| CloudNativePG | `cnpg-system` | Helm (`cnpg/cloudnative-pg`) |
+| MongoDB Community | `mongodb` | Helm (`mongodb/community-operator`) |
+| Keycloak Operator | `keycloak` | `kubectl apply` (no Helm chart) |
+| OpenTelemetry Operator | `monitoring` | Helm (`open-telemetry/opentelemetry-operator`) |
+
+#### 3. Create required secrets
+
+Before deploying infrastructure, create the secrets that are not committed to git:
 
 ```bash
-# Deploy infra namespace and Keycloak
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/infra/keycloak/
+# PostgreSQL superuser (CNPG bootstrap)
+kubectl create secret generic postgres-superuser-secret \
+  --from-literal=username=postgres --from-literal=password=<CHANGE_ME> \
+  --namespace postgres
 
-# Wait for Keycloak, then configure realm via Admin Console at http://localhost:8180
-# (same Keycloak setup as local dev — realm e-commerce, one client per service)
+# Keycloak admin credentials
+kubectl create secret generic keycloak-admin-secret \
+  --from-literal=username=admin --from-literal=password=<CHANGE_ME> \
+  --namespace keycloak
+
+# Keycloak → PostgreSQL credentials
+kubectl create secret generic keycloak-db-secret \
+  --from-literal=username=keycloak_owner --from-literal=password=<CHANGE_ME> \
+  --namespace keycloak
+
+# MongoDB per-service credentials
+kubectl create secret generic mongodb-reviews-secret \
+  --from-literal=password=<CHANGE_ME> --namespace mongodb
+kubectl create secret generic mongodb-notifications-secret \
+  --from-literal=password=<CHANGE_ME> --namespace mongodb
+
+# Grafana admin credentials
+kubectl create secret generic grafana-admin-secret \
+  --from-literal=username=admin --from-literal=password=<CHANGE_ME> \
+  --namespace monitoring
 ```
 
-#### 5. Deploy Services
+#### 4. Deploy infrastructure resources
 
 ```bash
-# Create namespaces + apply all service manifests
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/infra/
-kubectl apply -f k8s/product-service/
-kubectl apply -f k8s/order-service/
-kubectl apply -f k8s/reviews-service/
-kubectl apply -f k8s/notification-service/
-kubectl apply -f k8s/user-service/
-kubectl apply -f k8s/envoy-gateway/
+make k8s-infra
 ```
 
-#### 6. Access Points (k3d)
+Or deploy each component individually:
+
+```bash
+make k8s-infra-cert-manager    # self-signed CA + *.local.test wildcard cert
+make k8s-infra-postgres        # CNPG PostgreSQL cluster + per-service databases
+make k8s-infra-mongodb         # MongoDB replica set
+make k8s-infra-kafka           # Kafka cluster + topics
+make k8s-infra-keycloak        # Keycloak instance + realm import
+make k8s-infra-envoy-gateway   # GatewayClass, Gateway, HTTPRoutes, SecurityPolicy
+make k8s-infra-monitoring      # Grafana LGTM stack
+make k8s-infra-otel-collector  # OpenTelemetry Collector (fan-out to Tempo/Loki/Mimir)
+```
+
+#### 5. Build and push service images
+
+```bash
+# Build user-service image and push to the k3d local registry
+make k8s-us-image
+```
+
+#### 6. Deploy services
+
+```bash
+make k8s-apps-deploy
+```
+
+Or deploy an individual service:
+
+```bash
+make k8s-us-deploy
+```
+
+#### One-shot full setup
+
+```bash
+make k8s-up   # k3d-create + k8s-operators + k8s-infra
+```
+
+#### Access points (staging)
 
 | URL | Description |
 |-----|-------------|
-| `http://localhost/api/v1/products` | product-service via Envoy Gateway |
-| `http://localhost/api/v1/orders` | order-service via Envoy Gateway |
-| `http://localhost/api/v1/users` | user-service via Envoy Gateway |
-| `http://localhost/api/v1/reviews` | reviews-service via Envoy Gateway |
-| `http://localhost:8180` | Keycloak Admin Console |
-| `http://localhost:3000` | Grafana Dashboards |
+| `https://api.local.test/api/v1/users` | user-service via Envoy Gateway |
+| `https://keycloak.local.test` | Keycloak Admin Console |
+| `https://grafana.local.test` | Grafana Dashboards |
+
+> TLS is terminated at the Envoy Gateway using a self-signed `*.local.test` wildcard certificate issued by cert-manager. Add the CA to your browser trust store to avoid certificate warnings (see `k8s/infra/cert-manager/cluster-issuer.yaml`).
 
 ---
 

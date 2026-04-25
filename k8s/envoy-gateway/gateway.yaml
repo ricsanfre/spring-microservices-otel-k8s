@@ -1,0 +1,37 @@
+# Envoy Gateway — Gateway
+# Listens on HTTP (80) and HTTPS (443) in the envoy-gateway-system namespace.
+# The wildcard TLS certificate (*.local.test) is issued by cert-manager.
+#
+# HTTP listener redirects to HTTPS.
+# HTTPS listener terminates TLS and routes to services in the e-commerce namespace.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: envoy-gateway-system
+spec:
+  gatewayClassName: eg
+
+  listeners:
+    # ── HTTP: redirect all traffic to HTTPS ────────────────────────────────
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+
+    # ── HTTPS: terminate TLS, route to e-commerce services ─────────────────
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "*.local.test"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: local-test-wildcard-tls
+            namespace: envoy-gateway-system
+      allowedRoutes:
+        namespaces:
+          from: All

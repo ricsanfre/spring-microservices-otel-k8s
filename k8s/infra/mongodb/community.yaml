@@ -1,0 +1,77 @@
+# MongoDB Community Operator — MongoDBCommunity CR
+# Single replica set with two databases (one per service).
+# Namespace: mongodb
+#
+# Apply:
+#   kubectl apply -f k8s/infra/mongodb/community.yaml
+---
+# Credentials secret — override before applying:
+#   kubectl create secret generic mongodb-admin-secret \
+#     --from-literal=password=<CHANGE_ME> \
+#     --namespace mongodb --dry-run=client -o yaml | kubectl apply -f -
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mongodb-admin-secret
+  namespace: mongodb
+type: Opaque
+stringData:
+  password: "change-me"
+---
+apiVersion: mongodbcommunity.mongodb.com/v1
+kind: MongoDBCommunity
+metadata:
+  name: mongodb
+  namespace: mongodb
+spec:
+  members: 1        # single-node replica set — sufficient for laptop staging
+  type: ReplicaSet
+  version: "7.0.14"
+
+  security:
+    authentication:
+      modes:
+        - SCRAM
+
+  users:
+    # ── reviews-service ───────────────────────────────────────────────────
+    - name: reviews_owner
+      db: admin
+      passwordSecretRef:
+        name: mongodb-reviews-secret
+      roles:
+        - name: readWrite
+          db: reviews
+      scramCredentialsSecretName: reviews-scram
+    # ── notification-service ──────────────────────────────────────────────
+    - name: notifications_owner
+      db: admin
+      passwordSecretRef:
+        name: mongodb-notifications-secret
+      roles:
+        - name: readWrite
+          db: notifications
+      scramCredentialsSecretName: notifications-scram
+
+  additionalMongodConfig:
+    storage.wiredTiger.engineConfig.journalCompressor: snappy
+
+---
+# Per-service credential secrets — override before applying
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mongodb-reviews-secret
+  namespace: mongodb
+type: Opaque
+stringData:
+  password: "change-me"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mongodb-notifications-secret
+  namespace: mongodb
+type: Opaque
+stringData:
+  password: "change-me"

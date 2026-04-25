@@ -1,0 +1,106 @@
+# OpenTelemetry Collector — central OTLP fan-out
+#
+# Receives OTLP signals from all Spring Boot services and routes them to the
+# appropriate Grafana LGTM backends (Tempo / Loki / Mimir).
+#
+# Service endpoints visible to Spring Boot apps inside the cluster:
+#   OTLP gRPC  → otel-collector.monitoring.svc.cluster.local:4317
+#   OTLP HTTP  → otel-collector.monitoring.svc.cluster.local:4318
+#
+# Required:
+#   - opentelemetry-operator installed (make k8s-operators)
+#   - LGTM stack deployed (make k8s-infra-monitoring)
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: otel
+  namespace: monitoring
+spec:
+  mode: deployment
+  replicas: 1
+
+  # Use the contrib distribution — required for the loki exporter
+  image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.123.0
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  config:
+    # ── Receivers ────────────────────────────────────────────────────────────
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    # ── Processors ───────────────────────────────────────────────────────────
+    processors:
+      # Back-pressure guard — drop data rather than OOM the pod
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 75
+        spike_limit_percentage: 15
+
+      # Batch before exporting — reduces downstream request count
+      batch:
+        send_batch_size: 10000
+        timeout: 10s
+
+      # Enrich every signal with the deployment environment
+      resource/staging:
+        attributes:
+          - action: insert
+            key: deployment.environment
+            value: staging
+
+    # ── Exporters ────────────────────────────────────────────────────────────
+    exporters:
+      # Traces → Tempo (gRPC OTLP)
+      # Tempo distributor service from the lgtm-distributed Helm release
+      otlp/tempo:
+        endpoint: lgtm-tempo-distributor.monitoring.svc.cluster.local:4317
+        tls:
+          insecure: true
+
+      # Logs → Loki (HTTP push)
+      # Loki gateway from the lgtm-distributed Helm release
+      # Resource attributes service.name / service.instance.id are mapped to
+      # Loki stream labels job / instance automatically.
+      loki:
+        endpoint: http://lgtm-loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push
+        default_labels_enabled:
+          exporter: false
+          job: true
+          instance: true
+          level: true
+
+      # Metrics → Mimir (OTLP HTTP)
+      # Mimir nginx service from the lgtm-distributed Helm release
+      otlphttp/mimir:
+        endpoint: http://lgtm-mimir-distributed-nginx.monitoring.svc.cluster.local/otlp
+
+    # ── Pipelines ────────────────────────────────────────────────────────────
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, resource/staging]
+          exporters: [otlp/tempo]
+
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, resource/staging]
+          exporters: [loki]
+
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, resource/staging]
+          exporters: [otlphttp/mimir]

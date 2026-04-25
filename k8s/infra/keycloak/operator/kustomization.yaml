@@ -1,0 +1,23 @@
+# Keycloak Operator — Kustomize application
+#
+# Installs the Keycloak Operator without OLM by referencing the versioned
+# upstream manifests from https://github.com/keycloak/keycloak-k8s-resources
+#
+# The KEYCLOAK_OPERATOR_VERSION variable is substituted by the Makefile before
+# applying. If running manually, replace the version in the URLs below or use:
+#
+#   VERSION=26.6.1
+#   kustomize build k8s/infra/keycloak/operator | \
+#     sed "s/KEYCLOAK_OPERATOR_VERSION/$VERSION/g" | kubectl apply -f -
+#
+# Or simply use the Makefile target:
+#   make k8s-keycloak-operator
+#
+# Requires: kustomize 5.x (supports https:// remote resources)
+resources:
+  - namespace.yaml
+  # CRDs (cluster-scoped — installed once, shared across namespaces)
+  - https://raw.githubusercontent.com/keycloak/keycloak-k8s-resources/26.6.1/kubernetes/keycloaks.k8s.keycloak.org-v1.yml
+  - https://raw.githubusercontent.com/keycloak/keycloak-k8s-resources/26.6.1/kubernetes/keycloakrealmimports.k8s.keycloak.org-v1.yml
+  # Operator deployment + RBAC (namespace-scoped resources target the keycloak namespace)
+  - https://raw.githubusercontent.com/keycloak/keycloak-k8s-resources/26.6.1/kubernetes/kubernetes.yml

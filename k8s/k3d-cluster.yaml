@@ -1,0 +1,67 @@
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: e-commerce             # k3d cluster name; kubeconfig context = k3d-e-commerce
+servers: 1                     # single control-plane (laptop staging)
+agents: 2                      # two worker nodes
+kubeAPI:
+  host: "kube-api.local.test"  # resolves to 127.0.0.1 via .local.test wildcard DNS
+  hostPort: "6445"
+
+# Expose ports 80 and 443 via the k3d load-balancer container so that
+# Envoy Gateway (running inside the cluster) is reachable on localhost.
+ports:
+  - port: 80:80
+    nodeFilters:
+      - loadbalancer
+  - port: 443:443
+    nodeFilters:
+      - loadbalancer
+
+# Built-in image registry — lets `jib:build -Ddocker.registry=localhost:5000`
+# push images that are immediately importable into the cluster.
+registries:
+  create:
+    name: e-commerce-registry
+    host: "localhost"
+    hostPort: "5000"
+
+# /etc/hosts entries injected into every k3d node container and CoreDNS.
+# Add hostnames here as new services are exposed through Envoy Gateway.
+hostAliases:
+  - ip: 172.17.0.1              # Docker bridge gateway — reachable from inside nodes
+    hostnames:
+      - kube-api.local.test
+      # ── IAM ────────────────────────────────────────────────────────────────
+      - keycloak.local.test
+      # ── Business services ──────────────────────────────────────────────────
+      - api.local.test          # single ingress hostname for all /api/v1/* routes
+      # ── Observability ──────────────────────────────────────────────────────
+      - grafana.local.test
+
+options:
+  k3s:
+    extraArgs:
+      # Allow the host IP as a valid SAN in the k3s TLS certificate
+      - arg: --tls-san=172.17.0.1
+        nodeFilters:
+          - server:*
+      # Expose kube-proxy metrics (scraped by Prometheus)
+      - arg: --kube-proxy-arg=metrics-bind-address=0.0.0.0
+        nodeFilters:
+          - server:*
+          - agent:*
+      - arg: --kube-controller-manager-arg=bind-address=0.0.0.0
+        nodeFilters:
+          - server:*
+      - arg: --kube-scheduler-arg=bind-address=0.0.0.0
+        nodeFilters:
+          - server:*
+      # Disable Traefik — Envoy Gateway is used instead
+      - arg: --disable=traefik
+        nodeFilters:
+          - server:*
+      # Expose etcd metrics (for Prometheus)
+      - arg: --etcd-expose-metrics=true
+        nodeFilters:
+          - server:*

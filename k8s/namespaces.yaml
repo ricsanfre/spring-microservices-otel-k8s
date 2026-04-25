@@ -1,0 +1,41 @@
+# All namespaces for the e-commerce k3d staging cluster
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: e-commerce
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: e-commerce-infra
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: envoy-gateway-system
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keycloak
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kafka
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mongodb
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: postgres
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring

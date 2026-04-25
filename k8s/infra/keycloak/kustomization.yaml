@@ -1,0 +1,14 @@
+# Keycloak — Keycloak CR + KeycloakRealmImport CR
+# Namespace: keycloak
+# Operator must already be installed (make k8s-keycloak-operator)
+#
+# Prerequisites — create secrets before applying:
+#   kubectl create secret generic keycloak-admin-secret \
+#     --from-literal=username=admin --from-literal=password=<CHANGE_ME> \
+#     --namespace keycloak
+#   kubectl create secret generic keycloak-db-secret \
+#     --from-literal=username=keycloak_owner --from-literal=password=<CHANGE_ME> \
+#     --namespace keycloak
+resources:
+  - keycloak.yaml
+  - realm-import.yaml

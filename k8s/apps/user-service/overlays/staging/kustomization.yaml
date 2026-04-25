@@ -1,0 +1,43 @@
+# Staging overlay for user-service
+# Patches the base resources with staging-specific image tags and configuration.
+#
+# Build & apply:
+#   kustomize build k8s/apps/user-service/overlays/staging | kubectl apply -f -
+# or:
+#   kubectl apply -k k8s/apps/user-service/overlays/staging
+resources:
+  - ../../base
+
+# Set the image to use the k3d local registry with an explicit tag.
+# Update the newTag when releasing a new version.
+images:
+  - name: localhost:5000/user-service
+    newTag: "latest"
+
+# Staging-specific patches
+patches:
+  # Scale to 1 replica on laptop (saves resources)
+  - patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: user-service
+
+  # Overwrite imagePullPolicy to Always so the k3d registry is re-checked on each restart
+  - patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+    target:
+      kind: Deployment
+      name: user-service
+
+# Additional staging resources (secrets, etc.)
+# Secrets are NOT committed to git — create them before applying:
+#
+#   kubectl create secret generic user-service-db-secret \
+#     --from-literal=username=users_owner \
+#     --from-literal=password=<CHANGE_ME> \
+#     --namespace e-commerce

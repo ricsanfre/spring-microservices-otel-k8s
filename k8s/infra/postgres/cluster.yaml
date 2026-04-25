@@ -1,0 +1,33 @@
+# CloudNativePG — PostgreSQL Cluster CR
+# Namespace: postgres
+# Single primary + one replica — enough for laptop staging.
+#
+# Apply:
+#   kubectl apply -f k8s/infra/postgres/cluster.yaml
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  namespace: postgres
+spec:
+  # 1 primary + 1 replica (standby)
+  instances: 2
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: "128MB"
+
+  bootstrap:
+    initdb:
+      database: app      # default database (individual service DBs are created via kubectl)
+      owner: app
+      secret:
+        name: postgres-superuser-secret
+
+  storage:
+    size: 5Gi
+
+  # Expose a read-write Service at postgres-rw.postgres.svc.cluster.local:5432
+  # and a read-only Service at postgres-ro.postgres.svc.cluster.local:5432

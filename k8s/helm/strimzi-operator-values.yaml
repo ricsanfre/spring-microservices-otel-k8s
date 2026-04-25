@@ -1,0 +1,16 @@
+# Strimzi Kafka Operator Helm values — staging (k3d)
+# Chart: oci://quay.io/strimzi-helm-charts/strimzi-kafka-operator
+# Docs: https://strimzi.io/docs/operators/latest/deploying#deploying-cluster-operator-helm-chart-str
+#
+# Install:
+#   helm upgrade --install strimzi-kafka-operator \
+#     oci://quay.io/strimzi-helm-charts/strimzi-kafka-operator \
+#     --namespace kafka --create-namespace \
+#     --values k8s/helm/strimzi-operator-values.yaml
+
+# Watch only the kafka namespace (least privilege)
+watchNamespaces:
+  - kafka
+
+# Single replica for laptop staging
+replicas: 1

@@ -1,0 +1,21 @@
+# Wildcard TLS certificate for *.local.test
+# Issued by the local-test-ca-issuer (self-signed CA).
+# The secret `local-test-wildcard-tls` is referenced by the Envoy Gateway listener.
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: local-test-wildcard
+  namespace: envoy-gateway-system
+spec:
+  secretName: local-test-wildcard-tls
+  duration: 8760h      # 1 year
+  renewBefore: 720h    # renew 30 days before expiry
+  commonName: "*.local.test"
+  dnsNames:
+    - "*.local.test"
+    - "local.test"
+  issuerRef:
+    name: local-test-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io

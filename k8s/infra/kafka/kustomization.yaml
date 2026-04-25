@@ -1,0 +1,5 @@
+# Kafka — Strimzi Kafka cluster + KafkaTopic CRs
+# Namespace: kafka
+resources:
+  - cluster.yaml
+  - topics.yaml

@@ -1,0 +1,32 @@
+# Envoy Gateway — JWT SecurityPolicy
+# Enforces JWT authentication for all routes under api.local.test.
+# JWT tokens must be issued by the Keycloak `e-commerce` realm.
+#
+# The SecurityPolicy targets the Gateway itself so it applies to ALL
+# HTTPRoutes attached to it. Per-route exemptions (e.g. public health endpoints)
+# can be added by attaching a separate SecurityPolicy at the HTTPRoute level.
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: jwt-authn
+  namespace: e-commerce
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: user-service
+
+  jwt:
+    providers:
+      - name: keycloak
+        issuer: "https://keycloak.local.test/realms/e-commerce"
+        audiences:
+          - account
+        remoteJWKS:
+          uri: "https://keycloak.local.test/realms/e-commerce/protocol/openid-connect/certs"
+        claimToHeaders:
+          - claim: sub
+            header: x-user-id
+          - claim: preferred_username
+            header: x-username

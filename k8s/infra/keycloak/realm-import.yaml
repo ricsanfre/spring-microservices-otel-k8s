@@ -1,0 +1,101 @@
+# Keycloak Operator — KeycloakRealmImport CR
+# Imports the e-commerce realm from the JSON defined in this file.
+# Namespace: keycloak
+#
+# NOTE: The realm JSON here is a minimal version.
+#       The full realm (with clients, users, roles) lives in
+#       docker/keycloak/realm-e-commerce.json and can be replaced in the
+#       `spec.realm` field below.
+#
+# Apply:
+#   kubectl apply -f k8s/infra/keycloak/realm-import.yaml
+---
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: KeycloakRealmImport
+metadata:
+  name: e-commerce-realm
+  namespace: keycloak
+spec:
+  keycloakCRName: keycloak
+  realm:
+    realm: e-commerce
+    enabled: true
+    displayName: "E-Commerce"
+    registrationAllowed: false
+
+    roles:
+      realm:
+        - name: user
+          description: "Regular user"
+        - name: service-account
+          description: "Machine-to-machine service account"
+
+    clients:
+      - clientId: e-commerce-web
+        name: "E-Commerce Web"
+        enabled: true
+        publicClient: true
+        directAccessGrantsEnabled: true
+        redirectUris:
+          - "http://localhost:*"
+          - "https://api.local.test/*"
+        webOrigins:
+          - "+"
+        defaultClientScopes:
+          - web-origins
+          - profile
+          - roles
+          - email
+
+      - clientId: e-commerce-service
+        name: "E-Commerce Service"
+        enabled: true
+        publicClient: false
+        serviceAccountsEnabled: true
+        standardFlowEnabled: false
+        directAccessGrantsEnabled: false
+        secret: "change-me-service-secret"
+        defaultClientScopes:
+          - web-origins
+          - profile
+          - roles
+          - email
+
+    users:
+      - username: testuser
+        enabled: true
+        email: testuser@example.com
+        firstName: Test
+        lastName: User
+        credentials:
+          - type: password
+            value: password
+            temporary: false
+        realmRoles:
+          - user
+
+      - username: otheruser
+        enabled: true
+        email: otheruser@example.com
+        firstName: Other
+        lastName: User
+        credentials:
+          - type: password
+            value: password
+            temporary: false
+        realmRoles:
+          - user
+
+    # Flat `roles` claim — required by SecurityConfig.java
+    protocolMappers:
+      - name: roles-mapper
+        protocol: openid-connect
+        protocolMapper: oidc-usermodel-realm-role-mapper
+        consentRequired: false
+        config:
+          multivalued: "true"
+          userinfo.token.claim: "true"
+          id.token.claim: "true"
+          access.token.claim: "true"
+          claim.name: "roles"
+          jsonType.label: String

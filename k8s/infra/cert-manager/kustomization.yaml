@@ -1,0 +1,5 @@
+# cert-manager — ClusterIssuers + wildcard TLS certificate
+# Apply with: kubectl apply -k k8s/infra/cert-manager
+resources:
+  - cluster-issuer.yaml
+  - wildcard-certificate.yaml

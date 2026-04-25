@@ -1,0 +1,20 @@
+# cert-manager Helm values — staging (k3d)
+# Chart: jetstack/cert-manager
+# Docs: https://cert-manager.io/docs/installation/helm/
+#
+# Install:
+#   helm repo add jetstack https://charts.jetstack.io --force-update
+#   helm upgrade --install cert-manager jetstack/cert-manager \
+#     --namespace cert-manager --create-namespace \
+#     --values k8s/helm/cert-manager-values.yaml
+
+installCRDs: true   # install CRDs as part of the Helm release
+
+# Single replica is sufficient for laptop staging
+replicaCount: 1
+
+# Prometheus metrics (scraped by kube-prometheus-stack or Grafana agent)
+prometheus:
+  enabled: true
+  servicemonitor:
+    enabled: false   # enable when kube-prometheus-stack is present

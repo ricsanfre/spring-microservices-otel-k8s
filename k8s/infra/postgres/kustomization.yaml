@@ -1,0 +1,10 @@
+# PostgreSQL — CNPG Cluster + per-service Database CRs
+# Namespace: postgres
+#
+# Prerequisites:
+#   kubectl create secret generic postgres-superuser-secret \
+#     --from-literal=username=postgres --from-literal=password=<CHANGE_ME> \
+#     --namespace postgres
+resources:
+  - cluster.yaml
+  - databases.yaml

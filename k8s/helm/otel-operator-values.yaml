@@ -1,0 +1,29 @@
+# OpenTelemetry Operator — Helm values for k3d staging
+# Chart : open-telemetry/opentelemetry-operator
+# Repo  : https://open-telemetry.github.io/opentelemetry-helm-charts
+#
+# Prerequisites already satisfied:
+#   - cert-manager is installed (required for the operator's admission webhook TLS)
+#
+# The operator manages OpenTelemetryCollector and Instrumentation CRs.
+# The collector itself is defined in k8s/infra/otel-collector/collector.yaml.
+# ─────────────────────────────────────────────────────────────────────────────
+
+manager:
+  # Single replica — sufficient for k3d staging
+  replicaCount: 1
+
+  # Use cert-manager (already in cluster) to provision the webhook TLS certificate
+  # instead of the built-in self-signed certificate rotation.
+admissionWebhooks:
+  certManager:
+    enabled: true
+    # Reuse the existing cluster CA issuer (created by k8s-infra-cert-manager)
+    issuerRef:
+      kind: ClusterIssuer
+      name: local-test-ca-issuer
+
+# Disable auto-instrumentation injection cluster-wide; Instrumentation CRs can
+# be created per-namespace when needed.
+instrumentationAnnotations:
+  enabled: false

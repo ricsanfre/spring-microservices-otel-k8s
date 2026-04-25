@@ -1,0 +1,42 @@
+# cert-manager — self-signed ClusterIssuer + CA
+# Apply after cert-manager is installed and its webhook is ready.
+#   kubectl apply -f k8s/infra/cert-manager/cluster-issuer.yaml
+---
+# Step 1 — a bootstrap issuer that can sign only the CA certificate
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+# Step 2 — generate a self-signed CA certificate for the .local.test domain
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: local-test-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: "local.test CA"
+  subject:
+    organizations:
+      - e-commerce staging
+  secretName: local-test-ca-secret
+  duration: 87600h     # 10 years
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+# Step 3 — a CA-backed ClusterIssuer used for all *.local.test certificates
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: local-test-ca-issuer
+spec:
+  ca:
+    secretName: local-test-ca-secret

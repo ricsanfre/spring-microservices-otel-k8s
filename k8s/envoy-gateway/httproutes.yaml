@@ -1,0 +1,105 @@
+# Envoy Gateway — HTTPRoutes
+# One HTTPRoute per business service.
+# All routes share the single Gateway `eg` in envoy-gateway-system.
+#
+# HTTP → HTTPS redirect (applies to all hostnames on port 80)
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: https-redirect
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+      sectionName: http
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+---
+# ── user-service ──────────────────────────────────────────────────────────
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: user-service
+  namespace: e-commerce
+spec:
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - "api.local.test"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/users
+      backendRefs:
+        - name: user-service
+          port: 8085
+---
+# ── product-service (placeholder — add when service is implemented) ────────
+# apiVersion: gateway.networking.k8s.io/v1
+# kind: HTTPRoute
+# metadata:
+#   name: product-service
+#   namespace: e-commerce
+# spec:
+#   parentRefs:
+#     - name: eg
+#       namespace: envoy-gateway-system
+#       sectionName: https
+#   hostnames:
+#     - "api.local.test"
+#   rules:
+#     - matches:
+#         - path:
+#             type: PathPrefix
+#             value: /api/v1/products
+#       backendRefs:
+#         - name: product-service
+#           port: 8081
+---
+# ── Keycloak passthrough route ─────────────────────────────────────────────
+# Routes keycloak.local.test to the Keycloak service in the keycloak namespace.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - "keycloak.local.test"
+  rules:
+    - backendRefs:
+        - name: keycloak-service
+          port: 8080
+---
+# ── Grafana ────────────────────────────────────────────────────────────────
+# Routes grafana.local.test to the Grafana pod in the monitoring namespace.
+# Release name 'lgtm' → service name 'lgtm-grafana'.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - "grafana.local.test"
+  rules:
+    - backendRefs:
+        - name: lgtm-grafana
+          port: 80

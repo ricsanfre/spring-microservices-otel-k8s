@@ -1,0 +1,10 @@
+# MongoDB — MongoDBCommunity replica set + per-service credentials
+# Namespace: mongodb
+#
+# Prerequisites — create per-service credential secrets before applying:
+#   kubectl create secret generic mongodb-reviews-secret \
+#     --from-literal=password=<CHANGE_ME> --namespace mongodb
+#   kubectl create secret generic mongodb-notifications-secret \
+#     --from-literal=password=<CHANGE_ME> --namespace mongodb
+resources:
+  - community.yaml

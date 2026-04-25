@@ -1,0 +1,16 @@
+# MongoDB Community Operator Helm values — staging (k3d)
+# Chart: mongodb/community-operator
+# Docs: https://github.com/mongodb/mongodb-kubernetes-operator/blob/master/docs/install-upgrade.md
+#
+# Install:
+#   helm repo add mongodb https://mongodb.github.io/helm-charts --force-update
+#   helm upgrade --install mongodb-operator mongodb/community-operator \
+#     --namespace mongodb --create-namespace \
+#     --values k8s/helm/mongodb-operator-values.yaml
+
+# Restrict operator to the mongodb namespace
+operator:
+  watchNamespace: mongodb
+
+# Single replica for laptop staging
+replicaCount: 1

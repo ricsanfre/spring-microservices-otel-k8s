@@ -1,0 +1,18 @@
+# Envoy Gateway Helm values — staging (k3d)
+# Chart: oci://docker.io/envoyproxy/gateway-helm
+# Docs: https://gateway.envoyproxy.io/docs/install/install-helm/
+#
+# Install:
+#   helm upgrade --install envoy-gateway oci://docker.io/envoyproxy/gateway-helm \
+#     --version v1.4.1 \
+#     --namespace envoy-gateway-system --create-namespace \
+#     --values k8s/helm/envoy-gateway-values.yaml
+
+# Single replica for laptop staging
+deployment:
+  replicas: 1
+
+# Expose the gateway via the k3d load-balancer (NodePort → host ports 80/443)
+envoyGateway:
+  gateway:
+    controllerName: gateway.envoyproxy.io/gatewayclass-controller

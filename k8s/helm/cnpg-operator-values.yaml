@@ -1,0 +1,16 @@
+# CloudNativePG (CNPG) Operator Helm values — staging (k3d)
+# Chart: cnpg/cloudnative-pg
+# Docs: https://cloudnative-pg.io/documentation/current/installation_upgrade/#installing-via-helm
+#
+# Install:
+#   helm repo add cnpg https://cloudnative-pg.github.io/charts --force-update
+#   helm upgrade --install cnpg cnpg/cloudnative-pg \
+#     --namespace cnpg-system --create-namespace \
+#     --values k8s/helm/cnpg-operator-values.yaml
+
+# Single replica for laptop staging
+replicaCount: 1
+
+# Prometheus metrics
+monitoring:
+  podMonitorEnabled: false   # enable when kube-prometheus-stack is present
