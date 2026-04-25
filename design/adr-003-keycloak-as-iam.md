@@ -14,7 +14,7 @@ The platform requires a centralised Identity and Access Management (IAM) solutio
 - Manages user credentials — services must **not** store passwords
 - Supports the OAuth2 Authorization Code + PKCE flow for browser clients
 - Supports the OAuth2 Client Credentials flow for machine-to-machine (service-to-service) calls
-- Provides role-based access control claims in tokens
+- Provides OAuth2 scope-based access control in tokens (see [ADR-006](adr-006-scope-based-authorization.md))
 - Can run locally (Docker Compose) and in Kubernetes (k3d staging)
 
 Alternatives considered:
@@ -94,7 +94,7 @@ spring:
 ### Realm auto-import for reproducible environments
 
 The Keycloak realm (`e-commerce`) is defined as a JSON export (`docker/keycloak/realm-e-commerce.json`) and auto-imported on container start. This ensures:
-- Every developer starts with the same realm configuration (roles, clients, test users, JWT mappers)
+- Every developer starts with the same realm configuration (client scopes, clients, and test users)
 - No manual Admin Console setup steps
 - The realm config is version-controlled alongside application code
 

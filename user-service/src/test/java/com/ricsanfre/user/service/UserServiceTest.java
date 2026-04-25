@@ -15,7 +15,6 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -44,7 +43,7 @@ class UserServiceTest {
                 .claim("preferred_username", username)
                 .claim("given_name", firstName)
                 .claim("family_name", lastName)
-                .claim("roles", List.of("user"))
+                .claim("scope", "openid profile email users:read")
                 .build();
         return new JwtAuthenticationToken(jwt);
     }

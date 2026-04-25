@@ -8,18 +8,62 @@
   "duplicateEmailsAllowed": false,
   "defaultSignatureAlgorithm": "RS256",
 
-  "roles": {
-    "realm": [
-      {
-        "name": "user",
-        "description": "Standard customer role"
-      },
-      {
-        "name": "service-account",
-        "description": "Internal service-to-service calls (resolveUser endpoint)"
-      }
-    ]
-  },
+  "clientScopes": [
+    {
+      "name": "products:read",
+      "description": "Read access to the product catalog",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+    },
+    {
+      "name": "products:write",
+      "description": "Create and update products (admin / product-service)",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+    },
+    {
+      "name": "orders:read",
+      "description": "Read access to orders",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+    },
+    {
+      "name": "orders:write",
+      "description": "Place and update orders",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+    },
+    {
+      "name": "reviews:read",
+      "description": "Read access to product reviews",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+    },
+    {
+      "name": "reviews:write",
+      "description": "Submit and edit reviews",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+    },
+    {
+      "name": "users:read",
+      "description": "Read own user profile",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+    },
+    {
+      "name": "users:resolve",
+      "description": "Resolve an IDP subject to an internal user ID (service-to-service only)",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "false" }
+    },
+    {
+      "name": "notifications:receive",
+      "description": "Receive notification events",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+    }
+  ],
 
   "clients": [
     {
@@ -37,49 +81,31 @@
         "http://127.0.0.1:*"
       ],
       "webOrigins": ["+"],
-      "protocolMappers": [
-        {
-          "name": "realm-roles-flat",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-usermodel-realm-role-mapper",
-          "consentRequired": false,
-          "config": {
-            "multivalued": "true",
-            "id.token.claim": "true",
-            "access.token.claim": "true",
-            "userinfo.token.claim": "false",
-            "claim.name": "roles",
-            "jsonType.label": "String"
-          }
-        }
+      "defaultClientScopes": [
+        "openid", "profile", "email",
+        "products:read",
+        "orders:read", "orders:write",
+        "reviews:read", "reviews:write",
+        "users:read"
+      ],
+      "optionalClientScopes": [
+        "products:write"
       ]
     },
     {
       "clientId": "e-commerce-service",
       "name": "E-Commerce Service Client (M2M)",
-      "description": "Confidential client for service-account credentials flow",
+      "description": "Confidential client for service-to-service client credentials flow",
       "enabled": true,
       "publicClient": false,
       "secret": "e-commerce-service-secret",
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
-      "protocolMappers": [
-        {
-          "name": "realm-roles-flat",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-usermodel-realm-role-mapper",
-          "consentRequired": false,
-          "config": {
-            "multivalued": "true",
-            "id.token.claim": "true",
-            "access.token.claim": "true",
-            "userinfo.token.claim": "false",
-            "claim.name": "roles",
-            "jsonType.label": "String"
-          }
-        }
-      ]
+      "defaultClientScopes": [
+        "users:resolve"
+      ],
+      "optionalClientScopes": []
     }
   ],
 
@@ -96,8 +122,7 @@
           "value": "password",
           "temporary": false
         }
-      ],
-      "realmRoles": ["user"]
+      ]
     },
     {
       "username": "otheruser",
@@ -111,15 +136,13 @@
           "value": "password",
           "temporary": false
         }
-      ],
-      "realmRoles": ["user"]
+      ]
     },
     {
       "username": "service-account-e-commerce-service",
       "enabled": true,
       "email": "service-account-e-commerce-service@placeholder.org",
-      "serviceAccountClientId": "e-commerce-service",
-      "realmRoles": ["service-account"]
+      "serviceAccountClientId": "e-commerce-service"
     }
   ]
 }

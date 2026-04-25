@@ -120,7 +120,7 @@ This approach keeps the resolution logic at the boundary of each service, with `
 ### Negative / Trade-offs
 
 - **One extra HTTP call per new user** — the first request from a user triggers `GET /users/resolve`. This is bounded by the cache TTL and is an inherent cost of the isolation approach.
-- **Resolve endpoint must be protected** — `GET /api/v1/users/resolve` must only be accessible to service accounts (authenticated via Client Credentials), never to regular users. Enforced via `@PreAuthorize` with a service-account role check.
+- **Resolve endpoint must be protected** — `GET /api/v1/users/resolve` must only be accessible to service accounts (authenticated via Client Credentials), never to regular users. Enforced via `@PreAuthorize("hasAuthority('SCOPE_users:resolve')")` (see [ADR-006](adr-006-scope-based-authorization.md)).
 
 ---
 

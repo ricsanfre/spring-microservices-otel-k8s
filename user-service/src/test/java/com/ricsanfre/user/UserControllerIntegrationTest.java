@@ -21,7 +21,6 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import java.util.List;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.*;
@@ -77,8 +76,14 @@ class UserControllerIntegrationTest {
                         .claim("preferred_username", "testuser")
                         .claim("given_name", "Test")
                         .claim("family_name", "User")
-                        .claim("roles", List.of("user")))
-                .authorities(new SimpleGrantedAuthority("ROLE_user"));
+                        .claim("scope", "openid profile email users:read orders:read orders:write reviews:read reviews:write products:read"))
+                .authorities(
+                        new SimpleGrantedAuthority("SCOPE_users:read"),
+                        new SimpleGrantedAuthority("SCOPE_orders:read"),
+                        new SimpleGrantedAuthority("SCOPE_orders:write"),
+                        new SimpleGrantedAuthority("SCOPE_reviews:read"),
+                        new SimpleGrantedAuthority("SCOPE_reviews:write"),
+                        new SimpleGrantedAuthority("SCOPE_products:read"));
     }
 
     /** JWT for a second user with sub = "test-sub-2". */
@@ -91,20 +96,26 @@ class UserControllerIntegrationTest {
                         .claim("preferred_username", "otheruser")
                         .claim("given_name", "Other")
                         .claim("family_name", "Person")
-                        .claim("roles", List.of("user")))
-                .authorities(new SimpleGrantedAuthority("ROLE_user"));
+                        .claim("scope", "openid profile email users:read orders:read orders:write reviews:read reviews:write products:read"))
+                .authorities(
+                        new SimpleGrantedAuthority("SCOPE_users:read"),
+                        new SimpleGrantedAuthority("SCOPE_orders:read"),
+                        new SimpleGrantedAuthority("SCOPE_orders:write"),
+                        new SimpleGrantedAuthority("SCOPE_reviews:read"),
+                        new SimpleGrantedAuthority("SCOPE_reviews:write"),
+                        new SimpleGrantedAuthority("SCOPE_products:read"));
     }
 
-    /** JWT for an internal service account carrying the service-account role. */
+    /** JWT for an internal service account carrying the users:resolve scope. */
     private static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
             .JwtRequestPostProcessor serviceAccountJwt() {
         return jwt()
                 .jwt(j -> j
                         .subject("service-account-sub")
                         .claim("email", "service@internal.local")
-                        .claim("preferred_username", "service-account")
-                        .claim("roles", List.of("service-account")))
-                .authorities(new SimpleGrantedAuthority("ROLE_service-account"));
+                        .claim("preferred_username", "e-commerce-service")
+                        .claim("scope", "users:resolve"))
+                .authorities(new SimpleGrantedAuthority("SCOPE_users:resolve"));
     }
 
     // ── Tests ────────────────────────────────────────────────────────────────
@@ -203,7 +214,7 @@ class UserControllerIntegrationTest {
 
     @Test
     @Order(9)
-    void resolveUser_withServiceAccountRole_returns200() throws Exception {
+    void resolveUser_withUsersResolveScope_returns200() throws Exception {
         mockMvc.perform(get("/users/resolve").with(serviceAccountJwt())
                         .param("idp_subject", "test-sub-1"))
                 .andExpect(status().isOk())
@@ -212,7 +223,7 @@ class UserControllerIntegrationTest {
 
     @Test
     @Order(10)
-    void resolveUser_withRegularUserRole_returns403() throws Exception {
+    void resolveUser_withoutUsersResolveScope_returns403() throws Exception {
         mockMvc.perform(get("/users/resolve").with(userJwt())
                         .param("idp_subject", "test-sub-1"))
                 .andExpect(status().isForbidden());

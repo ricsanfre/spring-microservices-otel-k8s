@@ -30,7 +30,7 @@ public class UserController implements UsersApi {
     }
 
     @Override
-    @PreAuthorize("hasRole('service-account')")
+    @PreAuthorize("hasAuthority('SCOPE_users:resolve')")
     public ResponseEntity<UserResponse> resolveUser(String idpSubject) {
         return ResponseEntity.ok(userService.findByIdpSubject(idpSubject));
     }

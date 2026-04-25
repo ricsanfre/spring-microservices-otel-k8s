@@ -636,24 +636,32 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                 .requestMatchers("/api-docs/**", "/swagger-ui/**").permitAll()
-                .anyRequest().authenticated()
+                .anyRequest().hasAuthority("SCOPE_<service-scope>:read")
             )
-            .oauth2ResourceServer(oauth2 -> oauth2
-                .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
-            );
+            // Spring Security default converter reads 'scope'/'scp' claim → SCOPE_ prefix.
+            // No custom JwtAuthenticationConverter is needed.
+            .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()));
         return http.build();
     }
-
-    @Bean
-    public JwtAuthenticationConverter jwtAuthenticationConverter() {
-        JwtGrantedAuthoritiesConverter converter = new JwtGrantedAuthoritiesConverter();
-        converter.setAuthoritiesClaimName("roles");         // Keycloak realm roles
-        converter.setAuthorityPrefix("ROLE_");
-        JwtAuthenticationConverter jwtConverter = new JwtAuthenticationConverter();
-        jwtConverter.setJwtGrantedAuthoritiesConverter(converter);
-        return jwtConverter;
-    }
 }
+```
+
+Replace `<service-scope>:read` with the primary read scope for the service (e.g. `products:read`, `orders:read`, `users:read`).
+
+### Scope-based method-level authorization
+
+Use `@PreAuthorize` with `hasAuthority('SCOPE_<scope>')` on endpoints that require specific scopes beyond the baseline:
+
+```java
+// Endpoint accessible to regular users
+@Override
+@PreAuthorize("hasAuthority('SCOPE_users:read')")
+public ResponseEntity<UserResponse> getMyProfile(Authentication auth) { ... }
+
+// Internal-only endpoint — requires the machine-to-machine scope
+@Override
+@PreAuthorize("hasAuthority('SCOPE_users:resolve')")
+public ResponseEntity<UserResponse> resolveUser(String idpSubject) { ... }
 ```
 
 ### Service-to-service Client Credentials config
@@ -670,7 +678,7 @@ spring:
             client-id: reviews-service
             client-secret: ${REVIEWS_SERVICE_CLIENT_SECRET}
             authorization-grant-type: client_credentials
-            scope: openid
+            scope: reviews:read   # grant only the scopes needed for this M2M call
         provider:
           order-service:
             token-uri: http://keycloak:8180/realms/e-commerce/protocol/openid-connect/token
@@ -1042,9 +1050,25 @@ mockMvc.perform(get("/users/me").with(jwt()
             .claim("preferred_username", "testuser")
             .claim("given_name", "Test")
             .claim("family_name", "User")
-            .claim("roles", List.of("user")))
-        .authorities(new SimpleGrantedAuthority("ROLE_user"))))
+            .claim("scope", "openid profile email users:read"))
+        .authorities(new SimpleGrantedAuthority("SCOPE_users:read"))))
     .andExpect(status().isOk());
+```
+
+For endpoints that require specific scopes (e.g. M2M-only `users:resolve`):
+
+```java
+// Service account with users:resolve scope
+mockMvc.perform(get("/users/resolve").with(jwt()
+        .jwt(j -> j.subject("svc-sub").claim("scope", "users:resolve"))
+        .authorities(new SimpleGrantedAuthority("SCOPE_users:resolve"))))
+    .andExpect(status().isOk());
+
+// Regular user missing users:resolve → 403
+mockMvc.perform(get("/users/resolve").with(jwt()
+        .jwt(j -> j.subject("test-sub-1").claim("scope", "openid profile email users:read"))
+        .authorities(new SimpleGrantedAuthority("SCOPE_users:read"))))
+    .andExpect(status().isForbidden());
 ```
 
 Also mock the `JwtDecoder` bean to prevent Spring Boot from fetching the JWK Set URI at context startup:

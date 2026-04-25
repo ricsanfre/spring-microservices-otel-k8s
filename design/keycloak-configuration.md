@@ -13,9 +13,13 @@ flowchart TD
     subgraph REALM["Keycloak Realm: e-commerce"]
         direction TB
 
-        subgraph ROLES["Realm Roles"]
-            R1(user)
-            R2(service-account)
+        subgraph SCOPES["Client Scopes"]
+            S1("products:read / products:write")
+            S2("orders:read / orders:write")
+            S3("reviews:read / reviews:write")
+            S4("users:read")
+            S5("users:resolve")
+            S6("notifications:receive")
         end
 
         subgraph CLIENTS["Clients"]
@@ -24,14 +28,16 @@ flowchart TD
         end
 
         subgraph USERS["Users"]
-            U1["testuser\nrole: user"]
-            U2["otheruser\nrole: user"]
-            U3["service-account-e-commerce-service\nrole: service-account"]
+            U1["testuser"]
+            U2["otheruser"]
+            U3["service-account-e-commerce-service\n(Keycloak service account)"]
         end
 
-        R1 -->|assigned to| U1
-        R1 -->|assigned to| U2
-        R2 -->|assigned to| U3
+        S1 -->|defaultClientScopes| C1
+        S2 -->|defaultClientScopes| C1
+        S3 -->|defaultClientScopes| C1
+        S4 -->|defaultClientScopes| C1
+        S5 -->|defaultClientScopes| C2
         C2 -->|owns service account| U3
     end
 
@@ -40,13 +46,13 @@ flowchart TD
     Gateway["Envoy Gateway"]
 
     Browser -->|"Authorization Code + PKCE\n(redirect to Keycloak login)"| C1
-    C1 -->|"access_token (roles: [user])"| Browser
+    C1 -->|"access_token (scope: openid … users:read)"| Browser
     Browser -->|"Bearer JWT"| Gateway
     Gateway -->|validates JWT via JWKS| REALM
     Gateway -->|forwards request + Bearer JWT| Service
 
     Service -->|"Client Credentials\n(client_id + client_secret)"| C2
-    C2 -->|"access_token (roles: [service-account])"| Service
+    C2 -->|"access_token (scope: users:resolve)"| Service
     Service -->|"Bearer service-account JWT"| Service
 ```
 
@@ -79,56 +85,43 @@ In staging (k3d), replace `http://localhost:8180` with `https://keycloak.local.t
 
 ---
 
-## Realm Roles
+## Client Scopes
 
-Two realm-level roles exist. They are mapped to JWTs via the `realm-roles-flat` protocol mapper (see [Protocol Mappers](#protocol-mappers) below).
+Authorization uses standard OAuth2 **resource scopes** (RFC 6749 §3.3).  
+Spring Security reads the `scope` claim from the JWT and maps each space-separated token to a
+`SCOPE_<name>` authority — no custom converter or Keycloak-specific claim mapping required.
 
-### `user`
+See [ADR-006 — Scope-Based Authorization](adr-006-scope-based-authorization.md) for the full rationale.
 
-```json
-{ "name": "user", "description": "Standard customer role" }
-```
+### Scope Catalogue
 
-Assigned to: all human users (`testuser`, `otheruser` and any future registered users).
+| Scope | Description | Granted to |
+|-------|-------------|-----------|
+| `products:read` | Read product catalog | `e-commerce-web` (default) |
+| `products:write` | Create/update products (admin) | `e-commerce-web` (optional) |
+| `orders:read` | Read own orders | `e-commerce-web` (default) |
+| `orders:write` | Place and update orders | `e-commerce-web` (default) |
+| `reviews:read` | Read product reviews | `e-commerce-web` (default) |
+| `reviews:write` | Submit and edit reviews | `e-commerce-web` (default) |
+| `users:read` | Read own user profile | `e-commerce-web` (default) |
+| `users:resolve` | Resolve IDP subject → internal user ID (M2M only) | `e-commerce-service` (default) |
+| `notifications:receive` | Receive notification events | `e-commerce-web` (optional) |
 
-Usage in services:
+### Usage in services
 
-```java
-// Require at least the 'user' role to access any endpoint
-.anyRequest().authenticated()
-
-// Or explicitly with method security:
-@PreAuthorize("hasRole('user')")
-public ResponseEntity<ProfileResponse> getMyProfile() { ... }
-```
-
-Services extract roles from the `roles` claim in the JWT:
-
-```java
-// SecurityConfig — maps 'roles' claim → ROLE_ prefix
-converter.setAuthoritiesClaimName("roles");
-converter.setAuthorityPrefix("ROLE_");
-```
-
-Spring Security then allows `hasRole("user")` to match `ROLE_user`.
-
-### `service-account`
-
-```json
-{ "name": "service-account", "description": "Internal service-to-service calls (resolveUser endpoint)" }
-```
-
-Assigned to: the Keycloak service account for the `e-commerce-service` client
-(`service-account-e-commerce-service`).
-
-Usage: The `GET /api/v1/users/resolve` endpoint in `user-service` is restricted to callers bearing a
-JWT with `roles: ["service-account"]`. This prevents regular users from resolving arbitrary `sub` values
-to internal user IDs.
+Spring Security default `JwtGrantedAuthoritiesConverter` reads the `scope` claim (space-separated)
+and creates one `SCOPE_<name>` authority per token. No custom `JwtAuthenticationConverter` is needed:
 
 ```java
-@GetMapping("/resolve")
-@PreAuthorize("hasRole('service-account')")
-public ResponseEntity<UserSummary> resolveByIdpSubject(@RequestParam String idp_subject) { ... }
+// SecurityConfig.java — uses Spring Security defaults
+.oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()));
+
+// Controller method security
+@PreAuthorize("hasAuthority('SCOPE_users:resolve')")
+public ResponseEntity<UserResponse> resolveUser(String idpSubject) { ... }
+
+@PreAuthorize("hasAuthority('SCOPE_users:read')")
+public ResponseEntity<UserResponse> getMyProfile(Authentication auth) { ... }
 ```
 
 ---
@@ -146,6 +139,9 @@ directAccessGrantsEnabled: true ← password grant — for local curl/Postman te
 serviceAccountsEnabled: false
 redirectUris:           http://localhost:*, http://127.0.0.1:*
 webOrigins:             + (same as redirectUris — CORS allowed)
+defaultClientScopes:    openid, profile, email, products:read, orders:read, orders:write,
+                        reviews:read, reviews:write, users:read
+optionalClientScopes:   products:write
 ```
 
 #### When is this used?
@@ -158,7 +154,7 @@ A browser-based SPA (React, Angular, etc.) uses this client to authenticate user
        ?client_id=e-commerce-web
        &redirect_uri=http://localhost:3000/callback
        &response_type=code
-       &scope=openid email profile
+       &scope=openid email profile products:read orders:read orders:write reviews:read reviews:write users:read
        &code_challenge=<SHA256 of code_verifier>     ← PKCE
        &code_challenge_method=S256
 
@@ -190,7 +186,8 @@ curl -s -X POST http://localhost:8180/realms/e-commerce/protocol/openid-connect/
   -d "client_id=e-commerce-web" \
   -d "username=testuser" \
   -d "password=password" \
-  -d "scope=openid" | jq .access_token
+  -d "scope=openid profile email users:read orders:read orders:write reviews:read reviews:write products:read" \
+  | jq .access_token
 ```
 
 #### JWT payload (user token from this client)
@@ -204,7 +201,7 @@ curl -s -X POST http://localhost:8180/realms/e-commerce/protocol/openid-connect/
   "email":             "testuser@example.com",
   "given_name":        "Test",
   "family_name":       "User",
-  "roles":             ["user"],
+  "scope":             "openid profile email products:read orders:read orders:write reviews:read reviews:write users:read",
   "exp":               1745600000,
   "iat":               1745596400
 }
@@ -221,6 +218,7 @@ secret:                 e-commerce-service-secret
 standardFlowEnabled:    false   ← no browser login
 directAccessGrantsEnabled: false
 serviceAccountsEnabled: true    ← Client Credentials grant
+defaultClientScopes:    users:resolve
 ```
 
 #### When is this used?
@@ -246,17 +244,15 @@ In Spring Boot, `OAuth2ClientHttpRequestInterceptor` handles this automatically 
   "sub":                "service-account-uuid",
   "iss":                "http://localhost:8180/realms/e-commerce",
   "preferred_username": "service-account-e-commerce-service",
-  "roles":              ["service-account"],
+  "scope":              "users:resolve",
   "exp":                1745600000,
   "iat":                1745596400
 }
 ```
 
 > **Future expansion**: As additional microservices are implemented (`order-service`, `product-service`,
-> etc.), each should get its own Keycloak client (`client_id: order-service`, `client_id:
-> product-service`, etc.) with its own `client_secret`. Currently a single shared `e-commerce-service`
-> client is used for development simplicity. See [ADR-003](adr-003-keycloak-as-iam.md) for the
-> target architecture.
+> etc.), each should get its own Keycloak client (`client_id: order-service`, etc.) with its own
+> `client_secret` and the scopes it needs to call downstream services. See [ADR-003](adr-003-keycloak-as-iam.md).
 
 ---
 
@@ -271,11 +267,10 @@ In Spring Boot, `OAuth2ClientHttpRequestInterceptor` handles this automatically 
 | First name | `Test` |
 | Last name | `User` |
 | Password | `password` |
-| Realm roles | `user` |
 | Temporary password | No |
 
-A standard test customer account. Use this account to simulate normal user flows (placing orders,
-writing reviews, browsing products).
+A standard test customer account. The JWT issued for this user will contain the scopes granted by
+`e-commerce-web`'s `defaultClientScopes`. Use this account to simulate normal user flows.
 
 ### `otheruser`
 
@@ -286,7 +281,6 @@ writing reviews, browsing products).
 | First name | `Other` |
 | Last name | `Person` |
 | Password | `password` |
-| Realm roles | `user` |
 | Temporary password | No |
 
 A second test customer account. Useful for testing cross-user isolation (e.g., verifying that
@@ -298,53 +292,14 @@ A second test customer account. Useful for testing cross-user isolation (e.g., v
 |-----------|-------|
 | Username | `service-account-e-commerce-service` |
 | Email | `service-account-e-commerce-service@placeholder.org` |
-| Realm roles | `service-account` |
-| Type | Keycloak service account (automatically created for `e-commerce-service` client) |
+| Type | Keycloak service account (auto-created when `serviceAccountsEnabled: true`) |
 
 This user is not a real human. Keycloak automatically creates it when `serviceAccountsEnabled: true` is
 set on the `e-commerce-service` client. The JWT issued via Client Credentials grant has `sub` equal to
-this user's internal UUID and `preferred_username: service-account-e-commerce-service`.
+this user's internal UUID, `preferred_username: service-account-e-commerce-service`, and
+`scope: users:resolve`.
 
-Services receiving a request from this account can detect it via `hasRole('service-account')`.
-
----
-
-## Protocol Mappers
-
-Both clients share the same `realm-roles-flat` protocol mapper. It is defined on each client (not at
-the realm level) to control which claims appear in each client's tokens.
-
-```json
-{
-  "name": "realm-roles-flat",
-  "protocol": "openid-connect",
-  "protocolMapper": "oidc-usermodel-realm-role-mapper",
-  "config": {
-    "multivalued":         "true",
-    "claim.name":          "roles",
-    "access.token.claim":  "true",
-    "id.token.claim":      "true",
-    "userinfo.token.claim":"false",
-    "jsonType.label":       "String"
-  }
-}
-```
-
-| Config key | Value | Meaning |
-|-----------|-------|---------|
-| `claim.name` | `roles` | The JWT claim name is `roles` (not the default `realm_access.roles`) |
-| `multivalued` | `true` | The claim is a JSON array of strings |
-| `access.token.claim` | `true` | Included in the `access_token` (the one services validate) |
-| `id.token.claim` | `true` | Also in the `id_token` (used by the SPA) |
-| `userinfo.token.claim` | `false` | Not in the `userinfo` endpoint response (not needed) |
-| `jsonType.label` | `String` | Each element is a plain string, not a nested object |
-
-This flat structure (`"roles": ["user"]` instead of `"realm_access": {"roles": ["user"]}`) matches the
-Spring Security configuration used across all services:
-
-```java
-converter.setAuthoritiesClaimName("roles");   // flat array, not nested object
-```
+Services receiving a request from this account detect it via `hasAuthority('SCOPE_users:resolve')`.
 
 ---
 
@@ -358,27 +313,27 @@ sequenceDiagram
     participant SVC as Microservice
 
     Note over SPA,KC: User Login (Authorization Code + PKCE)
-    SPA->>KC: GET /auth?client_id=e-commerce-web&code_challenge=...
+    SPA->>KC: GET /auth?client_id=e-commerce-web&scope=openid+users:read+...&code_challenge=...
     KC-->>SPA: Login page
     SPA->>KC: POST credentials (username + password)
     KC-->>SPA: Redirect with auth_code
     SPA->>KC: POST /token (code + code_verifier)
-    KC-->>SPA: access_token (roles:[user]) + refresh_token
+    KC-->>SPA: access_token (scope: openid … users:read) + refresh_token
 
     Note over SPA,SVC: Authenticated API Call
     SPA->>GW: POST /api/v1/orders  Authorization: Bearer <user JWT>
     GW->>KC: GET /certs (JWKS — cached)
     GW->>GW: Validate JWT signature + expiry
     GW->>SVC: POST /api/v1/orders  Authorization: Bearer <user JWT>
-    SVC->>SVC: Validate JWT (JWKS cache)
+    SVC->>SVC: Validate JWT (JWKS cache) — SCOPE_orders:write authority present
     SVC-->>GW: 201 Created
     GW-->>SPA: 201 Created
 
     Note over SVC,KC: Service-to-Service Call (Client Credentials)
     SVC->>KC: POST /token  client_credentials  e-commerce-service / secret
-    KC-->>SVC: access_token (roles:[service-account])
+    KC-->>SVC: access_token (scope: users:resolve)
     SVC->>SVC: GET /api/v1/users/resolve?idp_subject=...  Bearer <service JWT>
-    Note right of SVC: user-service validates\nroles:[service-account]
+    Note right of SVC: user-service validates\nSCOPE_users:resolve authority
 ```
 
 ---
@@ -395,13 +350,6 @@ Keycloak starts with `--import-realm` and the file is volume-mounted at
 `/opt/keycloak/data/import/`. On first startup, Keycloak imports the realm automatically. No Admin
 Console steps are needed.
 
-To add a new client (when a new service is implemented):
-
-1. Add a new entry to `clients[]` in `realm-e-commerce.json`
-2. Add the corresponding service account user to `users[]` (or let Keycloak create it — but pinning it
-   in the JSON ensures reproducibility)
-3. Restart Keycloak (`docker compose restart keycloak`) to re-import
-
 > **Keycloak 26 import behaviour**: If the realm already exists, `--import-realm` skips it unless you
 > add `--override=true`. For dev environments, deleting the Keycloak volume (`docker compose down -v`)
 > and re-running `docker compose up` re-imports from scratch.
@@ -412,48 +360,46 @@ To add a new client (when a new service is implemented):
 
 When a new microservice is implemented, follow this pattern to add its Keycloak identity:
 
+**Step 1 — Define the scopes the new service needs in `clientScopes[]`** (if not already present):
+
 ```json
-// In realm-e-commerce.json  clients[]
 {
-  "clientId": "order-service",
-  "name": "Order Service (M2M)",
+  "name": "notifications:receive",
+  "description": "Receive notification events",
+  "protocol": "openid-connect",
+  "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+}
+```
+
+**Step 2 — Add the client in `clients[]`**:
+
+```json
+{
+  "clientId": "notification-service",
+  "name": "Notification Service (M2M)",
   "enabled": true,
   "publicClient": false,
-  "secret": "order-service-secret",
+  "secret": "notification-service-secret",
   "standardFlowEnabled": false,
   "directAccessGrantsEnabled": false,
   "serviceAccountsEnabled": true,
-  "protocolMappers": [
-    {
-      "name": "realm-roles-flat",
-      "protocol": "openid-connect",
-      "protocolMapper": "oidc-usermodel-realm-role-mapper",
-      "consentRequired": false,
-      "config": {
-        "multivalued": "true",
-        "id.token.claim": "true",
-        "access.token.claim": "true",
-        "userinfo.token.claim": "false",
-        "claim.name": "roles",
-        "jsonType.label": "String"
-      }
-    }
-  ]
+  "defaultClientScopes": ["notifications:receive"],
+  "optionalClientScopes": []
 }
 ```
+
+**Step 3 — Pin the service account user in `users[]`** (optional but ensures reproducible imports):
 
 ```json
-// In realm-e-commerce.json  users[]
 {
-  "username": "service-account-order-service",
+  "username": "service-account-notification-service",
   "enabled": true,
-  "email": "service-account-order-service@placeholder.org",
-  "serviceAccountClientId": "order-service",
-  "realmRoles": ["service-account"]
+  "email": "service-account-notification-service@placeholder.org",
+  "serviceAccountClientId": "notification-service"
 }
 ```
 
-Then in the service's `application.yaml`:
+**Step 4 — Configure the calling service's `application.yaml`**:
 
 ```yaml
 spring:
@@ -462,14 +408,23 @@ spring:
       client:
         registration:
           user-service:                         # logical name for the downstream service
-            client-id: order-service            # this service's Keycloak client ID
-            client-secret: ${ORDER_SERVICE_CLIENT_SECRET:order-service-secret}
+            client-id: notification-service     # this service's Keycloak client ID
+            client-secret: ${NOTIFICATION_SERVICE_CLIENT_SECRET:notification-service-secret}
             authorization-grant-type: client_credentials
-            scope: openid
+            scope: notifications:receive        # request only the scopes needed
         provider:
           user-service:
             token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
 ```
+
+**Step 5 — Protect the endpoint in the service with `@PreAuthorize`**:
+
+```java
+@PreAuthorize("hasAuthority('SCOPE_notifications:receive')")
+public ResponseEntity<Void> receiveNotification(...) { ... }
+```
+
+**Step 6 — Restart Keycloak** to re-import (or use `--override=true`).
 
 ---
 
@@ -477,6 +432,5 @@ spring:
 
 - [ADR-003 — Keycloak as IAM](adr-003-keycloak-as-iam.md) — rationale for choosing Keycloak
 - [ADR-004 — IAM Portability](adr-004-iam-portability-user-service-isolation.md) — why only `user-service` stores the Keycloak `sub`
+- [ADR-006 — Scope-Based Authorization](adr-006-scope-based-authorization.md) — decision to use fine-grained OAuth2 scopes instead of realm roles
 - [development-guidelines.md §9 Security](development-guidelines.md) — Spring Security / OAuth2 Resource Server config pattern
-- [iam-portability.md](iam-portability.md) — detailed sequence diagrams for `sub` → internal UUID resolution
-- [user-service-keycloak-registration-flow.md](user-service-keycloak-registration-flow.md) — lazy registration flow on first login

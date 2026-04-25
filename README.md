@@ -456,7 +456,7 @@ For local development without Kubernetes, all infrastructure runs via Docker Com
 
 > **Profiles:** `infra` starts the shared databases (PostgreSQL + MongoDB); `auth` starts Keycloak; `observability` starts the Grafana LGTM stack. All three are started together via `make us-infra-up`.
 
-> **Keycloak realm auto-import:** `docker/keycloak/realm-e-commerce.json` is volume-mounted into Keycloak's import directory. On first start Keycloak creates realm `e-commerce` with roles, clients, test users, and JWT protocol mappers automatically — no manual Admin Console steps required.
+> **Keycloak realm auto-import:** `docker/keycloak/realm-e-commerce.json` is volume-mounted into Keycloak's import directory. On first start Keycloak creates realm `e-commerce` with client scopes, clients, and test users automatically — no manual Admin Console steps required.
 
 > **Database-per-service isolation:** Each service connects to its own named database within the shared PostgreSQL (or MongoDB) instance using dedicated credentials. The `docker/postgres/init-databases.sh` init script creates all databases and users on first container start. This preserves the database-per-service isolation principle while avoiding the overhead of multiple container instances.
 
@@ -703,11 +703,11 @@ curl -H "Authorization: Bearer $SA_TOKEN" \
 
 **Keycloak test accounts (auto-configured via realm import):**
 
-| Username | Password | Roles |
-|----------|----------|-------|
-| `testuser` | `password` | `user` |
-| `otheruser` | `password` | `user` |
-| `e-commerce-service` (client) | `e-commerce-service-secret` | `service-account` (service account) |
+| Username | Password | Granted Scopes |
+|----------|----------|----------------|
+| `testuser` | `password` | `openid profile email products:read orders:read orders:write reviews:read reviews:write users:read` |
+| `otheruser` | `password` | `openid profile email products:read orders:read orders:write reviews:read reviews:write users:read` |
+| `e-commerce-service` (client) | `e-commerce-service-secret` | `users:resolve` (M2M client credentials) |
 
 **Stopping infrastructure:**
 
