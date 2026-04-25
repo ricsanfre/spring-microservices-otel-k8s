@@ -17,6 +17,6 @@ data:
   # Keycloak OIDC
   KEYCLOAK_URL: "https://keycloak.local.test"
   KEYCLOAK_REALM: "e-commerce"
-  # OpenTelemetry (override in overlay if using a different collector)
-  OTEL_EXPORTER_OTLP_ENDPOINT: "http://grafana-lgtm.monitoring.svc.cluster.local:4318"
+  # OpenTelemetry Collector (managed by OpenTelemetry Operator)
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318"
   OTEL_SERVICE_NAME: "user-service"

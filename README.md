@@ -32,7 +32,7 @@ Spring Boot microservice-based e-commerce platform implementing:
 | `notification-service` | 8084 | stateless | Order event notifications — Kafka consumer |
 | `user-service` | 8085 | PostgreSQL | User profile management; delegates identity to Keycloak |
 
-> **Entry point:** External traffic enters through **Envoy Gateway** (Kubernetes Gateway API). There is no Spring Cloud Gateway service — Envoy handles JWT validation via a `SecurityPolicy` referencing the Keycloak JWKS endpoint, then routes directly to Kubernetes services. Service-to-service calls use Spring Cloud Kubernetes DiscoveryClient (`lb://` URIs).
+> **Entry point:** External traffic enters through **Envoy Gateway** (Kubernetes Gateway API). There is no Spring Cloud Gateway service — Envoy handles JWT validation via a `SecurityPolicy` referencing the Keycloak JWKS endpoint, then routes directly to Kubernetes services. Service-to-service calls use plain Kubernetes Service DNS (`http://service-name:port`), resolved by kube-proxy — no service discovery library required.
 
 ---
 
@@ -79,8 +79,8 @@ flowchart TD
     OS -- "publish\norder.created.v1" --> KAFKA
     KAFKA -- "consume" --> NS
 
-    RS -. "Client Credentials\n(lb://order-service)" .-> OS
-    RS -. "Client Credentials\n(lb://product-service)" .-> PS
+    RS -. "Client Credentials\nhttp://order-service:8082" .-> OS
+    RS -. "Client Credentials\nhttp://product-service:8081" .-> PS
 
     PS --- MDB
     RS --- MDB
@@ -88,7 +88,7 @@ flowchart TD
     US --- PG_U
 ```
 
-> `lb://service-name` URIs in service-to-service calls are resolved by **Spring Cloud Kubernetes DiscoveryClient**, which reads Kubernetes `Service` and `Endpoints` resources from the cluster API — no Eureka server required.
+> Service-to-service calls use plain Kubernetes Service DNS (`http://service-name:port`). kube-proxy handles server-side load balancing across pods — no client-side discovery library required. See [design/adr-002-plain-kubernetes-dns-service-calls.md](design/adr-002-plain-kubernetes-dns-service-calls.md) for the full rationale.
 
 ---
 
@@ -167,7 +167,6 @@ sequenceDiagram
 |---|---|---|
 | Resource Server (all services) | `spring-boot-starter-oauth2-resource-server` | `spring.security.oauth2.resourceserver.jwt.jwk-set-uri` |
 | OAuth2 Client (service accounts) | `spring-boot-starter-oauth2-client` | `spring.security.oauth2.client.registration.<id>.grant-type=client_credentials` |
-| Kubernetes service discovery (all services) | `spring-cloud-starter-kubernetes-client-loadbalancer` | `spring.cloud.kubernetes.discovery.enabled=true` |
 
 ---
 
@@ -542,9 +541,9 @@ flowchart TD
     GW -- "HTTPRoute keycloak.local.test" --> KC
     GW -- "HTTPRoute grafana.local.test" --> GRAFANA
 
-    %% ── Service-to-service (DiscoveryClient lb://) ──────────────────────────
-    RS -. "lb://order-service" .-> OS
-    RS -. "lb://product-service" .-> PS
+    %% ── Service-to-service (plain K8s DNS) ────────────────────────────────
+    RS -. "http://order-service:8082" .-> OS
+    RS -. "http://product-service:8081" .-> PS
 
     %% ── Async messaging ─────────────────────────────────────────────────────
     OS -- "publish order-events" --> KF
@@ -562,22 +561,6 @@ flowchart TD
     OS -- "OTLP :4317" --> OTELCOL
     RS -- "OTLP :4317" --> OTELCOL
     NS_SVC -- "OTLP :4317" --> OTELCOL
-    OTELCOL -- "traces" --> TEMPO
-    OTELCOL -- "logs" --> LOKI
-    OTELCOL -- "metrics" --> MIMIR
-    TEMPO --> GRAFANA
-    LOKI --> GRAFANA
-    MIMIR --> GRAFANA
-```
-    PS --- MDB
-    RS --- MDB
-
-    US -- "OTLP :4317" --> OTELCOL
-    PS -- "OTLP :4317" --> OTELCOL
-    OS -- "OTLP :4317" --> OTELCOL
-    RS -- "OTLP :4317" --> OTELCOL
-    NS_SVC -- "OTLP :4317" --> OTELCOL
-
     OTELCOL -- "traces" --> TEMPO
     OTELCOL -- "logs" --> LOKI
     OTELCOL -- "metrics" --> MIMIR
@@ -661,9 +644,9 @@ Envoy Gateway implements the [Kubernetes Gateway API](https://gateway-api.sigs.k
 
 JWT validation is enforced per `HTTPRoute` via a `SecurityPolicy` pointing to the Keycloak JWKS endpoint at `https://keycloak.local.test/realms/e-commerce/protocol/openid-connect/certs`. Each business service has a dedicated `HTTPRoute` matching its `/api/v1/<resource>` prefix.
 
-#### Spring Cloud Kubernetes DiscoveryClient
+#### Service-to-Service Calls
 
-Each service uses `spring-cloud-starter-kubernetes-client-loadbalancer` so that `lb://service-name` URIs (used by `RestClient` for peer-to-peer calls) are resolved via the Kubernetes API instead of Eureka. Each service `ServiceAccount` is bound to a `Role` granting `get/list/watch` on `services`, `endpoints`, and `pods`.
+Services call each other using plain Kubernetes Service DNS (`http://service-name:port`). kube-proxy handles server-side load balancing across pods — no `spring-cloud-starter-kubernetes-client-loadbalancer` or Eureka required, and no RBAC permissions to the Kubernetes API are needed. See [design/adr-002-plain-kubernetes-dns-service-calls.md](design/adr-002-plain-kubernetes-dns-service-calls.md).
 
 ---
 
@@ -694,7 +677,7 @@ make us-run
 make us-dev
 ```
 
-> The `local` Spring profile disables Kubernetes DiscoveryClient (`spring.cloud.kubernetes.enabled=false`) and falls back to static `application.yaml` URLs — no cluster required.
+> The `local` Spring profile is no longer needed for service discovery (DiscoveryClient has been removed). Services use plain Kubernetes Service DNS in-cluster, and static `application.yaml` defaults for local development — no cluster required.
 
 **Get a token and call the API:**
 

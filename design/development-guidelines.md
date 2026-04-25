@@ -116,10 +116,8 @@ Shared library (not a Spring Boot app — no `@SpringBootApplication`). Contains
 </dependency>
 
 <!-- Service discovery + load balancer (Kubernetes) -->
-<dependency>
-    <groupId>org.springframework.cloud</groupId>
-    <artifactId>spring-cloud-starter-kubernetes-client-loadbalancer</artifactId>
-</dependency>
+<!-- Removed: use plain Kubernetes Service DNS (http://service-name:port) instead.
+     See design/adr-002-plain-kubernetes-dns-service-calls.md -->
 
 <!-- Resilience4j -->
 <dependency>
@@ -302,7 +300,7 @@ public interface OrderServiceClient {
 }
 ```
 
-### Bean configuration (with load balancing + OAuth2 token)
+### Bean configuration (with plain K8s DNS + OAuth2 token)
 
 ```java
 @Configuration
@@ -314,7 +312,7 @@ public class HttpClientConfig {
             OAuth2AuthorizedClientManager authorizedClientManager) {
 
         RestClient restClient = builder
-            .baseUrl("lb://order-service")
+            .baseUrl("http://order-service:8082")
             .requestInterceptor(new OAuth2ClientHttpRequestInterceptor(authorizedClientManager))
             .build();
 
@@ -328,11 +326,10 @@ public class HttpClientConfig {
 ```
 
 Key rules:
-- Use `lb://service-name` URIs — Spring Cloud LoadBalancer resolves via **Kubernetes DiscoveryClient** (`spring-cloud-starter-kubernetes-client-loadbalancer`), which reads `Service` and `Endpoints` resources from the Kubernetes API. No Eureka server is used.
-- Each service requires a `ServiceAccount` with RBAC permissions to `get/list/watch` on `services`, `endpoints`, and `pods` in its namespace (see [Section 16](#16-kubernetes-deployment))
-- In the `local` Spring profile (`spring.cloud.kubernetes.enabled=false`), `lb://` falls back to a static URL configured via `spring.cloud.discovery.client.simple.instances`
+- Use **plain Kubernetes Service DNS** `http://service-name:port` — kube-proxy handles server-side load balancing. No `spring-cloud-starter-kubernetes-client-loadbalancer`, no Eureka, no RBAC permissions to the Kubernetes API. See [adr-002-plain-kubernetes-dns-service-calls.md](adr-002-plain-kubernetes-dns-service-calls.md).
 - Inject an `OAuth2ClientHttpRequestInterceptor` to attach a Client Credentials token on every request
 - Use `RestClient` (not `RestTemplate` or `WebClient`) — it is the preferred synchronous client in Spring Boot 4
+- For local development, set the base URL via an environment-specific property (e.g., `services.order-service.url: http://localhost:8082`)
 
 ---
 
@@ -1117,10 +1114,9 @@ When adding a new microservice, ensure all of the following are in place before 
 - [ ] `spring.threads.virtual.enabled: true` in `application.yaml`
 
 ### Infrastructure
-- [ ] `spring-cloud-starter-kubernetes-client-loadbalancer` dependency present
-- [ ] `spring.cloud.kubernetes.discovery.enabled: true` in `application.yaml`
-- [ ] `ServiceAccount` defined in `k8s/{service}/serviceaccount.yaml` with discovery RBAC role bound
-- [ ] `local` Spring profile disables Kubernetes discovery (`spring.cloud.kubernetes.enabled: false`) and provides static URLs for local dev
+- [ ] `ServiceAccount` defined in `k8s/{service}/serviceaccount.yaml`
+- [ ] Service-to-service base URLs configured via environment-specific properties (default `http://localhost:{port}` for local dev)
+- [ ] No `spring-cloud-starter-kubernetes-client-loadbalancer` or `lb://` URIs — use plain Kubernetes Service DNS
 
 ### Security
 - [ ] OAuth2 Resource Server configured with Keycloak JWKS URI

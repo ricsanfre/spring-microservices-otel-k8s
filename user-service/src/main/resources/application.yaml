@@ -32,11 +32,6 @@ spring:
     virtual:
       enabled: true
 
-  cloud:
-    kubernetes:
-      discovery:
-        enabled: true
-
 server:
   port: 8085
 

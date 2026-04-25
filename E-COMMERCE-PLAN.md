@@ -16,7 +16,7 @@
 | User profiles database | PostgreSQL |
 | Notification service storage | Stateless (no DB) |
 | Async messaging | Apache Kafka — topic `order.created.v1` |
-| Service discovery | Kubernetes native — `spring-cloud-starter-kubernetes-client-loadbalancer` |
+| Service discovery | Plain Kubernetes Service DNS — `http://service-name:port` via CoreDNS + kube-proxy |
 | Entry point / API Gateway | Envoy Gateway (Kubernetes Gateway API) |
 | Authentication / Authorization | OAuth2.0 + Keycloak (OIDC) |
 | Observability | OpenTelemetry → Grafana LGTM (traces, metrics, logs) |
@@ -54,7 +54,7 @@ Produce a `flowchart TD` diagram covering:
 
 - External client → Keycloak (get JWT) → Envoy Gateway (Bearer token)
 - Envoy Gateway validates JWT via Keycloak JWKS `SecurityPolicy`, then routes directly to Kubernetes services via `HTTPRoute`
-- All business services use Spring Cloud Kubernetes DiscoveryClient; synchronous inter-service calls use `lb://` URIs
+- All business services use plain Kubernetes Service DNS (`http://service-name:port`) for synchronous inter-service calls; kube-proxy handles server-side load balancing
 - Order Service publishes to Kafka `order.created.v1`; Notification Service consumes
 - Reviews Service calls Order Service + Product Service via Client Credentials (sync validation)
 - Database associations:
@@ -197,7 +197,6 @@ reviews-service → Keycloak (client_id + client_secret) → service account JWT
 |---|---|---|
 | Resource Server (all services) | `spring-boot-starter-oauth2-resource-server` | `spring.security.oauth2.resourceserver.jwt.jwk-set-uri` |
 | OAuth2 Client (service accounts) | `spring-boot-starter-oauth2-client` | `grant-type: client_credentials` per registration |
-| Kubernetes service discovery (all services) | `spring-cloud-starter-kubernetes-client-loadbalancer` | `spring.cloud.kubernetes.discovery.enabled=true` |
 
 ---
 
@@ -321,7 +320,7 @@ k8s/
 │   ├── deployment.yaml
 │   ├── service.yaml
 │   ├── configmap.yaml
-│   └── serviceaccount.yaml    ← RBAC for Spring Cloud Kubernetes DiscoveryClient
+│   └── serviceaccount.yaml
 ├── order-service/           ← (same files)
 ├── reviews-service/
 ├── notification-service/
@@ -358,9 +357,9 @@ kubectl apply -f k8s/user-service/
 kubectl apply -f k8s/envoy-gateway/
 ```
 
-#### Spring Cloud Kubernetes DiscoveryClient
+#### Service-to-Service Calls
 
-Each service includes `spring-cloud-starter-kubernetes-client-loadbalancer`. This allows `lb://service-name` URIs in `RestClient` to be resolved against Kubernetes `Service` resources instead of Eureka. A `ServiceAccount` with RBAC `get/list/watch` on `services`, `endpoints`, and `pods` is required for each deployment.
+Services call each other using plain Kubernetes Service DNS (`http://service-name:port`). kube-proxy handles server-side load balancing. No `spring-cloud-starter-kubernetes-client-loadbalancer` or RBAC API access required. See [design/adr-002-plain-kubernetes-dns-service-calls.md](design/adr-002-plain-kubernetes-dns-service-calls.md).
 
 ---
 
@@ -431,7 +430,7 @@ Each service includes `spring-cloud-starter-kubernetes-client-loadbalancer`. Thi
 - [ ] No references to Eureka or Spring Cloud Gateway in documentation
 - [ ] k3d cluster creation command includes port mappings for Envoy Gateway and Keycloak
 - [ ] Envoy Gateway `SecurityPolicy` references Keycloak JWKS endpoint
-- [ ] All services have `ServiceAccount` RBAC for Kubernetes DiscoveryClient
+- [ ] Service-to-service calls use plain Kubernetes Service DNS (`http://service-name:port`) — no DiscoveryClient, no RBAC
 - [ ] CI workflow uses `dorny/paths-filter` change detection with matrix build
 - [ ] `jib:build` step authenticates to `ghcr.io` via `GITHUB_TOKEN` (no extra secrets)
 - [ ] CD workflow creates k3d cluster + installs Envoy Gateway + deploys via `envsubst`
