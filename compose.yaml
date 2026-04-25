@@ -2,12 +2,19 @@
 # E-Commerce platform — local dev Docker Compose
 #
 # Profiles (use --profile <name> to activate):
+#   infra           Shared databases: PostgreSQL (all service DBs) + MongoDB
+#   auth            Keycloak IAM (e-commerce realm)
 #   observability   Grafana LGTM (Grafana + Prometheus + Loki + Tempo + OTel)
-#   user-service    PostgreSQL (users DB) + Keycloak (e-commerce realm)
 #
-# Quick-start via Makefile:
-#   make us-infra-up    # starts both profiles
+# Quick-start via Makefile (user-service example):
+#   make us-infra-up    # starts: infra + auth + observability profiles
 #   make us-infra-down  # stops containers (volumes preserved)
+#
+# Architecture note:
+#   A single PostgreSQL instance hosts one database per service (users, orders, …).
+#   A single MongoDB instance hosts one database per service (products, reviews, …).
+#   Each service connects with its own credentials to its own database, preserving
+#   the database-per-service isolation principle without spawning separate containers.
 # ──────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -28,29 +35,46 @@ services:
       retries: 10
       start_period: 30s
 
-  # ── user-service infrastructure ─────────────────────────────────────────────
-  postgres-users:
+  # ── Shared databases ────────────────────────────────────────────────────────
+  postgres:
     image: postgres:16-alpine
-    profiles: [user-service]
+    profiles: [infra]
     environment:
-      POSTGRES_DB: users
-      POSTGRES_USER: users
-      POSTGRES_PASSWORD: users
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres     # default admin DB; service DBs created by init script
     ports:
-      - "5433:5432"    # host port 5433 matches application.yaml default
+      - "5432:5432"
     volumes:
-      - postgres-users-data:/var/lib/postgresql/data
+      - ./docker/postgres:/docker-entrypoint-initdb.d:ro   # runs init-databases.sh on first start
+      - postgres-data:/var/lib/postgresql/data
     networks: [e-commerce]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U users -d users"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
 
+  mongo:
+    image: mongo:7
+    profiles: [infra]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks: [e-commerce]
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand(\"ping\").ok' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── IAM ─────────────────────────────────────────────────────────────────────
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
-    profiles: [user-service]
+    profiles: [auth]
     command: start-dev --import-realm
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
@@ -76,4 +100,5 @@ networks:
     driver: bridge
 
 volumes:
-  postgres-users-data:
+  postgres-data:
+  mongo-data:

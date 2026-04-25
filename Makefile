@@ -43,10 +43,10 @@ us-image: us-build ## Build user-service container image to local Docker daemon 
 	    --no-transfer-progress
 
 # ──────────────────────────────────────────────────────────────────────────────
-# user-service — infrastructure  (Docker Compose profiles: user-service + observability)
+# user-service — infrastructure  (Docker Compose profiles: infra + auth + observability)
 # ──────────────────────────────────────────────────────────────────────────────
 
-_COMPOSE_PROFILES := --profile user-service --profile observability
+_COMPOSE_PROFILES := --profile infra --profile auth --profile observability
 
 us-infra-up: ## Start infrastructure: postgres, keycloak, grafana-lgtm (waits for healthy)
 	docker compose $(_COMPOSE_PROFILES) up -d --wait

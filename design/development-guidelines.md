@@ -1146,18 +1146,23 @@ The root `Makefile` and `compose.yaml` replace manual Docker Compose and Keycloa
 
 ### Docker Compose profiles
 
-`compose.yaml` uses Docker Compose **profiles** so that starting one service's infrastructure does not pull in unrelated containers. Each service has a dedicated profile matching its name. The `observability` profile is shared across all services.
+`compose.yaml` uses Docker Compose **profiles** so that starting one service's infrastructure does not pull in unrelated containers. Three profiles are shared across all services; no per-service profile is needed.
 
 ```
 compose.yaml
   profiles:
+    infra             → postgres (all service DBs, port 5432) + mongo (port 27017)
+    auth              → keycloak (port 8180) — realm e-commerce auto-imported
     observability     → grafana/otel-lgtm (Grafana, Loki, Tempo, Prometheus)
-    user-service      → postgres-users (port 5433) + keycloak (port 8180)
-    product-service   → mongodb (port 27017)                         [planned]
-    order-service     → postgres-orders (port 5432) + kafka           [planned]
-    reviews-service   → (uses mongodb + kafka profiles)               [planned]
-    notification-svc  → (uses kafka profile)                          [planned]
 ```
+
+Future additions to `infra` as services are implemented:
+
+```
+    infra             → + kafka (port 9092)                           [planned]
+```
+
+> **Database-per-service within a shared instance:** `postgres` hosts one database per service (`users`, `orders`, …). `mongo` hosts one database per service (`products`, `reviews`, …). Each service connects with its own user credentials to its own named database. The `docker/postgres/init-databases.sh` script creates all databases and users on first container start. This preserves full isolation at the database level without multiple container instances.
 
 ### Keycloak realm auto-import
 
@@ -1192,12 +1197,14 @@ Each service's `application.yaml` defaults to values that match the compose netw
 
 | Env var | Default value | Compose service |
 |---------|---------------|-----------------|
-| `DB_HOST` | `localhost` | map host port in compose |
-| `DB_PORT` | service-specific | e.g. `5433` for users |
+| `DB_HOST` | `localhost` | `postgres` on host |
+| `DB_PORT` | `5432` | standard PostgreSQL port |
+| `DB_NAME` | service-specific | e.g. `users` for user-service |
+| `DB_USER` | service-specific | e.g. `users` for user-service |
 | `KEYCLOAK_URL` | `http://localhost:8180` | `keycloak` on host |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | `grafana-lgtm` on host |
 
-When running the service JAR locally with `make us-run`, these defaults point at the mapped host ports. When running the service as a Docker container inside the compose network, override them with the Docker service names (`DB_HOST=postgres-users`, `KEYCLOAK_URL=http://keycloak:8080`, etc.).
+When running the service JAR locally with `make us-run`, these defaults point at the mapped host ports. When running the service as a Docker container inside the compose network, override them with the Docker service names (`DB_HOST=postgres`, `KEYCLOAK_URL=http://keycloak:8080`, etc.).
 
 ### Complete local dev session
 

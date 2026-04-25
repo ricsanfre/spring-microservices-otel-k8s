@@ -400,14 +400,15 @@ For local development without Kubernetes, all infrastructure runs via Docker Com
 | Container | Image | Host Port | Compose Profile | Description |
 |-----------|-------|-----------|-----------------|-------------|
 | `grafana-lgtm` | `grafana/otel-lgtm:latest` | 3000, 4317, 4318 | `observability` | Observability stack (Loki, Tempo, Prometheus, Grafana) |
-| `postgres-users` | `postgres:16-alpine` | 5433 | `user-service` | PostgreSQL for user-service |
-| `keycloak` | `quay.io/keycloak/keycloak:26.0` | 8180 | `user-service` | OAuth2 / OIDC IAM — realm `e-commerce` auto-imported |
+| `postgres` | `postgres:16-alpine` | 5432 | `infra` | Single PostgreSQL instance — one database per service |
+| `mongo` | `mongo:7` | 27017 | `infra` | Single MongoDB instance — one database per service |
+| `keycloak` | `quay.io/keycloak/keycloak:26.0` | 8180 | `auth` | OAuth2 / OIDC IAM — realm `e-commerce` auto-imported |
 
-> **Profiles grow with services:** As each microservice is implemented, its required containers (PostgreSQL, MongoDB, Kafka) are added to `compose.yaml` under a matching profile. Running `make us-infra-up` starts only the containers needed for user-service — not the entire stack.
+> **Profiles:** `infra` starts the shared databases (PostgreSQL + MongoDB); `auth` starts Keycloak; `observability` starts the Grafana LGTM stack. All three are started together via `make us-infra-up`.
 
 > **Keycloak realm auto-import:** `docker/keycloak/realm-e-commerce.json` is volume-mounted into Keycloak's import directory. On first start Keycloak creates realm `e-commerce` with roles, clients, test users, and JWT protocol mappers automatically — no manual Admin Console steps required.
 
-> **Database-per-service:** Each service owns its PostgreSQL instance exclusively — a core microservice isolation principle.
+> **Database-per-service isolation:** Each service connects to its own named database within the shared PostgreSQL (or MongoDB) instance using dedicated credentials. The `docker/postgres/init-databases.sh` init script creates all databases and users on first container start. This preserves the database-per-service isolation principle while avoiding the overhead of multiple container instances.
 
 ---
 
