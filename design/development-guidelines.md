@@ -22,8 +22,9 @@
 13. [Testing Strategy](#13-testing-strategy)
 14. [Virtual Threads](#14-virtual-threads)
 15. [Quick Reference Checklist](#15-quick-reference-checklist)
-16. [Kubernetes Deployment](#16-kubernetes-deployment)
-17. [CI/CD — GitHub Actions](#17-cicd--github-actions)
+16. [Local Development Workflow (Docker Compose + Makefile)](#16-local-development-workflow-docker-compose--makefile)
+17. [Kubernetes Deployment](#17-kubernetes-deployment)
+18. [CI/CD — GitHub Actions](#18-cicd--github-actions)
 
 ---
 
@@ -1134,11 +1135,90 @@ When adding a new microservice, ensure all of the following are in place before 
 ### Testing
 - [ ] Unit tests for all service-layer methods (> 80% branch coverage)
 - [ ] Integration test with TestContainers `@ServiceConnection` for primary DB / broker
-- [ ] Security role tests (`@WithMockUser`) for at least one protected endpoint
+- [ ] Security role tests using `jwt()` MockMvc post-processor + `@MockitoBean JwtDecoder` for at least one protected endpoint (see §13)
+- [ ] `spring-boot-webmvc-test` and `spring-security-test` in test scope dependencies
 
 ---
 
-## 16. Kubernetes Deployment
+## 16. Local Development Workflow (Docker Compose + Makefile)
+
+The root `Makefile` and `compose.yaml` replace manual Docker Compose and Keycloak setup steps. Follow the pattern below when implementing each new microservice.
+
+### Docker Compose profiles
+
+`compose.yaml` uses Docker Compose **profiles** so that starting one service's infrastructure does not pull in unrelated containers. Each service has a dedicated profile matching its name. The `observability` profile is shared across all services.
+
+```
+compose.yaml
+  profiles:
+    observability     → grafana/otel-lgtm (Grafana, Loki, Tempo, Prometheus)
+    user-service      → postgres-users (port 5433) + keycloak (port 8180)
+    product-service   → mongodb (port 27017)                         [planned]
+    order-service     → postgres-orders (port 5432) + kafka           [planned]
+    reviews-service   → (uses mongodb + kafka profiles)               [planned]
+    notification-svc  → (uses kafka profile)                          [planned]
+```
+
+### Keycloak realm auto-import
+
+Keycloak is started with `start-dev --import-realm`. The realm JSON file is volume-mounted at `/opt/keycloak/data/import/`. On first startup Keycloak automatically creates the realm with all clients, roles, test users, and JWT protocol mappers. **No manual Admin Console configuration is required.**
+
+Realm files live in `docker/keycloak/`. Add or update realm clients in the JSON file as new services are implemented.
+
+### Makefile pattern (per service)
+
+Makefile targets follow the prefix convention `<service-abbrev>-<action>`:
+
+| Target | Description |
+|--------|-------------|
+| `us-build` | Compile + package JAR (`-DskipTests`) |
+| `us-test` | Run unit + integration tests (Testcontainers — Docker required) |
+| `us-image` | Build container image to local Docker daemon via Jib |
+| `us-infra-up` | Start infra containers with healthcheck wait (`--wait`) |
+| `us-infra-down` | Stop containers, keep named volumes |
+| `us-infra-clean` | Stop containers **and** delete data volumes |
+| `us-infra-logs` | Tail infra container logs |
+| `us-infra-ps` | Show container status |
+| `us-run` | Build JAR then run with Spring profile `local` |
+| `us-dev` | `us-infra-up` + `us-run` in sequence |
+| `us-token` | Fetch user access token via password grant (needs `jq`) |
+| `us-token-sa` | Fetch service-account token via client credentials (needs `jq`) |
+
+Add analogous targets (`ps-*`, `os-*`, …) for each new service following the same structure.
+
+### Environment variable defaults
+
+Each service's `application.yaml` defaults to values that match the compose network:
+
+| Env var | Default value | Compose service |
+|---------|---------------|-----------------|
+| `DB_HOST` | `localhost` | map host port in compose |
+| `DB_PORT` | service-specific | e.g. `5433` for users |
+| `KEYCLOAK_URL` | `http://localhost:8180` | `keycloak` on host |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | `grafana-lgtm` on host |
+
+When running the service JAR locally with `make us-run`, these defaults point at the mapped host ports. When running the service as a Docker container inside the compose network, override them with the Docker service names (`DB_HOST=postgres-users`, `KEYCLOAK_URL=http://keycloak:8080`, etc.).
+
+### Complete local dev session
+
+```bash
+# Start everything and run user-service
+make us-dev
+
+# In another terminal — get a token and test an endpoint
+TOKEN=$(make -s us-token)
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me | jq .
+
+# Tear down (preserves postgres data)
+make us-infra-down
+
+# Hard reset (destroys all data)
+make us-infra-clean
+```
+
+---
+
+## 17. Kubernetes Deployment
 
 ### Local Kubernetes environment — k3d
 
@@ -1351,7 +1431,7 @@ Start services with `-Dspring-boot.run.profiles=local` to activate this profile.
 
 ---
 
-## 17. CI/CD — GitHub Actions
+## 18. CI/CD — GitHub Actions
 
 ### Pipeline overview
 

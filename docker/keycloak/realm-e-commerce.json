@@ -1,0 +1,125 @@
+{
+  "realm": "e-commerce",
+  "displayName": "E-Commerce Platform",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "defaultSignatureAlgorithm": "RS256",
+
+  "roles": {
+    "realm": [
+      {
+        "name": "user",
+        "description": "Standard customer role"
+      },
+      {
+        "name": "service-account",
+        "description": "Internal service-to-service calls (resolveUser endpoint)"
+      }
+    ]
+  },
+
+  "clients": [
+    {
+      "clientId": "e-commerce-web",
+      "name": "E-Commerce Web App",
+      "description": "Public client — browser / SPA logins",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:*",
+        "http://127.0.0.1:*"
+      ],
+      "webOrigins": ["+"],
+      "protocolMappers": [
+        {
+          "name": "realm-roles-flat",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "claim.name": "roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "e-commerce-service",
+      "name": "E-Commerce Service Client (M2M)",
+      "description": "Confidential client for service-account credentials flow",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "e-commerce-service-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "realm-roles-flat",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "claim.name": "roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+
+  "users": [
+    {
+      "username": "testuser",
+      "enabled": true,
+      "email": "testuser@example.com",
+      "firstName": "Test",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["user"]
+    },
+    {
+      "username": "otheruser",
+      "enabled": true,
+      "email": "otheruser@example.com",
+      "firstName": "Other",
+      "lastName": "Person",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["user"]
+    },
+    {
+      "username": "service-account-e-commerce-service",
+      "enabled": true,
+      "email": "service-account-e-commerce-service@placeholder.org",
+      "serviceAccountClientId": "e-commerce-service",
+      "realmRoles": ["service-account"]
+    }
+  ]
+}

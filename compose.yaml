@@ -1,0 +1,79 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# E-Commerce platform — local dev Docker Compose
+#
+# Profiles (use --profile <name> to activate):
+#   observability   Grafana LGTM (Grafana + Prometheus + Loki + Tempo + OTel)
+#   user-service    PostgreSQL (users DB) + Keycloak (e-commerce realm)
+#
+# Quick-start via Makefile:
+#   make us-infra-up    # starts both profiles
+#   make us-infra-down  # stops containers (volumes preserved)
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Observability stack ─────────────────────────────────────────────────────
+  grafana-lgtm:
+    image: grafana/otel-lgtm:latest
+    profiles: [observability]
+    ports:
+      - "3000:3000"    # Grafana UI
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    networks: [e-commerce]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ── user-service infrastructure ─────────────────────────────────────────────
+  postgres-users:
+    image: postgres:16-alpine
+    profiles: [user-service]
+    environment:
+      POSTGRES_DB: users
+      POSTGRES_USER: users
+      POSTGRES_PASSWORD: users
+    ports:
+      - "5433:5432"    # host port 5433 matches application.yaml default
+    volumes:
+      - postgres-users-data:/var/lib/postgresql/data
+    networks: [e-commerce]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U users -d users"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    profiles: [user-service]
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"   # exposes /health/ready on management port 9000
+    ports:
+      - "8180:8080"    # host port 8180 matches KEYCLOAK_URL default
+    volumes:
+      - ./docker/keycloak:/opt/keycloak/data/import:ro
+    networks: [e-commerce]
+    healthcheck:
+      # Keycloak 26 image is based on UBI9-micro (no curl/wget).
+      # Use bash /dev/tcp to call the Quarkus management health endpoint (port 9000).
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && cat <&3 | grep -q UP"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+
+# ── Networks & volumes ─────────────────────────────────────────────────────────
+networks:
+  e-commerce:
+    driver: bridge
+
+volumes:
+  postgres-users-data:

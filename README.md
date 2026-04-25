@@ -395,20 +395,19 @@ All services export traces, metrics, and logs via the **OTLP protocol** to the G
 
 ### Local Development — Docker Compose
 
-For local development without Kubernetes, all infrastructure runs via Docker Compose and services run directly with `mvn spring-boot:run`.
+For local development without Kubernetes, all infrastructure runs via Docker Compose and services run directly with `mvn spring-boot:run` (via `make`). `compose.yaml` uses **profiles** so each microservice activates only the containers it needs.
 
-| Container | Image | Host Port | Description |
-|-----------|-------|-----------|-------------|
-| `keycloak` | `quay.io/keycloak/keycloak:latest` | 8180 | OAuth2 / OIDC IAM |
-| `kafka` | `apache/kafka:latest` | 9092 | Message broker (KRaft mode — no Zookeeper) |
-| `mongodb` | `mongo:7` | 27017 | Shared MongoDB for products and reviews |
-| `db-orders` | `postgres:16` | 5432 | PostgreSQL for order-service |
-| `db-users` | `postgres:16` | 5433 | PostgreSQL for user-service |
-| `grafana-lgtm` | `grafana/otel-lgtm:latest` | 3000, 4317, 4318 | Observability stack (Loki, Tempo, Prometheus, Grafana) |
+| Container | Image | Host Port | Compose Profile | Description |
+|-----------|-------|-----------|-----------------|-------------|
+| `grafana-lgtm` | `grafana/otel-lgtm:latest` | 3000, 4317, 4318 | `observability` | Observability stack (Loki, Tempo, Prometheus, Grafana) |
+| `postgres-users` | `postgres:16-alpine` | 5433 | `user-service` | PostgreSQL for user-service |
+| `keycloak` | `quay.io/keycloak/keycloak:26.0` | 8180 | `user-service` | OAuth2 / OIDC IAM — realm `e-commerce` auto-imported |
 
-> **Database-per-service:** `db-orders` and `db-users` are independent PostgreSQL instances. Each service has exclusive ownership of its schema — a core microservice isolation principle.
+> **Profiles grow with services:** As each microservice is implemented, its required containers (PostgreSQL, MongoDB, Kafka) are added to `compose.yaml` under a matching profile. Running `make us-infra-up` starts only the containers needed for user-service — not the entire stack.
 
-> **Keycloak in production:** The default dev mode uses an embedded H2 database. For production, provision a dedicated `db-keycloak` PostgreSQL container.
+> **Keycloak realm auto-import:** `docker/keycloak/realm-e-commerce.json` is volume-mounted into Keycloak's import directory. On first start Keycloak creates realm `e-commerce` with roles, clients, test users, and JWT protocol mappers automatically — no manual Admin Console steps required.
+
+> **Database-per-service:** Each service owns its PostgreSQL instance exclusively — a core microservice isolation principle.
 
 ---
 
@@ -515,50 +514,69 @@ rules:
 
 ## How to Run
 
-### Option A — Local Development (Docker Compose)
+### Option A — Local Development (Docker Compose + Makefile)
 
 #### Prerequisites
-- Docker & Docker Compose
+- Docker & Docker Compose v2
 - Java 25+
 - Maven 3.9+
+- `curl`, `jq` (token acquisition targets)
 
-#### 1. Start Infrastructure
+The root `Makefile` provides per-service targets. Run `make help` to see all targets.
 
-```bash
-docker compose up -d
-```
-
-Starts: Kafka, MongoDB, PostgreSQL (×2), Keycloak, and Grafana LGTM.
-
-#### 2. Configure Keycloak
-
-1. Open `http://localhost:8180` → Admin Console (`admin` / `admin`)
-2. Create realm: **`e-commerce`**
-3. Create one confidential client per service (enable *Service Accounts Enabled*)
-4. Create a test user and assign the `USER` role
-5. Update each service's `application.yaml` with its `client-id` and `client-secret`
-
-#### 3. Start Business Services
+#### user-service
 
 ```bash
-# Any order — Kubernetes discovery is disabled in local dev profile
-cd user-service         && mvn spring-boot:run -Dspring-boot.run.profiles=local &
-cd product-service      && mvn spring-boot:run -Dspring-boot.run.profiles=local &
-cd order-service        && mvn spring-boot:run -Dspring-boot.run.profiles=local &
-cd reviews-service      && mvn spring-boot:run -Dspring-boot.run.profiles=local &
-cd notification-service && mvn spring-boot:run -Dspring-boot.run.profiles=local &
+# 1. Start infrastructure (postgres-users + keycloak + grafana-lgtm)
+#    Blocks until all healthchecks pass (~60–90 s on first run)
+make us-infra-up
+
+# 2. Build JAR and run with Spring profile 'local'
+#    (disables Kubernetes discovery; uses static URLs)
+make us-run
+
+# Shortcut: infra-up + run in one command
+make us-dev
 ```
 
-> The `local` Spring profile disables Kubernetes DiscoveryClient (`spring.cloud.kubernetes.enabled=false`) and falls back to static `application.yaml` URLs.
+> The `local` Spring profile disables Kubernetes DiscoveryClient (`spring.cloud.kubernetes.enabled=false`) and falls back to static `application.yaml` URLs — no cluster required.
 
-#### 4. Access Points (local dev)
+**Get a token and call the API:**
+
+```bash
+# User token (password grant — testuser / password)
+TOKEN=$(make -s us-token)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me
+
+# Service-account token (client credentials — for /users/resolve)
+SA_TOKEN=$(make -s us-token-sa)
+curl -H "Authorization: Bearer $SA_TOKEN" \
+     "http://localhost:8085/users/resolve?idp_subject=<sub>"
+```
+
+**Access points:**
 
 | URL | Description |
 |-----|-------------|
 | `http://localhost:8081/swagger-ui.html` | product-service Swagger UI |
 | `http://localhost:8082/swagger-ui.html` | order-service Swagger UI |
-| `http://localhost:8180` | Keycloak Admin Console |
+| `http://localhost:8180/swagger-ui.html` | Keycloak Admin Console |
 | `http://localhost:3000` | Grafana Dashboards |
+
+**Keycloak test accounts (auto-configured via realm import):**
+
+| Username | Password | Roles |
+|----------|----------|-------|
+| `testuser` | `password` | `user` |
+| `otheruser` | `password` | `user` |
+| `e-commerce-service` (client) | `e-commerce-service-secret` | `service-account` (service account) |
+
+**Stopping infrastructure:**
+
+```bash
+make us-infra-down    # stop containers, keep data volumes
+make us-infra-clean   # stop containers AND delete data volumes
+```
 
 ---
 
