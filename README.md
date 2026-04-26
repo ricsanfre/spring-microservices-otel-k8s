@@ -662,9 +662,13 @@ k8s/
 │   ├── kustomization.yaml
 │   ├── gateway-class.yaml
 │   ├── gateway.yaml                    ← HTTP redirect + HTTPS TLS termination
-│   ├── httproutes.yaml                 ← HTTPRoute per business service
+│   ├── httproutes.yaml                 ← HTTPRoute per service (frontend has no SecurityPolicy)
 │   └── security-policy.yaml           ← JWT SecurityPolicy (Keycloak JWKS)
 └── apps/                               ← Kustomize apps — business services
+    ├── frontend-service/
+    │   ├── base/                       ← Deployment, Service, Secret ref (AUTH_SECRET, AUTH_KEYCLOAK_SECRET)
+    │   └── overlays/
+    │       └── staging/               ← image tag patch + AUTH_KEYCLOAK_ISSUER env
     └── user-service/
         ├── base/                       ← Deployment, Service, ConfigMap, ServiceAccount, RBAC
         └── overlays/
@@ -694,6 +698,7 @@ Services call each other using plain Kubernetes Service DNS (`http://service-nam
 - Docker & Docker Compose v2
 - Java 25+
 - Maven 3.9+
+- Node.js 22+ and npm 10+
 - `curl`, `jq` (token acquisition targets)
 
 The root `Makefile` provides per-service targets. Run `make help` to see all targets.
@@ -755,6 +760,54 @@ make us-infra-clean   # stop containers AND delete data volumes
 
 ---
 
+#### frontend-service
+
+```bash
+# 1. Copy the example env file and fill in required values
+cd frontend-service
+cp .env.local.example .env.local
+# Edit .env.local:
+#   AUTH_SECRET=<openssl rand -base64 32>
+#   AUTH_KEYCLOAK_SECRET=<e-commerce-web client secret from Keycloak>
+
+# 2. Install dependencies
+npm install
+
+# 3. Start the dev server on http://localhost:3001
+npm run dev
+```
+
+Make sure Keycloak is running (`make us-infra-up`) before starting the frontend — Auth.js needs to reach the Keycloak OIDC discovery endpoint at `http://localhost:8180/realms/e-commerce`.
+
+**Frontend source layout:**
+
+```
+frontend-service/
+├── .env.local.example     ← copy to .env.local; fill AUTH_SECRET + AUTH_KEYCLOAK_SECRET
+├── Dockerfile             ← multi-stage build; output:standalone for k8s
+├── next.config.ts         ← output:"standalone" enabled
+├── package.json           ← Next.js 15, next-auth v5, React 19; dev port 3001
+└── src/
+    ├── auth.ts            ← Auth.js v5: Keycloak provider, JWT/session callbacks, token refresh
+    ├── middleware.ts      ← protects all routes (redirects to Keycloak login if no session)
+    ├── types/
+    │   └── next-auth.d.ts ← Session augmented with accessToken + error fields
+    ├── lib/
+    │   └── api.ts         ← apiFetch() — forwards Bearer JWT server-side to microservices
+    └── app/
+        ├── layout.tsx     ← root layout with Nav server component
+        ├── page.tsx       ← home page (welcome + links)
+        ├── api/auth/[...nextauth]/route.ts  ← Auth.js OIDC callback handler
+        ├── components/
+        │   └── nav.tsx    ← server component: shows user email + sign-out
+        ├── products/
+        │   └── page.tsx   ← server component: lists products from product-service
+        └── orders/
+            └── page.tsx   ← server component: lists user orders from order-service
+```
+
+---
+
 ### Option B — Kubernetes Staging (k3d)
 
 The staging environment runs a full **k3d** cluster (k3s inside Docker) on your laptop. The cluster definition lives in `k8s/k3d-cluster.yaml`. All services are exposed via the `.local.test` domain, which resolves automatically on the local machine.
@@ -769,6 +822,7 @@ The staging environment runs a full **k3d** cluster (k3s inside Docker) on your 
 | helm | 3.15+ |
 | kustomize | 5.x |
 | Java 25 + Maven 3.9+ | (for building service images) |
+| Node.js 22 + npm 10+ | (for building frontend-service image) |
 
 #### 1. Create the cluster
 
@@ -830,6 +884,12 @@ kubectl create secret generic mongodb-notifications-secret \
 kubectl create secret generic grafana-admin-secret \
   --from-literal=username=admin --from-literal=password=<CHANGE_ME> \
   --namespace monitoring
+
+# frontend-service — Auth.js session key + Keycloak BFF client secret
+kubectl create secret generic frontend-service-secret \
+  --from-literal=AUTH_SECRET=$(openssl rand -base64 32) \
+  --from-literal=AUTH_KEYCLOAK_SECRET=<e-commerce-web-client-secret> \
+  --namespace e-commerce
 ```
 
 #### 4. Deploy infrastructure resources
@@ -889,7 +949,7 @@ make k8s-up   # k3d-create + k8s-operators + k8s-infra
 
 ---
 
-*Built with Java 25 · Spring Boot 4 · Spring Cloud · Apache Kafka · MongoDB · PostgreSQL · Keycloak · Envoy Gateway · OpenTelemetry · k3d*
+*Built with Java 25 · Spring Boot 4 · Next.js 15 · Auth.js v5 · Apache Kafka · MongoDB · PostgreSQL · Keycloak · Envoy Gateway · OpenTelemetry · k3d*
 
 
 
