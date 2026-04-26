@@ -96,7 +96,7 @@ us-token: ## Fetch access token for testuser via password grant (requires jq)
 	@curl -sf -X POST \
 	    "http://localhost:8180/realms/e-commerce/protocol/openid-connect/token" \
 	    -H "Content-Type: application/x-www-form-urlencoded" \
-	    -d "grant_type=password&client_id=e-commerce-web&username=testuser&password=password" \
+	    -d "grant_type=password&client_id=e-commerce-web&username=testuser&password=password&scope=openid+profile+email+products:read+orders:read+orders:write+reviews:read+reviews:write+users:read" \
 	    | jq -r .access_token
 
 us-token-sa: ## Fetch service account token for e-commerce-service (requires jq)

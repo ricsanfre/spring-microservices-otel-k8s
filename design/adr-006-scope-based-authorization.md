@@ -90,40 +90,45 @@ Global baseline in `SecurityFilterChain`:
 
 ### Keycloak Implementation
 
-Scopes are defined as **client scopes** (`clientScopes[]`) at the realm level:
+Scopes are defined as **client scopes** (`clientScopes[]`) at the realm level. Resource scopes are
+configured as `optionalClientScopes` on `e-commerce-web` so they are not blindly granted to every
+authenticated user.
+
+**Role-to-scope promotion mechanism** — instead of adding resource scopes to `defaultClientScopes`
+(which grants them to all users), the realm uses two Keycloak features:
+
+1. **Client roles** on `e-commerce-web` — one atomic role per scope plus composite `customer` and
+   `admin` roles that bundle the appropriate atomic roles.
+2. **`clientScopeMappings`** — maps each atomic client role to its corresponding client scope object.
+   Keycloak automatically promotes matching optional scopes into the token for any user who holds the
+   role (directly or via a composite).
 
 ```json
-{
-  "name": "users:resolve",
-  "description": "Resolve IDP subject to internal user ID (M2M only)",
-  "protocol": "openid-connect",
-  "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "false" }
-}
+// roles.client.e-commerce-web (excerpt)
+{ "name": "customer", "composite": true,
+  "composites": { "client": { "e-commerce-web": [
+    "products:read", "orders:read", "orders:write",
+    "reviews:read", "reviews:write", "users:read"
+  ] } } }
+
+// clientScopeMappings (excerpt)
+"e-commerce-web": [
+  { "clientScope": "products:read", "roles": ["products:read"] },
+  { "clientScope": "orders:read",   "roles": ["orders:read"]   },
+  ...
+]
 ```
 
-Each client declares which scopes it can obtain via `defaultClientScopes` and
-`optionalClientScopes` — **no protocol mappers or realm roles are needed**:
-
+Users are assigned the composite role in `users[].clientRoles`:
 ```json
-{
-  "clientId": "e-commerce-web",
-  "defaultClientScopes": ["openid", "profile", "email", "products:read", "orders:read", "orders:write", "reviews:read", "reviews:write", "users:read"],
-  "optionalClientScopes": ["products:write"]
-}
+"clientRoles": { "e-commerce-web": ["customer"] }
 ```
 
-```json
-{
-  "clientId": "e-commerce-service",
-  "defaultClientScopes": ["users:resolve"]
-}
-```
+The `e-commerce-service` M2M client keeps `defaultClientScopes: ["users:resolve"]` — for the
+Client Credentials grant there is no human user, so role-based promotion is not applicable.
 
-The resulting JWT `scope` claim is a space-separated string (RFC 6749):
-
-```json
-{ "scope": "openid profile email products:read orders:read orders:write reviews:read reviews:write users:read" }
-```
+`fullScopeAllowed: false` is set on `e-commerce-web` to ensure Keycloak does not fall back to
+including all realm roles in the token.
 
 ---
 
@@ -169,13 +174,13 @@ The following files were updated as part of this ADR:
 
 | File | Change |
 |------|--------|
-| `docker/keycloak/realm-e-commerce.json` | Removed `"roles"` block + protocol mappers; added `"clientScopes"` + `defaultClientScopes` on clients |
+| `docker/keycloak/realm-e-commerce.json` | Removed `"roles"` block + protocol mappers; added `"clientScopes"` + `"roles.client.e-commerce-web"` (atomic + composite roles) + `"clientScopeMappings"` (role → scope promotion) + `optionalClientScopes` on `e-commerce-web` |
 | `user-service/.../SecurityConfig.java` | Removed custom `JwtAuthenticationConverter`; changed to `Customizer.withDefaults()` |
 | `user-service/.../UserController.java` | `@PreAuthorize("hasRole('service-account')")` → `@PreAuthorize("hasAuthority('SCOPE_users:resolve')")` |
 | `user-service/.../UserControllerIntegrationTest.java` | JWT helpers updated to `scope` claim + `SCOPE_` authorities |
 | `user-service/.../UserServiceTest.java` | JWT helper updated to `scope` claim |
 | `design/development-guidelines.md` | §9 SecurityConfig example updated; §13 mock JWT examples updated |
-| `design/keycloak-configuration.md` | Realm roles → Client Scopes; protocol mappers section removed |
+| `design/keycloak-configuration.md` | Realm roles → Client Scopes + Client Roles + clientScopeMappings; role-to-scope promotion mechanism documented |
 | `README.md` | Test accounts table: "Roles" → "Granted Scopes" |
 
 ---

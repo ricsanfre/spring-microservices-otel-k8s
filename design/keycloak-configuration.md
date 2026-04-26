@@ -13,7 +13,18 @@ flowchart TD
     subgraph REALM["Keycloak Realm: e-commerce"]
         direction TB
 
+        subgraph ROLES["Client Roles (e-commerce-web)"]
+            CR_C("customer\n(composite)")
+            CR_A("admin\n(composite)")
+            CR_P("products:read / products:write")
+            CR_O("orders:read / orders:write")
+            CR_R("reviews:read / reviews:write")
+            CR_U("users:read")
+            CR_N("notifications:receive")
+        end
+
         subgraph SCOPES["Client Scopes"]
+            S0("basic (sub + auth_time)")
             S1("products:read / products:write")
             S2("orders:read / orders:write")
             S3("reviews:read / reviews:write")
@@ -28,17 +39,34 @@ flowchart TD
         end
 
         subgraph USERS["Users"]
-            U1["testuser"]
-            U2["otheruser"]
+            U1["testuser\nclientRole: customer"]
+            U2["otheruser\nclientRole: customer"]
             U3["service-account-e-commerce-service\n(Keycloak service account)"]
         end
 
-        S1 -->|defaultClientScopes| C1
-        S2 -->|defaultClientScopes| C1
-        S3 -->|defaultClientScopes| C1
-        S4 -->|defaultClientScopes| C1
+        CR_C -->|composites| CR_P
+        CR_C -->|composites| CR_O
+        CR_C -->|composites| CR_R
+        CR_C -->|composites| CR_U
+        CR_A -->|composites| CR_C
+        CR_A -->|composites| CR_N
+
+        CR_P -->|clientScopeMappings| S1
+        CR_O -->|clientScopeMappings| S2
+        CR_R -->|clientScopeMappings| S3
+        CR_U -->|clientScopeMappings| S4
+        CR_N -->|clientScopeMappings| S6
+
+        S0 -->|defaultClientScopes| C1
+        S1 -->|optionalClientScopes| C1
+        S2 -->|optionalClientScopes| C1
+        S3 -->|optionalClientScopes| C1
+        S4 -->|optionalClientScopes| C1
         S5 -->|defaultClientScopes| C2
+        S6 -->|optionalClientScopes| C1
         C2 -->|owns service account| U3
+        U1 -->|assigned role| CR_C
+        U2 -->|assigned role| CR_C
     end
 
     Browser["Browser / SPA"]
@@ -46,7 +74,7 @@ flowchart TD
     Gateway["Envoy Gateway"]
 
     Browser -->|"Authorization Code + PKCE\n(redirect to Keycloak login)"| C1
-    C1 -->|"access_token (scope: openid … users:read)"| Browser
+    C1 -->|"access_token (scope: openid … products:read orders:* …)"| Browser
     Browser -->|"Bearer JWT"| Gateway
     Gateway -->|validates JWT via JWKS| REALM
     Gateway -->|forwards request + Bearer JWT| Service
@@ -96,16 +124,53 @@ See [ADR-006 — Scope-Based Authorization](adr-006-scope-based-authorization.md
 ### Scope Catalogue
 
 | Scope | Description | Granted to |
-|-------|-------------|-----------|
-| `products:read` | Read product catalog | `e-commerce-web` (default) |
+|-------|-------------|------------|
+| `basic` | `sub` (user UUID) + `auth_time` — required for lazy registration | `e-commerce-web` (default) |
+| `products:read` | Read product catalog | `e-commerce-web` (optional) |
 | `products:write` | Create/update products (admin) | `e-commerce-web` (optional) |
-| `orders:read` | Read own orders | `e-commerce-web` (default) |
-| `orders:write` | Place and update orders | `e-commerce-web` (default) |
-| `reviews:read` | Read product reviews | `e-commerce-web` (default) |
-| `reviews:write` | Submit and edit reviews | `e-commerce-web` (default) |
-| `users:read` | Read own user profile | `e-commerce-web` (default) |
+| `orders:read` | Read own orders | `e-commerce-web` (optional) |
+| `orders:write` | Place and update orders | `e-commerce-web` (optional) |
+| `reviews:read` | Read product reviews | `e-commerce-web` (optional) |
+| `reviews:write` | Submit and edit reviews | `e-commerce-web` (optional) |
+| `users:read` | Read own user profile | `e-commerce-web` (optional) |
 | `users:resolve` | Resolve IDP subject → internal user ID (M2M only) | `e-commerce-service` (default) |
 | `notifications:receive` | Receive notification events | `e-commerce-web` (optional) |
+
+> **Keycloak 26 — `basic` scope and the `sub` claim**: In Keycloak 26, the `sub` claim (user UUID)
+was moved out of the hard-coded token builder and into a dedicated `basic` client scope containing
+an `oidc-sub-mapper`. The `basic` scope must be defined in `clientScopes` and listed in
+`defaultClientScopes` of every client that needs the `sub` claim in its access token. Without it,
+`sub` is absent from the JWT, which breaks any service that uses it to identify users (e.g.,
+`user-service` lazy registration reads `sub` as `idp_subject`). This scope is **not auto-created**
+when importing a partial realm — it must be explicitly defined in the realm JSON.
+
+> **Note — Keycloak CE limitation**: Keycloak Community Edition does not natively support
+> "role → optional scope auto-promotion" via simple realm configuration. Keycloak's
+> `clientScopeMappings` controls which *roles* appear in the token when a scope is requested, not
+> the reverse. Achieving per-role scope differentiation (e.g., `customer` gets fewer scopes than
+> `admin`) requires Keycloak Authorization Services or a custom protocol mapper script, which adds
+> operational complexity. For this project the resource scopes are therefore `optionalClientScopes`
+> on `e-commerce-web` and the **SPA/client is responsible for explicitly requesting the scopes it
+> needs** in the `scope` parameter of each authorization or token request. This is the standard
+> OAuth2 mechanism for scope negotiation (RFC 6749 §3.3) and keeps scope control on the client side.
+>
+> The client roles (`customer`, `admin`) defined in the realm are kept for informational purposes and
+> future use if Authorization Services are enabled.
+
+### Client Roles on `e-commerce-web` *(informational)*
+
+| Role | Type | Includes |
+|------|------|----------|
+| `products:read` | atomic | — |
+| `products:write` | atomic | — |
+| `orders:read` | atomic | — |
+| `orders:write` | atomic | — |
+| `reviews:read` | atomic | — |
+| `reviews:write` | atomic | — |
+| `users:read` | atomic | — |
+| `notifications:receive` | atomic | — |
+| `customer` | composite | `products:read`, `orders:read`, `orders:write`, `reviews:read`, `reviews:write`, `users:read` |
+| `admin` | composite | all `customer` scopes + `products:write` + `notifications:receive` |
 
 ### Usage in services
 
@@ -137,11 +202,12 @@ standardFlowEnabled:    true    ← Authorization Code + PKCE
 implicitFlowEnabled:    false   ← disabled (deprecated, insecure)
 directAccessGrantsEnabled: true ← password grant — for local curl/Postman testing only
 serviceAccountsEnabled: false
+fullScopeAllowed:       false   ← client must explicitly request every scope it needs
 redirectUris:           http://localhost:*, http://127.0.0.1:*
 webOrigins:             + (same as redirectUris — CORS allowed)
-defaultClientScopes:    openid, profile, email, products:read, orders:read, orders:write,
-                        reviews:read, reviews:write, users:read
-optionalClientScopes:   products:write
+defaultClientScopes:    openid, basic, profile, email
+optionalClientScopes:   products:read, products:write, orders:read, orders:write,
+                        reviews:read, reviews:write, users:read, notifications:receive
 ```
 
 #### When is this used?
@@ -177,7 +243,9 @@ A browser-based SPA (React, Angular, etc.) uses this client to authenticate user
 6. SPA attaches access_token as Authorization: Bearer header on API calls.
 ```
 
-`directAccessGrantsEnabled: true` allows a password grant for local testing:
+`directAccessGrantsEnabled: true` allows a password grant for local testing. The SPA must include
+all the scopes it needs in the `scope` parameter — Keycloak only includes optional scopes that are
+explicitly requested:
 
 ```bash
 # Obtain a user token via password grant (dev/testing only)
@@ -186,9 +254,13 @@ curl -s -X POST http://localhost:8180/realms/e-commerce/protocol/openid-connect/
   -d "client_id=e-commerce-web" \
   -d "username=testuser" \
   -d "password=password" \
-  -d "scope=openid profile email users:read orders:read orders:write reviews:read reviews:write products:read" \
+  -d "scope=openid profile email products:read orders:read orders:write reviews:read reviews:write users:read" \
   | jq .access_token
 ```
+
+For the Authorization Code + PKCE flow the SPA passes the same `scope` string in the initial
+`/auth` redirect. Keycloak will only grant scopes that are listed in `optionalClientScopes` (or
+`defaultClientScopes`) on the client.
 
 #### JWT payload (user token from this client)
 
@@ -269,8 +341,9 @@ In Spring Boot, `OAuth2ClientHttpRequestInterceptor` handles this automatically 
 | Password | `password` |
 | Temporary password | No |
 
-A standard test customer account. The JWT issued for this user will contain the scopes granted by
-`e-commerce-web`'s `defaultClientScopes`. Use this account to simulate normal user flows.
+A standard test customer account. Assigned the `customer` client role on `e-commerce-web`
+(informational — used for future Authorization Services). The JWT will contain the scopes
+explicitly requested by the client: `products:read orders:read orders:write reviews:read reviews:write users:read`.
 
 ### `otheruser`
 
@@ -283,8 +356,8 @@ A standard test customer account. The JWT issued for this user will contain the 
 | Password | `password` |
 | Temporary password | No |
 
-A second test customer account. Useful for testing cross-user isolation (e.g., verifying that
-`otheruser` cannot read `testuser`'s orders).
+A second test customer account. Assigned the `customer` client role on `e-commerce-web`.
+Useful for testing cross-user isolation (e.g., verifying that `otheruser` cannot read `testuser`'s orders).
 
 ### `service-account-e-commerce-service` *(Keycloak internal)*
 
@@ -350,9 +423,24 @@ Keycloak starts with `--import-realm` and the file is volume-mounted at
 `/opt/keycloak/data/import/`. On first startup, Keycloak imports the realm automatically. No Admin
 Console steps are needed.
 
-> **Keycloak 26 import behaviour**: If the realm already exists, `--import-realm` skips it unless you
-> add `--override=true`. For dev environments, deleting the Keycloak volume (`docker compose down -v`)
-> and re-running `docker compose up` re-imports from scratch.
+> **Keycloak 26 import behaviour**: If the realm already exists in the embedded H2 database,
+> `--import-realm` silently skips it — even if the realm JSON has changed. `docker compose restart`
+> preserves the `keycloak-data` volume, so the realm is **not** re-imported.
+>
+> The H2 database files are stored in the named volume `keycloak-data` (mounted at
+> `/opt/keycloak/data/h2`). To force a fresh realm import after modifying the realm JSON, remove
+> that volume:
+> ```bash
+> docker compose --profile auth down keycloak -v
+> docker compose --profile auth up -d keycloak
+> ```
+> Or to reset the entire local stack (Keycloak + Postgres + Mongo) at once:
+> ```bash
+> make us-infra-clean   # docker compose ... down -v
+> make us-infra-up
+> ```
+> `make us-infra-clean` runs `docker compose down -v` which removes **all** named volumes
+> (`keycloak-data`, `postgres-data`, `mongo-data`). Use it when you want a full environment reset.
 
 ---
 
@@ -360,7 +448,7 @@ Console steps are needed.
 
 When a new microservice is implemented, follow this pattern to add its Keycloak identity:
 
-**Step 1 — Define the scopes the new service needs in `clientScopes[]`** (if not already present):
+**Step 1 — Define any new client scopes in `clientScopes[]`** (if not already present):
 
 ```json
 {
@@ -371,7 +459,33 @@ When a new microservice is implemented, follow this pattern to add its Keycloak 
 }
 ```
 
-**Step 2 — Add the client in `clients[]`**:
+**Step 2 — Add an atomic client role on `e-commerce-web`** (for SPA users) or on the calling
+service's client (for M2M). Example for a new SPA scope:
+
+```json
+// In roles.client.e-commerce-web
+{ "name": "notifications:receive", "description": "Receive notification events" }
+```
+
+Then add it to the relevant composite role(s) (e.g., add to `admin`'s `composites.client.e-commerce-web`).
+
+**Step 3 — Add a `clientScopeMappings` entry** so the new role auto-promotes its optional scope:
+
+```json
+// In clientScopeMappings.e-commerce-web
+{ "clientScope": "notifications:receive", "roles": ["notifications:receive"] }
+```
+
+**Step 4 — Add the new scope to `optionalClientScopes`** of `e-commerce-web`:
+
+```json
+"optionalClientScopes": [
+  ... existing scopes ...,
+  "notifications:receive"
+]
+```
+
+**Step 5 — Add the M2M client in `clients[]`** (if the new feature requires a dedicated service client):
 
 ```json
 {
@@ -388,7 +502,7 @@ When a new microservice is implemented, follow this pattern to add its Keycloak 
 }
 ```
 
-**Step 3 — Pin the service account user in `users[]`** (optional but ensures reproducible imports):
+**Step 6 — Pin the service account user in `users[]`** (optional but ensures reproducible imports):
 
 ```json
 {
@@ -399,7 +513,7 @@ When a new microservice is implemented, follow this pattern to add its Keycloak 
 }
 ```
 
-**Step 4 — Configure the calling service's `application.yaml`**:
+**Step 7 — Configure the calling service's `application.yaml`**:
 
 ```yaml
 spring:
@@ -417,14 +531,14 @@ spring:
             token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
 ```
 
-**Step 5 — Protect the endpoint in the service with `@PreAuthorize`**:
+**Step 8 — Protect the endpoint in the service with `@PreAuthorize`**:
 
 ```java
 @PreAuthorize("hasAuthority('SCOPE_notifications:receive')")
 public ResponseEntity<Void> receiveNotification(...) { ... }
 ```
 
-**Step 6 — Restart Keycloak** to re-import (or use `--override=true`).
+**Step 9 — Restart Keycloak** to re-import (or use `--override=true`).
 
 ---
 

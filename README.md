@@ -703,11 +703,11 @@ curl -H "Authorization: Bearer $SA_TOKEN" \
 
 **Keycloak test accounts (auto-configured via realm import):**
 
-| Username | Password | Granted Scopes |
-|----------|----------|----------------|
-| `testuser` | `password` | `openid profile email products:read orders:read orders:write reviews:read reviews:write users:read` |
-| `otheruser` | `password` | `openid profile email products:read orders:read orders:write reviews:read reviews:write users:read` |
-| `e-commerce-service` (client) | `e-commerce-service-secret` | `users:resolve` (M2M client credentials) |
+| Username | Password | Client Role | Granted Scopes |
+|----------|----------|-------------|----------------|
+| `testuser` | `password` | `customer` on `e-commerce-web` | `openid profile email products:read orders:read orders:write reviews:read reviews:write users:read` |
+| `otheruser` | `password` | `customer` on `e-commerce-web` | `openid profile email products:read orders:read orders:write reviews:read reviews:write users:read` |
+| `e-commerce-service` (client) | `e-commerce-service-secret` | — (M2M client credentials) | `users:resolve` |
 
 **Stopping infrastructure:**
 

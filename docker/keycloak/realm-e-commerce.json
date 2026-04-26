@@ -7,64 +7,361 @@
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
   "defaultSignatureAlgorithm": "RS256",
-
+  "roles": {
+    "client": {
+      "e-commerce-web": [
+        {
+          "name": "products:read",
+          "description": "Read product catalog"
+        },
+        {
+          "name": "products:write",
+          "description": "Create and update products"
+        },
+        {
+          "name": "orders:read",
+          "description": "Read own orders"
+        },
+        {
+          "name": "orders:write",
+          "description": "Place and update orders"
+        },
+        {
+          "name": "reviews:read",
+          "description": "Read product reviews"
+        },
+        {
+          "name": "reviews:write",
+          "description": "Submit and edit reviews"
+        },
+        {
+          "name": "users:read",
+          "description": "Read own user profile"
+        },
+        {
+          "name": "notifications:receive",
+          "description": "Receive notification events"
+        },
+        {
+          "name": "customer",
+          "description": "Standard customer — read access to catalog + full order and review lifecycle",
+          "composite": true,
+          "composites": {
+            "client": {
+              "e-commerce-web": [
+                "products:read",
+                "orders:read",
+                "orders:write",
+                "reviews:read",
+                "reviews:write",
+                "users:read"
+              ]
+            }
+          }
+        },
+        {
+          "name": "admin",
+          "description": "Admin — all customer permissions plus product writes and notifications",
+          "composite": true,
+          "composites": {
+            "client": {
+              "e-commerce-web": [
+                "products:read",
+                "products:write",
+                "orders:read",
+                "orders:write",
+                "reviews:read",
+                "reviews:write",
+                "users:read",
+                "notifications:receive"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "clientScopeMappings": {
+    "e-commerce-web": [
+      {
+        "clientScope": "products:read",
+        "roles": [
+          "products:read"
+        ]
+      },
+      {
+        "clientScope": "products:write",
+        "roles": [
+          "products:write"
+        ]
+      },
+      {
+        "clientScope": "orders:read",
+        "roles": [
+          "orders:read"
+        ]
+      },
+      {
+        "clientScope": "orders:write",
+        "roles": [
+          "orders:write"
+        ]
+      },
+      {
+        "clientScope": "reviews:read",
+        "roles": [
+          "reviews:read"
+        ]
+      },
+      {
+        "clientScope": "reviews:write",
+        "roles": [
+          "reviews:write"
+        ]
+      },
+      {
+        "clientScope": "users:read",
+        "roles": [
+          "users:read"
+        ]
+      },
+      {
+        "clientScope": "notifications:receive",
+        "roles": [
+          "notifications:receive"
+        ]
+      }
+    ]
+  },
   "clientScopes": [
+    {
+      "name": "basic",
+      "description": "OpenID Connect scope for add all basic claims to the token",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "false",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {
+            "introspection.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "auth_time",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usersessionmodel-note-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.session.note": "AUTH_TIME",
+            "introspection.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "auth_time",
+            "jsonType.label": "long"
+          }
+        }
+      ]
+    },
+    {
+      "name": "profile",
+      "description": "OpenID Connect built-in scope: profile",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "consent.screen.text": "${profileScopeConsentText}",
+        "display.on.consent.screen": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "full name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-full-name-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "true",
+            "introspection.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "user.attribute": "username",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "given name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "user.attribute": "firstName",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "given_name",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "family name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "user.attribute": "lastName",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "family_name",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    },
+    {
+      "name": "email",
+      "description": "OpenID Connect built-in scope: email",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "consent.screen.text": "${emailScopeConsentText}",
+        "display.on.consent.screen": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "user.attribute": "email",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "email",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "email verified",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "user.attribute": "emailVerified",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "email_verified",
+            "jsonType.label": "boolean"
+          }
+        }
+      ]
+    },
     {
       "name": "products:read",
       "description": "Read access to the product catalog",
       "protocol": "openid-connect",
-      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      }
     },
     {
       "name": "products:write",
       "description": "Create and update products (admin / product-service)",
       "protocol": "openid-connect",
-      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      }
     },
     {
       "name": "orders:read",
       "description": "Read access to orders",
       "protocol": "openid-connect",
-      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      }
     },
     {
       "name": "orders:write",
       "description": "Place and update orders",
       "protocol": "openid-connect",
-      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      }
     },
     {
       "name": "reviews:read",
       "description": "Read access to product reviews",
       "protocol": "openid-connect",
-      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      }
     },
     {
       "name": "reviews:write",
       "description": "Submit and edit reviews",
       "protocol": "openid-connect",
-      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      }
     },
     {
       "name": "users:read",
       "description": "Read own user profile",
       "protocol": "openid-connect",
-      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      }
     },
     {
       "name": "users:resolve",
       "description": "Resolve an IDP subject to an internal user ID (service-to-service only)",
       "protocol": "openid-connect",
-      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "false" }
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
     },
     {
       "name": "notifications:receive",
       "description": "Receive notification events",
       "protocol": "openid-connect",
-      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      }
     }
   ],
-
   "clients": [
     {
       "clientId": "e-commerce-web",
@@ -76,20 +373,29 @@
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
+      "fullScopeAllowed": false,
       "redirectUris": [
         "http://localhost:*",
         "http://127.0.0.1:*"
       ],
-      "webOrigins": ["+"],
+      "webOrigins": [
+        "+"
+      ],
       "defaultClientScopes": [
-        "openid", "profile", "email",
-        "products:read",
-        "orders:read", "orders:write",
-        "reviews:read", "reviews:write",
-        "users:read"
+        "openid",
+        "basic",
+        "profile",
+        "email"
       ],
       "optionalClientScopes": [
-        "products:write"
+        "products:read",
+        "products:write",
+        "orders:read",
+        "orders:write",
+        "reviews:read",
+        "reviews:write",
+        "users:read",
+        "notifications:receive"
       ]
     },
     {
@@ -108,7 +414,6 @@
       "optionalClientScopes": []
     }
   ],
-
   "users": [
     {
       "username": "testuser",
@@ -122,7 +427,12 @@
           "value": "password",
           "temporary": false
         }
-      ]
+      ],
+      "clientRoles": {
+        "e-commerce-web": [
+          "customer"
+        ]
+      }
     },
     {
       "username": "otheruser",
@@ -136,7 +446,12 @@
           "value": "password",
           "temporary": false
         }
-      ]
+      ],
+      "clientRoles": {
+        "e-commerce-web": [
+          "customer"
+        ]
+      }
     },
     {
       "username": "service-account-e-commerce-service",

@@ -83,6 +83,7 @@ services:
     ports:
       - "8180:8080"    # host port 8180 matches KEYCLOAK_URL default
     volumes:
+      - keycloak-data:/opt/keycloak/data
       - ./docker/keycloak:/opt/keycloak/data/import:ro
     networks: [e-commerce]
     healthcheck:
@@ -102,3 +103,4 @@ networks:
 volumes:
   postgres-data:
   mongo-data:
+  keycloak-data:
