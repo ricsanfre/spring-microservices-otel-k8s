@@ -18,8 +18,7 @@
 | Async messaging | Apache Kafka — topic `order.created.v1` |
 | Service discovery | Plain Kubernetes Service DNS — `http://service-name:port` via CoreDNS + kube-proxy |
 | Entry point / API Gateway | Envoy Gateway (Kubernetes Gateway API) |
-| Authentication / Authorization | OAuth2.0 + Keycloak (OIDC) |
-| Observability | OpenTelemetry → Grafana LGTM (traces, metrics, logs) |
+| Authentication / Authorization | OAuth2.0 + Keycloak (OIDC) || Frontend framework | Next.js 15 (App Router) + Auth.js v5 — BFF pattern; browser never holds JWT (see [ADR-007](design/adr-007-nextjs-bff-frontend.md)) || Observability | OpenTelemetry → Grafana LGTM (traces, metrics, logs) |
 | Deployment environment | k3d (k3s in Docker) |
 
 ---
@@ -29,13 +28,14 @@
 | Service | Port | Database | Communication |
 |---------|------|----------|---------------|
 | `keycloak` | 8180 | H2 (dev) / PostgreSQL (prod) | OAuth2 / OIDC IAM — token issuance |
+| `frontend-service` | 3000 (container) / 3001 (local dev) | stateless | Next.js 15 BFF; Auth.js v5 OIDC session; server-side API proxy |
 | `product-service` | 8081 | MongoDB | Product catalog CRUD |
 | `order-service` | 8082 | PostgreSQL | Order lifecycle; Kafka producer |
 | `reviews-service` | 8083 | MongoDB | Product reviews; validates via order + product services |
 | `notification-service` | 8084 | stateless | Kafka consumer; sends notifications |
 | `user-service` | 8085 | PostgreSQL | User profile management; delegates identity to Keycloak |
 
-> **Entry point:** All external traffic enters via **Envoy Gateway** (Kubernetes Gateway API). There is no `api-gateway` Spring service — Envoy handles JWT validation (`SecurityPolicy` → Keycloak JWKS) and routes directly to Kubernetes services.
+> **Entry point:** All external traffic enters via **Envoy Gateway** (Kubernetes Gateway API). There is no `api-gateway` Spring service — Envoy handles JWT validation (`SecurityPolicy` → Keycloak JWKS) and routes directly to Kubernetes services. The `app.local.test` HTTPRoute for `frontend-service` has **no `SecurityPolicy`** — Auth.js handles authentication server-side.
 
 ---
 
@@ -149,6 +149,31 @@ Produce a `flowchart TD` diagram covering:
 
 ---
 
+### Phase 3c — Frontend Service (Next.js BFF)
+
+See [ADR-007](design/adr-007-nextjs-bff-frontend.md) for the full rationale.
+
+| Aspect | Detail |
+|--------|--------|
+| Framework | Next.js 15 (App Router) |
+| Auth | Auth.js v5 — OIDC Authorization Code, server-side |
+| Session | Encrypted HttpOnly cookie; JWT never sent to browser |
+| Keycloak client | `e-commerce-web` (confidential) — `client_secret` in Next.js server env only |
+| API calls | Route Handlers forward `Authorization: Bearer <access_token>` server-side |
+| Envoy HTTPRoute | `app.local.test` — **no `SecurityPolicy`** |
+| Local dev port | 3001 (3000 is Grafana) |
+
+#### Token flow (BFF)
+
+```
+Browser ─── HTTPS cookie ───► Next.js server ─── OIDC Auth Code (server-side) ───► Keycloak
+                                          └─── Bearer JWT (server-side) ───► Envoy Gateway ──► Microservices
+```
+
+Spring Boot microservices receive the user's real access token forwarded by Next.js — `@PreAuthorize` rules work identically regardless of the caller.
+
+---
+
 ### Phase 3b — Security Architecture (OAuth2 + Keycloak)
 
 #### Keycloak Realm
@@ -163,13 +188,14 @@ One confidential client per service (service accounts enabled):
 
 | Keycloak Client ID | Grant Types | Used By |
 |--------------------|-------------|---------|
+| `e-commerce-web` | Authorization Code (confidential) | `frontend-service` Next.js BFF (Auth.js v5) |
 | `product-service` | Client Credentials | Resource server + service account |
 | `order-service` | Client Credentials | Resource server + service account |
 | `reviews-service` | Client Credentials | Resource server + service account |
 | `user-service` | Client Credentials | Resource server + service account |
 | `notification-service` | Client Credentials | Resource server |
 
-> **No `api-gateway` Keycloak client** — the frontend SPA performs the Authorization Code + PKCE flow directly with Keycloak. Envoy Gateway validates JWTs via JWKS without holding a client secret.
+> **`e-commerce-web` is a confidential client** — `client_secret` stored only in the Next.js server env. The browser receives an HttpOnly session cookie; the JWT never leaves the server.
 
 #### Token Flow 1 — User Authentication (Authorization Code + PKCE)
 
@@ -276,6 +302,9 @@ OTLP endpoints (HTTP): `:4318` — gRPC: `:4317` — Grafana UI: `:3000`
 | `db-users` | `postgres:16` | 5433 | PostgreSQL exclusive to user-service |
 | `grafana-lgtm` | `grafana/otel-lgtm:latest` | 3000, 4317, 4318 | OTEL + Loki + Tempo + Prometheus + Grafana |
 
+> **frontend-service local dev:** Run `npm run dev -- --port 3001` from `frontend-service/`.
+> Set `KEYCLOAK_CLIENT_SECRET` in `.env.local`. Port 3001 avoids conflict with Grafana on 3000.
+
 ---
 
 ### Phase 9 — Kubernetes Deployment (k3d)
@@ -354,8 +383,17 @@ kubectl apply -f k8s/order-service/
 kubectl apply -f k8s/reviews-service/
 kubectl apply -f k8s/notification-service/
 kubectl apply -f k8s/user-service/
+kubectl apply -f k8s/apps/frontend-service/
 kubectl apply -f k8s/envoy-gateway/
 ```
+
+> **`frontend-service` secret:** Before deploying, create the `e-commerce-web` client secret:
+> ```bash
+> kubectl create secret generic e-commerce-web-secret \
+>   --from-literal=KEYCLOAK_CLIENT_SECRET=<value> \
+>   --namespace e-commerce
+> ```
+> The `frontend-service` Deployment references this secret as an env var.
 
 #### Service-to-Service Calls
 

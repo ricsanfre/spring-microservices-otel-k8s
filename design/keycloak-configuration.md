@@ -34,7 +34,7 @@ flowchart TD
         end
 
         subgraph CLIENTS["Clients"]
-            C1["e-commerce-web\n(Public — SPA)"]
+            C1["e-commerce-web\n(Confidential — BFF)"]
             C2["e-commerce-service\n(Confidential — M2M)"]
         end
 
@@ -69,13 +69,15 @@ flowchart TD
         U2 -->|assigned role| CR_C
     end
 
-    Browser["Browser / SPA"]
+    Browser["Browser"]
+    NextJS["Next.js BFF\n(frontend-service)"]
     Service["Microservice\n(e.g. user-service)"]
     Gateway["Envoy Gateway"]
 
-    Browser -->|"Authorization Code + PKCE\n(redirect to Keycloak login)"| C1
-    C1 -->|"access_token (scope: openid … products:read orders:* …)"| Browser
-    Browser -->|"Bearer JWT"| Gateway
+    Browser -->|"HTTPS (HttpOnly cookie)"| NextJS
+    NextJS -->|"Authorization Code\n(server-side, redirect to Keycloak login)"| C1
+    C1 -->|"access_token (scope: openid … products:read orders:* …)"| NextJS
+    NextJS -->|"Bearer JWT (server-side)"| Gateway
     Gateway -->|validates JWT via JWKS| REALM
     Gateway -->|forwards request + Bearer JWT| Service
 
@@ -193,18 +195,23 @@ public ResponseEntity<UserResponse> getMyProfile(Authentication auth) { ... }
 
 ## Clients
 
-### `e-commerce-web` — Public SPA Client
+### `e-commerce-web` — Confidential BFF Client
+
+> **Changed from Public SPA to Confidential BFF** — see [ADR-007](adr-007-nextjs-bff-frontend.md).
+> The `client_secret` is stored only in the Next.js server environment variable
+> `KEYCLOAK_CLIENT_SECRET` and is never exposed to the browser.
 
 ```
 clientId:               e-commerce-web
-type:                   Public (no secret)
-standardFlowEnabled:    true    ← Authorization Code + PKCE
+type:                   Confidential (client_secret held in Next.js server env only)
+standardFlowEnabled:    true    ← Authorization Code (no PKCE required — server holds secret)
 implicitFlowEnabled:    false   ← disabled (deprecated, insecure)
 directAccessGrantsEnabled: true ← password grant — for local curl/Postman testing only
 serviceAccountsEnabled: false
 fullScopeAllowed:       false   ← client must explicitly request every scope it needs
-redirectUris:           http://localhost:*, http://127.0.0.1:*
-webOrigins:             + (same as redirectUris — CORS allowed)
+redirectUris:           http://localhost:3001/api/auth/callback/keycloak  (local dev)
+                        https://app.local.test/api/auth/callback/keycloak (staging)
+webOrigins:             http://localhost:3001, https://app.local.test
 defaultClientScopes:    openid, basic, profile, email
 optionalClientScopes:   products:read, products:write, orders:read, orders:write,
                         reviews:read, reviews:write, users:read, notifications:receive
@@ -212,40 +219,42 @@ optionalClientScopes:   products:read, products:write, orders:read, orders:write
 
 #### When is this used?
 
-A browser-based SPA (React, Angular, etc.) uses this client to authenticate users:
+The **Next.js BFF** (`frontend-service`) uses this client to authenticate users server-side:
 
 ```
-1. SPA redirects browser to:
+1. Auth.js middleware intercepts an unauthenticated browser request and redirects to:
    GET /realms/e-commerce/protocol/openid-connect/auth
        ?client_id=e-commerce-web
-       &redirect_uri=http://localhost:3000/callback
+       &redirect_uri=http://localhost:3001/api/auth/callback/keycloak
        &response_type=code
        &scope=openid email profile products:read orders:read orders:write reviews:read reviews:write users:read
-       &code_challenge=<SHA256 of code_verifier>     ← PKCE
-       &code_challenge_method=S256
+       (no PKCE — confidential client holds the secret)
 
-2. User logs in on Keycloak login page.
+2. User logs in on the Keycloak login page.
 
-3. Keycloak redirects back to SPA:
-   http://localhost:3000/callback?code=<auth_code>
+3. Keycloak redirects back to the Next.js callback Route Handler:
+   http://localhost:3001/api/auth/callback/keycloak?code=<auth_code>
 
-4. SPA exchanges code for tokens:
+4. Auth.js exchanges the code server-side:
    POST /realms/e-commerce/protocol/openid-connect/token
    code=<auth_code>
-   &code_verifier=<original code_verifier>           ← PKCE
    &client_id=e-commerce-web
-   &redirect_uri=http://localhost:3000/callback
+   &client_secret=<KEYCLOAK_CLIENT_SECRET>   ← server-side only
+   &redirect_uri=http://localhost:3001/api/auth/callback/keycloak
    &grant_type=authorization_code
 
 5. Keycloak returns:
    { "access_token": "eyJ...", "refresh_token": "eyJ...", ... }
+   Auth.js stores the tokens in the server-side session (encrypted HttpOnly cookie).
+   The browser never sees the JWT.
 
-6. SPA attaches access_token as Authorization: Bearer header on API calls.
+6. Next.js Route Handlers forward the access_token server-side to microservices:
+   Authorization: Bearer <access_token>  (never sent from browser)
 ```
 
-`directAccessGrantsEnabled: true` allows a password grant for local testing. The SPA must include
-all the scopes it needs in the `scope` parameter — Keycloak only includes optional scopes that are
-explicitly requested:
+`directAccessGrantsEnabled: true` allows a password grant for local Makefile testing targets.
+All the scopes it needs must be included in the `scope` parameter — Keycloak only includes
+optional scopes that are explicitly requested:
 
 ```bash
 # Obtain a user token via password grant (dev/testing only)
@@ -385,16 +394,18 @@ sequenceDiagram
     participant GW as Envoy Gateway
     participant SVC as Microservice
 
-    Note over SPA,KC: User Login (Authorization Code + PKCE)
-    SPA->>KC: GET /auth?client_id=e-commerce-web&scope=openid+users:read+...&code_challenge=...
+    Note over SPA,KC: User Login (Authorization Code — server-side via Auth.js)
+    SPA->>KC: GET /auth?client_id=e-commerce-web&scope=openid+users:read+...
+    Note right of SPA: Next.js BFF redirects browser to Keycloak login
     KC-->>SPA: Login page
     SPA->>KC: POST credentials (username + password)
-    KC-->>SPA: Redirect with auth_code
-    SPA->>KC: POST /token (code + code_verifier)
-    KC-->>SPA: access_token (scope: openid … users:read) + refresh_token
+    KC-->>SPA: Redirect with auth_code → Next.js /api/auth/callback/keycloak
+    SPA->>KC: POST /token (code + client_secret — server-side, browser not involved)
+    KC-->>SPA: access_token + refresh_token (stored in server session / HttpOnly cookie)
 
-    Note over SPA,SVC: Authenticated API Call
+    Note over SPA,SVC: Authenticated API Call (browser holds only session cookie)
     SPA->>GW: POST /api/v1/orders  Authorization: Bearer <user JWT>
+    Note right of SPA: Bearer JWT sent by Next.js server — not by browser
     GW->>KC: GET /certs (JWKS — cached)
     GW->>GW: Validate JWT signature + expiry
     GW->>SVC: POST /api/v1/orders  Authorization: Bearer <user JWT>

@@ -13,6 +13,12 @@ Spring Boot microservice-based e-commerce platform implementing:
 - [Architecture Diagram](#architecture-diagram)
 - [Security: OAuth2 + Keycloak](#security-oauth2--keycloak)
 - [Service Details](#service-details)
+  - [frontend-service](#frontend-service--port-3001-local--stateless)
+  - [product-service](#product-service--port-8081--mongodb)
+  - [order-service](#order-service--port-8082--postgresql)
+  - [reviews-service](#reviews-service--port-8083--mongodb)
+  - [notification-service](#notification-service--port-8084--stateless)
+  - [user-service](#user-service--port-8085--postgresql)
 - [Kafka Events](#kafka-events)
 - [Data Models](#data-models)
 - [Observability](#observability)
@@ -26,6 +32,7 @@ Spring Boot microservice-based e-commerce platform implementing:
 | Service | Port | Database | Responsibility |
 |---------|------|----------|----------------|
 | `keycloak` | 8180 | H2 (dev) / PostgreSQL (prod) | OAuth2/OIDC IAM — authentication, authorization, token issuance |
+| `frontend-service` | 3000 (container) / 3001 (local dev) | stateless | Next.js 15 BFF — server-side OIDC session (Auth.js v5); proxies API calls to microservices |
 | `product-service` | 8081 | MongoDB | Product catalog — CRUD and inventory quantities |
 | `order-service` | 8082 | PostgreSQL | Order lifecycle management; Kafka producer |
 | `reviews-service` | 8083 | MongoDB | Product reviews and ratings — validated against order history |
@@ -40,7 +47,7 @@ Spring Boot microservice-based e-commerce platform implementing:
 
 ```mermaid
 flowchart TD
-    Client(["External Client"])
+    Client(["Browser"])
 
     subgraph IAM["Identity & Access Management"]
         KC["Keycloak :8180\nOAuth2 / OIDC IAM"]
@@ -50,6 +57,7 @@ flowchart TD
         EG["Envoy Gateway\nKubernetes Gateway API\nJWT validation via SecurityPolicy"]
 
         subgraph SERVICES["Business Services"]
+            FE["frontend-service\nNext.js 15 BFF\nAuth.js v5"]
             PS["product-service :8081\nMongoDB"]
             OS["order-service :8082\nPostgreSQL"]
             RS["reviews-service :8083\nMongoDB"]
@@ -68,8 +76,10 @@ flowchart TD
         end
     end
 
-    Client -- "1. Authenticate (OIDC)" --> KC
-    Client -- "2. Bearer JWT" --> EG
+    Client -- "1. Visit app (cookie)" --> EG
+    EG -- "HTTPRoute app.local.test\n(no SecurityPolicy)" --> FE
+    FE -. "2. OIDC Auth Code flow\n(server-side)" .-> KC
+    FE -- "3. Bearer JWT\n(server-side API calls)" --> EG
     EG -. "validate JWT\nvia JWKS (SecurityPolicy)" .-> KC
     EG -- "HTTPRoute" --> PS
     EG -- "HTTPRoute" --> OS
@@ -110,37 +120,46 @@ One Keycloak client per service (all confidential, with service accounts enabled
 
 | Keycloak Client ID | Grant Types | Used By |
 |--------------------|-------------|---------|
+| `e-commerce-web` | Authorization Code (confidential BFF) | `frontend-service` Next.js server (Auth.js v5) |
 | `product-service` | Client Credentials | product-service resource server + service account |
 | `order-service` | Client Credentials | order-service resource server + service account |
 | `reviews-service` | Client Credentials | reviews-service resource server + service account |
 | `user-service` | Client Credentials | user-service resource server + service account |
 | `notification-service` | Client Credentials | notification-service resource server |
 
-> **No `api-gateway` Keycloak client** — the frontend SPA handles the OIDC Authorization Code + PKCE flow directly with Keycloak. Envoy Gateway validates the resulting JWT via the Keycloak JWKS endpoint (no client secret required on the gateway).
+> **`e-commerce-web` is a confidential client** — the `client_secret` lives only in the Next.js server environment (`KEYCLOAK_CLIENT_SECRET`). The browser never sees the JWT; Auth.js manages the OIDC session server-side and issues an HttpOnly cookie to the browser. See [ADR-007](design/adr-007-nextjs-bff-frontend.md).
 
-### Token Flow 1 — User Authentication (Authorization Code + PKCE)
+### Token Flow 1 — User Authentication (Authorization Code — BFF)
 
 ```mermaid
 sequenceDiagram
-    participant C as Client App (SPA)
+    participant B as Browser
+    participant FE as frontend-service (Next.js)
     participant KC as Keycloak :8180
     participant EG as Envoy Gateway
     participant SVC as Microservice
 
-    C->>KC: Authorization request (redirect to login)
-    KC-->>C: Login page
-    C->>KC: User credentials
-    KC-->>C: Authorization code
-    C->>KC: POST /token (code + PKCE verifier)
-    KC-->>C: access_token (JWT) + refresh_token
+    B->>FE: GET /some-page (no session cookie)
+    FE->>B: 302 Redirect to Keycloak login
+    B->>KC: Authorization request
+    KC-->>B: Login page
+    B->>KC: User credentials
+    KC-->>B: 302 Redirect to /api/auth/callback/keycloak?code=...
+    B->>FE: GET /api/auth/callback/keycloak?code=...
+    FE->>KC: POST /token (code + client_secret) ← server-side only
+    KC-->>FE: access_token (JWT) + refresh_token
+    FE-->>B: Set-Cookie: session (HttpOnly, Secure) — JWT never sent to browser
 
-    C->>EG: HTTP request + Authorization: Bearer JWT
+    Note over B,SVC: Subsequent authenticated requests
+    B->>FE: GET /orders (session cookie)
+    FE->>EG: GET /api/v1/orders + Authorization: Bearer JWT ← server-side
     EG->>KC: GET /certs (JWKS) — SecurityPolicy, cached
     EG-->>EG: Validate JWT signature + expiry + audience
-    EG->>SVC: Forward request + Authorization: Bearer JWT (header forwarded)
+    EG->>SVC: Forward request + Authorization: Bearer JWT
     SVC-->>SVC: Validate JWT (OAuth2 Resource Server)
     SVC-->>EG: Response
-    EG-->>C: Response
+    EG-->>FE: Response
+    FE-->>B: Rendered page
 ```
 
 ### Token Flow 2 — Service-to-Service (Client Credentials Grant)
@@ -171,6 +190,22 @@ sequenceDiagram
 ---
 
 ## Service Details
+
+### frontend-service · port 3001 (local) / 3000 (container) · stateless
+
+Browser-facing Next.js 15 application implementing the BFF pattern. See [ADR-007](design/adr-007-nextjs-bff-frontend.md) for the full rationale.
+
+| Aspect | Detail |
+|--------|--------|
+| Framework | Next.js 15 (App Router) |
+| Auth library | Auth.js v5 |
+| Session storage | Encrypted HttpOnly cookie (JWT never in browser) |
+| Keycloak client | `e-commerce-web` (confidential — `client_secret` in server env only) |
+| API calls | Server Components / Route Handlers forward `Authorization: Bearer <token>` server-side |
+| Envoy HTTPRoute | `app.local.test` — **no `SecurityPolicy`** (Auth.js handles authentication) |
+| Local dev port | 3001 (3000 is reserved for Grafana) |
+
+---
 
 ### product-service · port 8081 · MongoDB
 
@@ -487,6 +522,7 @@ flowchart TD
                 end
 
                 subgraph NS_APP["e-commerce"]
+                    FE["frontend-service\\nNext.js 15 BFF\\nAuth.js v5"]
                     US["user-service :8085"]
                     PS["product-service :8081"]
                     OS["order-service :8082"]
@@ -530,11 +566,16 @@ flowchart TD
     LB --> GW
     CM -- "issues wildcard cert" --> GW
     GW -. "JWT validate\n(SecurityPolicy → JWKS)" .-> KC
+    GW -- "HTTPRoute app.local.test\n(no SecurityPolicy)" --> FE
     GW -- "HTTPRoute /api/v1/users" --> US
     GW -- "HTTPRoute /api/v1/products" --> PS
     GW -- "HTTPRoute /api/v1/orders" --> OS
     GW -- "HTTPRoute keycloak.local.test" --> KC
     GW -- "HTTPRoute grafana.local.test" --> GRAFANA
+
+    %% ── BFF server-side API calls ─────────────────────────────────────────
+    FE -. "OIDC Auth Code\n(server-side, client_secret)" .-> KC
+    FE -. "Bearer JWT\n(server-side)" .-> GW
 
     %% ── Service-to-service (plain K8s DNS) ────────────────────────────────
     RS -. "http://order-service:8082" .-> OS
@@ -691,6 +732,7 @@ curl -H "Authorization: Bearer $SA_TOKEN" \
 
 | URL | Description |
 |-----|-------------|
+| `http://localhost:3001` | frontend-service (Next.js dev server) |
 | `http://localhost:8081/swagger-ui.html` | product-service Swagger UI |
 | `http://localhost:8082/swagger-ui.html` | order-service Swagger UI |
 | `http://localhost:8180/swagger-ui.html` | Keycloak Admin Console |
@@ -838,6 +880,7 @@ make k8s-up   # k3d-create + k8s-operators + k8s-infra
 
 | URL | Description |
 |-----|-------------|
+| `https://app.local.test` | frontend-service (Next.js BFF) |
 | `https://api.local.test/api/v1/users` | user-service via Envoy Gateway |
 | `https://keycloak.local.test` | Keycloak Admin Console |
 | `https://grafana.local.test` | Grafana Dashboards |

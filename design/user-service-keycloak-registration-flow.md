@@ -10,14 +10,20 @@ The link between the two systems is the JWT `sub` claim — a UUID Keycloak assi
 
 ## Option A — Client-side "Lazy Registration" (Simplest)
 
+> **BFF note (ADR-007):** In the Next.js BFF architecture, the "Browser/App" participant below is
+> the **Next.js server** (a Route Handler), not the browser itself. Auth.js manages the OIDC
+> session and provides the `access_token` server-side. The lazy registration logic in `user-service`
+> is identical regardless of whether the caller is a pure SPA or a Next.js Route Handler — the
+> service sees only a JWT with a `sub` claim.
+
 ```mermaid
 sequenceDiagram
-    participant U as User (Browser/App)
+    participant U as User (Browser / Next.js BFF)
     participant KC as Keycloak :8180
-    participant GW as API Gateway :8080
+    participant GW as Envoy Gateway
     participant US as user-service :8085
 
-    U->>KC: Login (username + password)
+    U->>KC: Login (OIDC Authorization Code flow)
     KC-->>U: JWT (sub = "kc-uuid-123")
 
     U->>GW: GET /api/v1/users/me + Bearer JWT
