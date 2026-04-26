@@ -59,12 +59,18 @@ sequenceDiagram
     US->>US: Extract sub from JWT
     US->>US: SELECT * FROM users WHERE idp_subject = sub
 
-    alt First login — no profile row
-        US->>US: Read email, given_name, family_name,\npreferred_username from JWT claims
-        US->>US: INSERT INTO users (idp_subject, email, first_name, ...)
-        US-->>GW: 200 OK  (newly created profile)
-    else Returning user
+    alt Returning user — idp_subject found
         US-->>GW: 200 OK  (existing profile)
+    else idp_subject not found
+        US->>US: SELECT * FROM users WHERE email = email_claim
+        alt Email match — re-link (e.g. IAM reset)
+            US->>US: UPDATE users SET idp_subject = sub WHERE email = email_claim
+            US-->>GW: 200 OK  (re-linked existing profile)
+        else Truly new user
+            US->>US: Read email, given_name, family_name,\npreferred_username from JWT claims
+            US->>US: INSERT INTO users (idp_subject, email, first_name, ...)
+            US-->>GW: 200 OK  (newly created profile)
+        end
     end
 
     GW-->>U: UserProfile JSON
@@ -125,6 +131,7 @@ adding the Keycloak extension; no data migration is needed.
 - **Zero extra components** — no Keycloak extension, no onboarding form, no `POST /api/v1/users` call from the client
 - **Automatic** — works transparently on every authenticated call to `/users/me`
 - **Idempotent** — a `SELECT … WHERE idp_subject = sub` check before `INSERT` prevents duplicates even under concurrent first calls (database `UNIQUE` constraint on `idp_subject` as the final guard)
+- **Re-link on IAM reset** — if the IAM provider is reset (e.g. Keycloak dev volume wiped) and the same user logs in with a new `sub`, the email-based fallback re-links the existing profile row rather than failing with a unique-email constraint violation. The user's internal `id` and all associated data are preserved.
 - **JWT self-contained** — profile seeding uses only data the service already has; no extra network round-trip
 
 ### Neutral
@@ -156,7 +163,11 @@ Not adopted yet. It is the target for production once the MVP is stable. It prov
 ## Implementation Notes
 
 - `user-service` endpoint: `GET /api/v1/users/me`
-- Logic: `SELECT users WHERE idp_subject = :sub` → missing → `INSERT` from JWT claims → return profile
+- Logic:
+  1. `SELECT users WHERE idp_subject = :sub` → found → return profile
+  2. Not found → `SELECT users WHERE email = :email`
+     - Found → update `idp_subject` to new `sub` and save (re-link after IAM reset or provider migration)
+     - Not found → `INSERT` new profile from JWT claims
 - Database constraint: `users.idp_subject` is `UNIQUE` (prevents race-condition duplicates)
 - Required JWT scopes on `e-commerce-web` client: `openid profile email`
 - See [user-service-keycloak-registration-flow.md](user-service-keycloak-registration-flow.md) for full option comparison and sequence diagrams

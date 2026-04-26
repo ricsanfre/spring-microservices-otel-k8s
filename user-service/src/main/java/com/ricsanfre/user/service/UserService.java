@@ -27,7 +27,16 @@ public class UserService {
     public UserResponse getOrCreateCurrentUser(Authentication authentication) {
         String idpSubject = JwtUtils.getSubject(authentication);
         User user = userRepository.findByIdpSubject(idpSubject)
-                .orElseGet(() -> lazyRegister(authentication, idpSubject));
+                .orElseGet(() -> {
+                    String email = JwtUtils.getEmail(authentication);
+                    return userRepository.findByEmail(email)
+                            .map(existing -> {
+                                log.info("Re-linking user profile email={} to new idp_subject={}", email, idpSubject);
+                                existing.setIdpSubject(idpSubject);
+                                return userRepository.save(existing);
+                            })
+                            .orElseGet(() -> lazyRegister(authentication, idpSubject));
+                });
         return toResponse(user);
     }
 

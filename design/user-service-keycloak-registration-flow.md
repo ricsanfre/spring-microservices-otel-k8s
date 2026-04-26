@@ -23,14 +23,18 @@ sequenceDiagram
     U->>GW: GET /api/v1/users/me + Bearer JWT
     GW->>US: GET /api/v1/users/me + Bearer JWT
     US->>US: extract sub="kc-uuid-123" from JWT
-    US->>US: SELECT * FROM users WHERE keycloak_id = 'kc-uuid-123'
-    alt Profile NOT found (first login)
-        US->>KC: GET /realms/e-commerce/protocol/openid-connect/userinfo\n       Authorization: Bearer JWT
-        KC-->>US: { sub, email, given_name, family_name, preferred_username }
-        US->>US: INSERT INTO users (keycloak_id, email, first_name, ...) VALUES (...)
-        US-->>GW: 200 newly created profile
-    else Profile found
+    US->>US: SELECT * FROM users WHERE idp_subject = 'kc-uuid-123'
+    alt Profile found (returning user)
         US-->>GW: 200 existing profile
+    else idp_subject not found
+        US->>US: SELECT * FROM users WHERE email = email_claim
+        alt Email match — re-link (IAM reset / migration)
+            US->>US: UPDATE users SET idp_subject = 'kc-uuid-123'
+            US-->>GW: 200 re-linked profile (same internal id)
+        else Truly new user
+            US->>US: INSERT INTO users (idp_subject, email, first_name, ...) VALUES (...)
+            US-->>GW: 200 newly created profile
+        end
     end
     GW-->>U: User profile JSON
 ```
@@ -39,14 +43,16 @@ sequenceDiagram
 
 1. `GET /api/v1/users/me` is the standard endpoint for "get my profile"
 2. `user-service` extracts the `sub` claim from the incoming JWT
-3. It queries the DB for a row with matching `keycloak_id`
-4. **On first call** — row does not exist → calls Keycloak's `/userinfo` endpoint with the user's own token to fetch name/email → auto-creates the profile row
-5. All subsequent calls hit the DB directly (no Keycloak call needed)
+3. It queries the DB for a row with matching `idp_subject`
+4. **Row found** — return the existing profile directly
+5. **Row not found** — fall back to an email lookup:
+   - **Email matches an existing row** — update that row's `idp_subject` to the new `sub` and save it (re-link). This handles dev Keycloak resets and production IAM provider migrations — the user's internal `id` and all associated data are preserved.
+   - **No email match** — truly new user; read `email`, `given_name`, `family_name`, `preferred_username` directly from the JWT claims and insert a new profile row. No extra call to Keycloak's `/userinfo` endpoint is needed because the JWT already carries all required data.
 
 | | |
 |---|---|
-| **Pros** | Zero extra configuration. Works automatically. No Keycloak extensions needed. |
-| **Cons** | Profile name/email may drift if updated in Keycloak later (not synced automatically). |
+| **Pros** | Zero extra configuration. Works automatically. No Keycloak extensions needed. Gracefully handles IAM resets by re-linking on email match instead of failing. |
+| **Cons** | Profile name/email may drift if updated in Keycloak later (not synced automatically). Re-linking on email assumes email uniqueness across all IAM users — upheld by `uq_users_email` constraint. |
 
 ---
 

@@ -80,6 +80,7 @@ class UserServiceTest {
     void getOrCreateCurrentUser_newUser_registersAndReturnsProfile() {
         var auth = jwtAuth("sub-new", "new@test.com", "newuser", "New", "User");
         when(userRepository.findByIdpSubject("sub-new")).thenReturn(Optional.empty());
+        when(userRepository.findByEmail("new@test.com")).thenReturn(Optional.empty());
         when(userRepository.save(any(User.class))).thenAnswer(inv -> {
             User u = inv.getArgument(0);
             u.setId(UUID.randomUUID());
@@ -93,6 +94,21 @@ class UserServiceTest {
         assertThat(result.getUsername()).isEqualTo("newuser");
         assertThat(result.getFirstName()).isEqualTo("New");
         verify(userRepository).save(any(User.class));
+    }
+
+    @Test
+    void getOrCreateCurrentUser_newIdpSubjectSameEmail_relinksIdpSubject() {
+        var auth = jwtAuth("sub-new", "user@test.com", "testuser", "Test", "User");
+        var existing = buildUser("sub-old");
+        when(userRepository.findByIdpSubject("sub-new")).thenReturn(Optional.empty());
+        when(userRepository.findByEmail("user@test.com")).thenReturn(Optional.of(existing));
+        when(userRepository.save(existing)).thenReturn(existing);
+
+        UserResponse result = userService.getOrCreateCurrentUser(auth);
+
+        assertThat(result.getEmail()).isEqualTo("user@test.com");
+        assertThat(existing.getIdpSubject()).isEqualTo("sub-new");
+        verify(userRepository).save(existing);
     }
 
     // ── findById ─────────────────────────────────────────────────────────────

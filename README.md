@@ -253,7 +253,7 @@ Stores user profile data. **Does not store passwords** — Keycloak manages cred
 | `PUT` | `/api/v1/users/{id}` | Update own profile | Owner |
 | `POST` | `/api/v1/users` | Create user profile (lazy registration) | Any authenticated user |
 
-> **Lazy registration flow:** On the first call to `GET /api/v1/users/me`, if no profile exists for the JWT `sub`, `user-service` auto-creates it using claims from the JWT (`email`, `given_name`, `family_name`, `preferred_username`). No explicit registration step required.
+> **Lazy registration flow:** On every call to `GET /api/v1/users/me`, `user-service` resolves the caller's profile in three steps: **(1)** look up by `idp_subject = sub` — found → return immediately; **(2)** not found → look up by `email` — found → re-link the existing row to the new `sub` and return (handles dev Keycloak resets or IAM migrations without losing user data); **(3)** no email match → create a new profile from the JWT claims (`email`, `given_name`, `family_name`, `preferred_username`). No explicit registration step required.
 
 > **Per-service lazy resolution:** When `order-service` or `reviews-service` needs to associate a user with data, they extract the JWT `sub`, call `GET /api/v1/users/resolve?idp_subject={sub}` to obtain the internal `users.id`, then cache the mapping locally (TTL: 5–15 min). Subsequent requests for the same user skip the resolution call.
 
