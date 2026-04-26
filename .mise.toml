@@ -1,0 +1,23 @@
+# mise-en-place tool version configuration
+# See design/adr-008-mise-tool-version-management.md
+#
+# Install mise:  curl https://mise.run | sh
+# Install tools: mise install
+# Verify:        mise doctor
+
+[tools]
+# Language runtimes
+java    = "temurin-25"
+maven   = "3.9"
+node    = "22"
+
+# Kubernetes tooling (Option B — k3d staging only)
+kubectl   = "latest"
+helm      = "latest"
+k3d       = "latest"
+kustomize = "latest"
+
+# Utilities
+jq = "latest"
+
+

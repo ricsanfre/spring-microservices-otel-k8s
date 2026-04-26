@@ -23,6 +23,7 @@ Spring Boot microservice-based e-commerce platform implementing:
 - [Data Models](#data-models)
 - [Observability](#observability)
 - [Infrastructure](#infrastructure)
+- [Prerequisites — mise](#prerequisites--mise)
 - [How to Run](#how-to-run)
 
 ---
@@ -690,16 +691,52 @@ Services call each other using plain Kubernetes Service DNS (`http://service-nam
 
 ---
 
+## Prerequisites — mise
+
+All developer tools are version-pinned in [`.mise.toml`](.mise.toml) at the repository root (see [ADR-008](design/adr-008-mise-tool-version-management.md)). Install [mise](https://mise.jdx.dev) once, then run `mise install` to get every tool at the exact declared version — no `sudo`, no OS-specific steps.
+
+```bash
+# 1. Install mise (one-time, per machine)
+curl https://mise.run | sh
+echo 'eval "$(mise activate bash)"' >> ~/.bashrc
+source ~/.bashrc
+
+# 2. Install all project tools (re-run after pulling changes to .mise.toml)
+mise install
+
+# 3. Verify
+mise doctor
+```
+
+**Tools installed by `.mise.toml`:**
+
+| Tool | Pinned version | Used by |
+|------|---------------|---------|
+| `java` (Temurin) | 25 | All Spring Boot services |
+| `maven` | 3.9 | Building / running services |
+| `node` | 22 | frontend-service dev server + image build |
+| `kubectl` | latest | Option B — k3d staging |
+| `helm` | latest | Option B — operator install |
+| `k3d` | latest | Option B — cluster management |
+| `kustomize` | latest | Option B — k8s manifests |
+| `jq` | latest | Makefile token helpers |
+
+> **Docker** is the only prerequisite not managed by mise — the Docker daemon requires OS-level integration that a user-space tool manager cannot provide. Install it separately:
+> ```bash
+> curl -fsSL https://get.docker.com | sh
+> sudo usermod -aG docker $USER   # re-login after this
+> ```
+
+---
+
 ## How to Run
 
 ### Option A — Local Development (Docker Compose + Makefile)
 
 #### Prerequisites
-- Docker & Docker Compose v2
-- Java 25+
-- Maven 3.9+
-- Node.js 22+ and npm 10+
-- `curl`, `jq` (token acquisition targets)
+- Docker & Docker Compose v2 (see above)
+- All other tools via `mise install` (Java 25, Maven 3.9, Node.js 22, `jq`)
+- `curl` (standard on Linux/macOS)
 
 The root `Makefile` provides per-service targets. Run `make help` to see all targets.
 
@@ -814,15 +851,18 @@ The staging environment runs a full **k3d** cluster (k3s inside Docker) on your 
 
 #### Prerequisites
 
-| Tool | Min version |
-|------|-------------|
-| Docker | 24+ |
-| k3d | 5.x |
-| kubectl | 1.30+ |
-| helm | 3.15+ |
-| kustomize | 5.x |
-| Java 25 + Maven 3.9+ | (for building service images) |
-| Node.js 22 + npm 10+ | (for building frontend-service image) |
+All tools except Docker are installed via `mise install` (see [Prerequisites — mise](#prerequisites--mise)).
+
+| Tool | Pinned in `.mise.toml` |
+|------|------------------------|
+| Docker 24+ | manual — `get.docker.com` |
+| k3d | `latest` |
+| kubectl | `latest` |
+| helm | `latest` |
+| kustomize | `latest` |
+| Java 25 (Temurin) | `temurin-25` |
+| Maven 3.9 | `3.9` |
+| Node.js 22 | `22` |
 
 #### 1. Create the cluster
 
