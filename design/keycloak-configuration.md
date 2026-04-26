@@ -206,11 +206,12 @@ clientId:               e-commerce-web
 type:                   Confidential (client_secret held in Next.js server env only)
 standardFlowEnabled:    true    ← Authorization Code (no PKCE required — server holds secret)
 implicitFlowEnabled:    false   ← disabled (deprecated, insecure)
-directAccessGrantsEnabled: true ← password grant — for local curl/Postman testing only
+directAccessGrantsEnabled: false
 serviceAccountsEnabled: false
 fullScopeAllowed:       false   ← client must explicitly request every scope it needs
-redirectUris:           http://localhost:3001/api/auth/callback/keycloak  (local dev)
-                        https://app.local.test/api/auth/callback/keycloak (staging)
+redirectUris:           http://localhost:3001/api/auth/callback/keycloak  (local dev — Auth.js)
+                        https://app.local.test/api/auth/callback/keycloak (staging — Auth.js)
+                        http://localhost:9876/callback                     (local dev — oauth2c CLI)
 webOrigins:             http://localhost:3001, https://app.local.test
 defaultClientScopes:    openid, basic, profile, email
 optionalClientScopes:   products:read, products:write, orders:read, orders:write,
@@ -252,24 +253,9 @@ The **Next.js BFF** (`frontend-service`) uses this client to authenticate users 
    Authorization: Bearer <access_token>  (never sent from browser)
 ```
 
-`directAccessGrantsEnabled: true` allows a password grant for local Makefile testing targets.
-All the scopes it needs must be included in the `scope` parameter — Keycloak only includes
-optional scopes that are explicitly requested:
+All the scopes it needs must be included in the `scope` parameter of the authorization request — Keycloak only includes optional scopes that are explicitly requested. Keycloak will only grant scopes that are listed in `optionalClientScopes` (or `defaultClientScopes`) on the client.
 
-```bash
-# Obtain a user token via password grant (dev/testing only)
-curl -s -X POST http://localhost:8180/realms/e-commerce/protocol/openid-connect/token \
-  -d "grant_type=password" \
-  -d "client_id=e-commerce-web" \
-  -d "username=testuser" \
-  -d "password=password" \
-  -d "scope=openid profile email products:read orders:read orders:write reviews:read reviews:write users:read" \
-  | jq .access_token
-```
-
-For the Authorization Code + PKCE flow the SPA passes the same `scope` string in the initial
-`/auth` redirect. Keycloak will only grant scopes that are listed in `optionalClientScopes` (or
-`defaultClientScopes`) on the client.
+> **No password grant**: `directAccessGrantsEnabled` is `false` on this client. For local API testing use the `e-commerce-service` client credentials token (which grants `users:resolve`) or start the frontend dev server and obtain a token from the browser session.
 
 #### JWT payload (user token from this client)
 
@@ -452,6 +438,106 @@ Console steps are needed.
 > ```
 > `make us-infra-clean` runs `docker compose down -v` which removes **all** named volumes
 > (`keycloak-data`, `postgres-data`, `mongo-data`). Use it when you want a full environment reset.
+
+---
+
+## Local API Testing — Getting Tokens
+
+Since `e-commerce-web` is a confidential BFF client (`directAccessGrantsEnabled: false`), a user
+token can only be obtained through the **Authorization Code** flow, which requires a browser
+login step. Two CLI tools support this from a terminal.
+
+### Recommended: `oauth2c`
+
+[`oauth2c`](https://github.com/cloudentity/oauth2c) (Cloudentity / SecureAuthCorp, 900+ stars,
+Go binary, Apache-2.0) is the most widely used OAuth2 CLI tool. It handles the full Authorization
+Code flow: opens a browser automatically, listens on a local callback port, and prints the token
+response JSON to stdout. The `--silent` flag makes it scriptable.
+
+**Install:**
+
+```bash
+# Linux
+curl -sSfL https://raw.githubusercontent.com/cloudentity/oauth2c/master/install.sh | \
+  sudo sh -s -- -b /usr/local/bin latest
+
+# macOS
+brew install cloudentity/tap/oauth2c
+```
+
+> `http://localhost:9876/callback` (oauth2c's default) is already included in `e-commerce-web`'s
+> `redirectUris` in `realm-e-commerce.json`.
+
+**Get a user access token and call an API:**
+
+```bash
+TOKEN=$(oauth2c http://localhost:8180/realms/e-commerce \
+  --client-id e-commerce-web \
+  --client-secret e-commerce-web-secret \
+  --grant-type authorization_code \
+  --auth-method client_secret_post \
+  --response-types code \
+  --response-mode query \
+  --scopes "openid profile email products:read orders:read orders:write reviews:read reviews:write users:read" \
+  --redirect-url http://localhost:9876/callback \
+  --silent | jq -r .access_token)
+
+curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me
+```
+
+Or via the Makefile shortcut (requires `oauth2c` + `jq` installed):
+
+```bash
+TOKEN=$(make -s us-token) && \
+  curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me
+```
+
+`oauth2c` opens a browser for the Keycloak login page. Once the user authenticates, Keycloak
+redirects to `http://localhost:9876/callback` and oauth2c captures the code, exchanges it for a
+token server-side, and prints the response JSON to stdout.
+
+### Alternative: `oidc-client.sh` (bash-only, no binary required)
+
+[`oidc-client.sh`](https://github.com/please-openit/oidc-bash-client) is a pure-bash OIDC client
+that uses `nc` (netcat) to listen for the redirect. No compiled binary required. Supports PKCE.
+
+```bash
+# Download once
+curl -sLO https://raw.githubusercontent.com/please-openit/oidc-bash-client/master/oidc-client.sh
+chmod +x oidc-client.sh
+
+# Obtain a user token — prints the authorize URL; open it in a browser to log in
+./oidc-client.sh \
+  --operation authorization_code_grant \
+  --openid-endpoint "http://localhost:8180/realms/e-commerce/.well-known/openid-configuration" \
+  --client-id e-commerce-web \
+  --client-secret e-commerce-web-secret \
+  --redirect-uri "http://localhost:8080" \
+  --scope "openid profile email products:read orders:read orders:write reviews:read reviews:write users:read" \
+  --field .access_token \
+  --redirect-http-port 8080
+```
+
+> To use `oidc-client.sh`, add `http://localhost:8080` to `e-commerce-web`'s `redirectUris` in
+> `realm-e-commerce.json` and restart Keycloak to re-import the realm.
+
+### Service account token (Client Credentials — no browser needed)
+
+`e-commerce-service` still supports Client Credentials. The token grants only
+`scope: users:resolve` — suitable for calling `/users/resolve`, not user-facing endpoints
+like `/users/me` (which requires `users:read`).
+
+```bash
+# Via Makefile shortcut (requires jq):
+TOKEN=$(make -s us-token-sa)
+
+# Or directly:
+TOKEN=$(curl -sf -X POST \
+  http://localhost:8180/realms/e-commerce/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=e-commerce-service&client_secret=e-commerce-service-secret" \
+  | jq -r .access_token)
+```
 
 ---
 

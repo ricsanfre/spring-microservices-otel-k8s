@@ -366,20 +366,23 @@
     {
       "clientId": "e-commerce-web",
       "name": "E-Commerce Web App",
-      "description": "Public client — browser / SPA logins",
+      "description": "Confidential BFF client — Next.js server-side OIDC (Auth.js v5)",
       "enabled": true,
-      "publicClient": true,
+      "publicClient": false,
+      "secret": "e-commerce-web-secret",
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "fullScopeAllowed": false,
       "redirectUris": [
-        "http://localhost:*",
-        "http://127.0.0.1:*"
+        "http://localhost:3001/api/auth/callback/keycloak",
+        "https://app.local.test/api/auth/callback/keycloak",
+        "http://localhost:9876/callback"
       ],
       "webOrigins": [
-        "+"
+        "http://localhost:3001",
+        "https://app.local.test"
       ],
       "defaultClientScopes": [
         "openid",

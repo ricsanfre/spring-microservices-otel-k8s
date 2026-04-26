@@ -87,17 +87,29 @@ us-dev: us-infra-up us-run ## Full local dev loop: start infra, then run service
 # ──────────────────────────────────────────────────────────────────────────────
 # user-service — Keycloak tokens  (manual API testing with curl)
 #
+# e-commerce-web is a confidential BFF client (directAccessGrantsEnabled=false).
+# us-token uses Authorization Code flow via oauth2c — a browser window will open.
+#
+# Install oauth2c:
+#   curl -sSfL https://raw.githubusercontent.com/cloudentity/oauth2c/master/install.sh | \
+#     sudo sh -s -- -b /usr/local/bin latest
+#
 # Usage:
 #   TOKEN=$(make -s us-token)
-#   curl -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me
+#   curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me
 # ──────────────────────────────────────────────────────────────────────────────
 
-us-token: ## Fetch access token for testuser via password grant (requires jq)
-	@curl -sf -X POST \
-	    "http://localhost:8180/realms/e-commerce/protocol/openid-connect/token" \
-	    -H "Content-Type: application/x-www-form-urlencoded" \
-	    -d "grant_type=password&client_id=e-commerce-web&username=testuser&password=password&scope=openid+profile+email+products:read+orders:read+orders:write+reviews:read+reviews:write+users:read" \
-	    | jq -r .access_token
+us-token: ## Fetch user access token via Authorization Code flow (opens browser — requires oauth2c + jq)
+	@oauth2c "http://localhost:8180/realms/e-commerce" \
+	    --client-id e-commerce-web \
+	    --client-secret e-commerce-web-secret \
+	    --grant-type authorization_code \
+	    --auth-method client_secret_post \
+	    --response-types code \
+	    --response-mode query \
+	    --scopes "openid profile email products:read orders:read orders:write reviews:read reviews:write users:read" \
+	    --redirect-url http://localhost:9876/callback \
+	    --silent | jq -r .access_token
 
 us-token-sa: ## Fetch service account token for e-commerce-service (requires jq)
 	@curl -sf -X POST \

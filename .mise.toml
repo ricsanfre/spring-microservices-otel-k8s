@@ -18,6 +18,8 @@ k3d       = "latest"
 kustomize = "latest"
 
 # Utilities
-jq = "latest"
+jq      = "latest"
+"go:github.com/cloudentity/oauth2c" = "latest"
+go = "latest"
 
 
