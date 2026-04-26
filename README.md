@@ -524,11 +524,6 @@ flowchart TD
 
     %% ── Image registry ─────────────────────────────────────────────────────
     Dev -- "mvn jib:build\n→ localhost:5000" --> REG
-    REG -- "pull e-commerce-registry:5000\nimagePullPolicy: Always" --> US
-    REG -- "pull e-commerce-registry:5000\nimagePullPolicy: Always" --> PS
-    REG -- "pull e-commerce-registry:5000\nimagePullPolicy: Always" --> OS
-    REG -- "pull e-commerce-registry:5000\nimagePullPolicy: Always" --> RS
-    REG -- "pull e-commerce-registry:5000\nimagePullPolicy: Always" --> NS_SVC
 
     %% ── External traffic ────────────────────────────────────────────────────
     Client -- "HTTPS *.local.test" --> LB
