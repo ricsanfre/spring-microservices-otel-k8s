@@ -763,12 +763,12 @@ make us-dev
 # User token — Authorization Code flow (opens browser for Keycloak login)
 # Requires: oauth2c installed (via `mise install`)
 TOKEN=$(make -s us-token)
-curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me
+curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/api/v1/users/me
 
 # Service-account token (client credentials — no browser required)
 SA_TOKEN=$(make -s us-token-sa)
 curl -H "Authorization: Bearer $SA_TOKEN" \
-     "http://localhost:8085/users/resolve?idp_subject=<sub>"
+     "http://localhost:8085/api/v1/users/resolve?idp_subject=<sub>"
 ```
 
 > `make us-token` uses [oauth2c](https://github.com/cloudentity/oauth2c) to perform the
@@ -829,7 +829,7 @@ frontend-service/
 ├── .env.local.example     ← copy to .env.local; fill AUTH_SECRET + AUTH_KEYCLOAK_SECRET
 ├── Dockerfile             ← multi-stage build; output:standalone for k8s
 ├── next.config.ts         ← output:"standalone" enabled
-├── package.json           ← Next.js 15, next-auth v5, React 19; dev port 3001
+├── package.json           ← Next.js 15, next-auth 5.0.0-beta (Auth.js v5), React 19; dev port 3001
 └── src/
     ├── auth.ts            ← Auth.js v5: Keycloak provider, JWT/session callbacks, token refresh
     ├── middleware.ts      ← protects all routes (redirects to Keycloak login if no session)

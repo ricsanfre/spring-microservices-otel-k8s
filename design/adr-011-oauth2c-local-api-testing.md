@@ -70,7 +70,7 @@ Usage:
 
 ```bash
 TOKEN=$(make -s us-token) && \
-  curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me
+  curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/api/v1/users/me
 ```
 
 oauth2c's default callback URL (`http://localhost:9876/callback`) is registered in

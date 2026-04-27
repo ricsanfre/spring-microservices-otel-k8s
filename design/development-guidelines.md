@@ -246,6 +246,26 @@ public class ProductController implements ProductsApi {
 }
 ```
 
+### `servers.url` is NOT applied automatically by the generator
+
+The `openapi-generator-maven-plugin` with `interfaceOnly: true` generates **method-level** `@RequestMapping` annotations only (e.g. `@RequestMapping(value = "/products/{id}", ...)`). It intentionally ignores the `servers[0].url` base path (`/api/v1`) so the same interface contract can be deployed behind an API gateway that re-strips the prefix.
+
+**You must apply the base path yourself** by adding a class-level `@RequestMapping` on the concrete controller:
+
+```java
+@RestController
+@RequestMapping("/api/v1")   // ← mirrors servers[0].url in the OpenAPI spec
+@RequiredArgsConstructor
+public class ProductController implements ProductsApi {
+    // Spring MVC merges class-level + method-level mappings:
+    //   /api/v1  +  /products/{id}  →  GET /api/v1/products/{id}
+}
+```
+
+> **Do NOT use `server.servlet.context-path`** in `application.yaml` for this purpose — it shifts the entire servlet container (actuator, Swagger UI, etc.) and prevents multiple API versions from coexisting.
+
+> **MockMvc tests** do not include the servlet context path, so integration tests use bare paths (`/products/{id}`) regardless of the `@RequestMapping` prefix on the controller — tests do not need to change.
+
 ### Swagger UI
 
 Configure in `application.yaml`:
@@ -1234,7 +1254,7 @@ make us-dev
 
 # In another terminal — get a token and test an endpoint
 TOKEN=$(make -s us-token)
-curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me | jq .
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8085/api/v1/users/me | jq .
 
 # Tear down (preserves postgres data)
 make us-infra-down

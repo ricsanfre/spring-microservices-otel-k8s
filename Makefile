@@ -96,7 +96,7 @@ us-dev: us-infra-up us-run ## Full local dev loop: start infra, then run service
 #
 # Usage:
 #   TOKEN=$(make -s us-token)
-#   curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me
+#   curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/api/v1/users/me
 # ──────────────────────────────────────────────────────────────────────────────
 
 us-token: ## Fetch user access token via Authorization Code flow (opens browser — requires oauth2c + jq)

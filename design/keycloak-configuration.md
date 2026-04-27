@@ -483,14 +483,14 @@ TOKEN=$(oauth2c http://localhost:8180/realms/e-commerce \
   --redirect-url http://localhost:9876/callback \
   | jq -r .access_token)
 
-curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me
+curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/api/v1/users/me
 ```
 
 Or via the Makefile shortcut (requires `oauth2c` + `jq` installed):
 
 ```bash
 TOKEN=$(make -s us-token) && \
-  curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me
+  curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/api/v1/users/me
 ```
 
 `oauth2c` opens a browser for the Keycloak login page. Once the user authenticates, Keycloak

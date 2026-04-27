@@ -7,8 +7,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Keycloak({
       // Auth.js v5 auto-reads AUTH_KEYCLOAK_ID / AUTH_KEYCLOAK_SECRET / AUTH_KEYCLOAK_ISSUER
       // from the environment — no need to pass them explicitly.
+      // Request all optional scopes the BFF needs so they appear in the access_token.
+      authorization: {
+        params: {
+          scope:
+            "openid profile email users:read orders:read products:read reviews:read",
+        },
+      },
     }),
   ],
+
+  pages: {
+    signIn: "/login",
+  },
 
   callbacks: {
     // Persist the access_token and refresh_token in the encrypted JWT session cookie
