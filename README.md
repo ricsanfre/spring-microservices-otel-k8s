@@ -760,15 +760,21 @@ make us-dev
 **Get a token and call the API:**
 
 ```bash
-# User token (password grant — testuser / password)
+# User token — Authorization Code flow (opens browser for Keycloak login)
+# Requires: oauth2c installed (via `mise install`)
 TOKEN=$(make -s us-token)
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me
+curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me
 
-# Service-account token (client credentials — for /users/resolve)
+# Service-account token (client credentials — no browser required)
 SA_TOKEN=$(make -s us-token-sa)
 curl -H "Authorization: Bearer $SA_TOKEN" \
      "http://localhost:8085/users/resolve?idp_subject=<sub>"
 ```
+
+> `make us-token` uses [oauth2c](https://github.com/cloudentity/oauth2c) to perform the
+> Authorization Code flow. A browser window opens to the Keycloak login page; after login,
+> the token is captured automatically. See [ADR-011](design/adr-011-oauth2c-local-api-testing.md)
+> for rationale (password grant is disabled on the BFF client).
 
 **Access points:**
 

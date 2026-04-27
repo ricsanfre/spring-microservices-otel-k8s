@@ -452,7 +452,8 @@ login step. Two CLI tools support this from a terminal.
 [`oauth2c`](https://github.com/cloudentity/oauth2c) (Cloudentity / SecureAuthCorp, 900+ stars,
 Go binary, Apache-2.0) is the most widely used OAuth2 CLI tool. It handles the full Authorization
 Code flow: opens a browser automatically, listens on a local callback port, and prints the token
-response JSON to stdout. The `--silent` flag makes it scriptable.
+response JSON to stdout. Verbose request/response logs go to stderr, keeping stdout clean for
+shell variable capture (`TOKEN=$(make -s us-token)`).
 
 **Install:**
 
@@ -480,7 +481,7 @@ TOKEN=$(oauth2c http://localhost:8180/realms/e-commerce \
   --response-mode query \
   --scopes "openid profile email products:read orders:read orders:write reviews:read reviews:write users:read" \
   --redirect-url http://localhost:9876/callback \
-  --silent | jq -r .access_token)
+  | jq -r .access_token)
 
 curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/users/me
 ```

@@ -109,7 +109,7 @@ us-token: ## Fetch user access token via Authorization Code flow (opens browser 
 	    --response-mode query \
 	    --scopes "openid profile email products:read orders:read orders:write reviews:read reviews:write users:read" \
 	    --redirect-url http://localhost:9876/callback \
-	    --silent | jq -r .access_token
+	    | jq -r .access_token
 
 us-token-sa: ## Fetch service account token for e-commerce-service (requires jq)
 	@curl -sf -X POST \

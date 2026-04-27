@@ -63,7 +63,7 @@ us-token:
 	    --response-mode query \
 	    --scopes "openid profile email products:read orders:read orders:write reviews:read reviews:write users:read" \
 	    --redirect-url http://localhost:9876/callback \
-	    --silent | jq -r .access_token
+	    | jq -r .access_token
 ```
 
 Usage:
@@ -86,7 +86,7 @@ oauth2c's default callback URL (`http://localhost:9876/callback`) is registered 
 |---------|------------------------|------------------|-----------|
 | Works with confidential BFF (`directAccessGrantsEnabled: false`) | ✗ | ✓ | ✓ |
 | Handles Authorization Code flow automatically | ✗ | ✓ (via `nc`) | ✓ (built-in HTTP server) |
-| Scriptable (no manual steps after browser login) | ✓ | Partial | ✓ (`--silent` flag) |
+| Scriptable (no manual steps after browser login) | ✓ | Partial | ✓ (logs to stderr, token JSON to stdout) |
 | Single binary, no shell dependencies | ✓ | ✗ (requires `nc`, `bash`) | ✓ |
 | Actively maintained | — | Low activity | ✓ (900+ stars, regular releases) |
 | Installable via mise | ✓ | ✗ | ✓ (`go:` backend) |
@@ -103,8 +103,8 @@ Keycloak `/auth` endpoint. When Keycloak sends the browser back to
 3. Prints the full token response JSON to stdout
 4. Shuts down the local server
 
-The `--silent` flag suppresses intermediate log lines, leaving only the JSON on stdout — suitable
-for shell variable capture: `TOKEN=$(make -s us-token)`.
+oauth2c writes verbose request/response logs to stderr, keeping stdout clean so the token JSON
+can be captured directly: `TOKEN=$(make -s us-token)`.
 
 ### Service account tokens (unchanged)
 
@@ -128,8 +128,8 @@ JSON and depends on `nc` (netcat) being available.
 - `make us-token` works correctly against a confidential BFF client — the flow matches production
 - Developers get a realistic Authorization Code round-trip rather than a deprecated password grant
 - oauth2c is installed automatically via `mise install` — no separate installation step
-- The `--silent | jq -r .access_token` pipeline is drop-in compatible with the previous
-  `make -s us-token` usage
+- oauth2c writes verbose request/response logs to stderr; stdout carries only the token JSON,
+  so `| jq -r .access_token` and `TOKEN=$(make -s us-token)` work correctly
 
 ### Negative / Trade-offs
 
