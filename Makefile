@@ -20,6 +20,9 @@ KEYCLOAK_OPERATOR_VERSION ?= 26.6.1  # https://github.com/keycloak/keycloak-k8s-
         us-infra-up us-infra-down us-infra-clean us-infra-logs us-infra-ps \
         us-run us-dev \
         us-token us-token-sa \
+        ps-build ps-test ps-image \
+        ps-infra-up ps-infra-down ps-infra-clean \
+        ps-run ps-dev \
         k3d-create k3d-delete k3d-info \
         k8s-namespaces k8s-operators k8s-keycloak-operator \
         k8s-infra k8s-infra-cert-manager k8s-infra-postgres k8s-infra-mongodb \
@@ -83,6 +86,43 @@ us-run: us-build ## Build then run user-service JAR with 'local' Spring profile
 	    --spring.profiles.active=local
 
 us-dev: us-infra-up us-run ## Full local dev loop: start infra, then run service
+
+# ──────────────────────────────────────────────────────────────────────────────
+# product-service — build & test
+# ──────────────────────────────────────────────────────────────────────────────
+
+ps-build: ## Compile + package product-service JAR (tests skipped)
+	$(MAVEN) -pl common,product-service -am package -DskipTests --no-transfer-progress
+
+ps-test: ## Run product-service unit + integration tests
+	$(MAVEN) -pl common,product-service -am test --no-transfer-progress
+
+ps-image: ps-build ## Build product-service container image to local Docker daemon (Jib)
+	$(MAVEN) -pl product-service jib:dockerBuild \
+	    -Ddocker.registry=local \
+	    --no-transfer-progress
+
+# ──────────────────────────────────────────────────────────────────────────────
+# product-service — infrastructure  (Docker Compose profiles: infra + auth + observability)
+# ──────────────────────────────────────────────────────────────────────────────
+
+ps-infra-up: ## Start infrastructure for product-service: mongodb, keycloak, grafana-lgtm
+	docker compose $(_COMPOSE_PROFILES) up -d --wait
+
+ps-infra-down: ## Stop + remove infra containers (named volumes preserved)
+	docker compose $(_COMPOSE_PROFILES) down
+
+ps-infra-clean: ## Stop + remove infra containers AND delete data volumes
+	docker compose $(_COMPOSE_PROFILES) down -v
+
+# ──────────────────────────────────────────────────────────────────────────────
+# product-service — run locally (JAR, Spring profile: local)
+# ──────────────────────────────────────────────────────────────────────────────
+
+ps-run: ps-build ## Build then run product-service JAR
+	java -jar product-service/target/product-service-*.jar
+
+ps-dev: ps-infra-up ps-run ## Full local dev loop: start infra, then run product-service
 
 # ──────────────────────────────────────────────────────────────────────────────
 # user-service — Keycloak tokens  (manual API testing with curl)

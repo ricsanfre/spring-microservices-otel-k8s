@@ -1,0 +1,238 @@
+openapi: 3.1.0
+info:
+  title: Product Service API
+  description: Product catalog — CRUD with paginated listing and inventory quantities
+  version: "1.0.0"
+
+servers:
+  - url: /api/v1
+
+tags:
+  - name: Products
+    description: Product catalog operations
+
+paths:
+
+  /products:
+    get:
+      tags: [Products]
+      operationId: listProducts
+      summary: List products (paginated)
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: category
+          in: query
+          description: Filter by category (exact match, case-insensitive)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated product list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductPage'
+        "401":
+          description: Unauthorized
+
+    post:
+      tags: [Products]
+      operationId: createProduct
+      summary: Create a product (ADMIN only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+      responses:
+        "201":
+          description: Product created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        "400":
+          description: Validation error
+        "403":
+          description: Forbidden — ADMIN role required
+
+  /products/{id}:
+    get:
+      tags: [Products]
+      operationId: getProductById
+      summary: Get product by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Product
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        "404":
+          description: Product not found
+
+    put:
+      tags: [Products]
+      operationId: updateProduct
+      summary: Update a product (ADMIN only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProductRequest'
+      responses:
+        "200":
+          description: Updated product
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+        "400":
+          description: Validation error
+        "403":
+          description: Forbidden — ADMIN role required
+        "404":
+          description: Product not found
+
+    delete:
+      tags: [Products]
+      operationId: deleteProduct
+      summary: Delete a product (ADMIN only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Product deleted
+        "403":
+          description: Forbidden — ADMIN role required
+        "404":
+          description: Product not found
+
+components:
+  schemas:
+
+    ProductResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: MongoDB ObjectId as hex string
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+          format: double
+        category:
+          type: string
+        imageUrl:
+          type: string
+        stockQty:
+          type: integer
+          format: int32
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProductPage:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductResponse'
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+
+    CreateProductRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 2000
+        price:
+          type: number
+          format: double
+          minimum: 0.0
+        category:
+          type: string
+          minLength: 1
+          maxLength: 100
+        imageUrl:
+          type: string
+          maxLength: 1024
+        stockQty:
+          type: integer
+          format: int32
+          minimum: 0
+
+    UpdateProductRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 2000
+        price:
+          type: number
+          format: double
+          minimum: 0.0
+        category:
+          type: string
+          minLength: 1
+          maxLength: 100
+        imageUrl:
+          type: string
+          maxLength: 1024
+        stockQty:
+          type: integer
+          format: int32
+          minimum: 0

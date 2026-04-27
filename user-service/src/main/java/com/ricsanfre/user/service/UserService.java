@@ -58,6 +58,7 @@ public class UserService {
 
     @Transactional
     public UserResponse update(UUID id, UpdateUserRequest request, Authentication authentication) {
+        log.info("Updating user profile id={} with data={}", id, request);
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User", id));
 
