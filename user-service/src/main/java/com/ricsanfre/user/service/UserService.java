@@ -2,6 +2,8 @@ package com.ricsanfre.user.service;
 
 import com.ricsanfre.common.exception.ResourceNotFoundException;
 import com.ricsanfre.common.security.JwtUtils;
+import com.ricsanfre.user.api.model.BillingAccount;
+import com.ricsanfre.user.api.model.ShippingAddress;
 import com.ricsanfre.user.api.model.UpdateUserRequest;
 import com.ricsanfre.user.api.model.UserResponse;
 import com.ricsanfre.user.domain.User;
@@ -68,6 +70,24 @@ public class UserService {
         if (request.getFirstName() != null) user.setFirstName(request.getFirstName());
         if (request.getLastName() != null)  user.setLastName(request.getLastName());
 
+        var addr = request.getShippingAddress();
+        if (addr != null) {
+            if (addr.getStreet() != null)     user.setAddressStreet(addr.getStreet());
+            if (addr.getCity() != null)       user.setAddressCity(addr.getCity());
+            if (addr.getState() != null)      user.setAddressState(addr.getState());
+            if (addr.getPostalCode() != null) user.setAddressPostalCode(addr.getPostalCode());
+            if (addr.getCountry() != null)    user.setAddressCountry(addr.getCountry());
+        }
+
+        var billing = request.getBillingAccount();
+        if (billing != null) {
+            if (billing.getCardHolder() != null) user.setBillingCardHolder(billing.getCardHolder());
+            if (billing.getCardLast4() != null)  user.setBillingCardLast4(billing.getCardLast4());
+            if (billing.getCardExpiry() != null) user.setBillingCardExpiry(billing.getCardExpiry());
+            if (billing.getSameAsShipping() != null)
+                user.setBillingSameAsShipping(billing.getSameAsShipping());
+        }
+
         return toResponse(userRepository.save(user));
     }
 
@@ -84,12 +104,36 @@ public class UserService {
     }
 
     private UserResponse toResponse(User user) {
+        ShippingAddress addr = null;
+        if (user.getAddressStreet() != null || user.getAddressCity() != null
+                || user.getAddressPostalCode() != null || user.getAddressCountry() != null) {
+            addr = ShippingAddress.builder()
+                    .street(user.getAddressStreet())
+                    .city(user.getAddressCity())
+                    .state(user.getAddressState())
+                    .postalCode(user.getAddressPostalCode())
+                    .country(user.getAddressCountry())
+                    .build();
+        }
+
+        BillingAccount billing = null;
+        if (user.getBillingCardHolder() != null || user.getBillingCardLast4() != null) {
+            billing = BillingAccount.builder()
+                    .cardHolder(user.getBillingCardHolder())
+                    .cardLast4(user.getBillingCardLast4())
+                    .cardExpiry(user.getBillingCardExpiry())
+                    .sameAsShipping(user.isBillingSameAsShipping())
+                    .build();
+        }
+
         return UserResponse.builder()
                 .id(user.getId())
                 .username(user.getUsername())
                 .email(user.getEmail())
                 .firstName(user.getFirstName())
                 .lastName(user.getLastName())
+                .shippingAddress(addr)
+                .billingAccount(billing)
                 .createdAt(user.getCreatedAt() != null
                         ? user.getCreatedAt().atOffset(ZoneOffset.UTC) : null)
                 .updatedAt(user.getUpdatedAt() != null

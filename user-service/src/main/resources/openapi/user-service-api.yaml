@@ -112,6 +112,56 @@ paths:
 components:
   schemas:
 
+    ShippingAddress:
+      type: object
+      description: Postal address used for order delivery
+      properties:
+        street:
+          type: string
+          maxLength: 255
+        city:
+          type: string
+          maxLength: 100
+        state:
+          type: string
+          maxLength: 100
+          description: State, province, or region
+        postalCode:
+          type: string
+          maxLength: 20
+        country:
+          type: string
+          minLength: 2
+          maxLength: 2
+          description: ISO 3166-1 alpha-2 country code (e.g. "US", "ES")
+
+    BillingAccount:
+      type: object
+      description: |
+        Payment card display metadata. Only the last-four digits and cardholder name
+        are stored; full PAN and CVV are never persisted.
+      properties:
+        cardHolder:
+          type: string
+          maxLength: 255
+          description: Name as it appears on the card
+        cardLast4:
+          type: string
+          minLength: 4
+          maxLength: 4
+          pattern: '^\d{4}$'
+          description: Last four digits of the payment card
+        cardExpiry:
+          type: string
+          minLength: 5
+          maxLength: 5
+          pattern: '^\d{2}/\d{2}$'
+          description: Card expiry in MM/YY format
+        sameAsShipping:
+          type: boolean
+          default: true
+          description: When true, the billing address matches the shipping address
+
     UserResponse:
       type: object
       properties:
@@ -127,6 +177,10 @@ components:
           type: string
         lastName:
           type: string
+        shippingAddress:
+          $ref: '#/components/schemas/ShippingAddress'
+        billingAccount:
+          $ref: '#/components/schemas/BillingAccount'
         createdAt:
           type: string
           format: date-time
@@ -147,3 +201,7 @@ components:
         lastName:
           type: string
           maxLength: 100
+        shippingAddress:
+          $ref: '#/components/schemas/ShippingAddress'
+        billingAccount:
+          $ref: '#/components/schemas/BillingAccount'

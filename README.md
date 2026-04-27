@@ -277,6 +277,8 @@ Pure Kafka consumer. No REST API. No database. Receives order events and dispatc
 
 Stores user profile data. **Does not store passwords** — Keycloak manages credentials. The `idp_subject` field stores the IAM provider's `sub` UUID, used only within this service for identity resolution.
 
+The profile also holds a **shipping address** and a **billing account** (card display metadata only) that `order-service` uses when processing a purchase order.
+
 > **IAM portability:** `user-service` is the **only** service that knows about Keycloak's `sub`. All other services reference the internal `users.id` UUID. On a future IAM provider migration, only the `idp_subject` column in this one service needs updating. See [design/iam-portability.md](design/iam-portability.md).
 
 **REST API**
@@ -286,8 +288,30 @@ Stores user profile data. **Does not store passwords** — Keycloak manages cred
 | `GET` | `/api/v1/users/me` | Get own profile (resolved from JWT `sub`) | Any authenticated user |
 | `GET` | `/api/v1/users/{id}` | Get user profile by ID | Any authenticated user |
 | `GET` | `/api/v1/users/resolve?idp_subject={sub}` | Resolve IAM `sub` → internal user profile | Service account only |
-| `PUT` | `/api/v1/users/{id}` | Update own profile | Owner |
+| `PUT` | `/api/v1/users/{id}` | Update own profile (name, address, billing) | Owner |
 | `POST` | `/api/v1/users` | Create user profile (lazy registration) | Any authenticated user |
+
+**`PUT /api/v1/users/{id}` request body (all fields optional / patch semantics)**
+
+```json
+{
+  "firstName": "Jane",
+  "lastName":  "Doe",
+  "shippingAddress": {
+    "street":     "123 Main St",
+    "city":       "Springfield",
+    "state":      "IL",
+    "postalCode": "62701",
+    "country":    "US"
+  },
+  "billingAccount": {
+    "cardHolder":    "Jane Doe",
+    "cardLast4":     "4242",
+    "cardExpiry":    "12/28",
+    "sameAsShipping": true
+  }
+}
+```
 
 > **Lazy registration flow:** On every call to `GET /api/v1/users/me`, `user-service` resolves the caller's profile in three steps: **(1)** look up by `idp_subject = sub` — found → return immediately; **(2)** not found → look up by `email` — found → re-link the existing row to the new `sub` and return (handles dev Keycloak resets or IAM migrations without losing user data); **(3)** no email match → create a new profile from the JWT claims (`email`, `given_name`, `family_name`, `preferred_username`). No explicit registration step required.
 
@@ -348,18 +372,31 @@ erDiagram
 ```mermaid
 erDiagram
     USERS {
-        uuid id PK
+        uuid    id PK
         varchar idp_subject
         varchar username
         varchar email
         varchar first_name
         varchar last_name
+        varchar address_street
+        varchar address_city
+        varchar address_state
+        varchar address_postal_code
+        char    address_country
+        varchar billing_card_holder
+        char    billing_card_last4
+        char    billing_card_expiry
+        boolean billing_same_as_shipping
         timestamp created_at
         timestamp updated_at
     }
 ```
 
 > `idp_subject` — the `sub` UUID issued by the IAM provider (Keycloak). Indexed for fast lookup. Used **only** inside `user-service` to link a JWT to the internal profile. Cross-service references always use `id` instead, keeping all other services IAM-agnostic.
+>
+> **Address** — shipping address used by `order-service` when dispatching orders. All columns are nullable; users fill them in from the Profile page.
+>
+> **Billing** — only the cardholder name, last-four card digits, and expiry (MM/YY) are stored for display purposes. Full PAN and CVV are **never** persisted.
 
 ---
 

@@ -44,6 +44,41 @@ public class User {
     @Column(name = "last_name")
     private String lastName;
 
+    // ── Shipping address ────────────────────────────────────────────────────
+    @Column(name = "address_street")
+    private String addressStreet;
+
+    @Column(name = "address_city")
+    private String addressCity;
+
+    @Column(name = "address_state")
+    private String addressState;
+
+    @Column(name = "address_postal_code")
+    private String addressPostalCode;
+
+    /** ISO 3166-1 alpha-2 country code, e.g. "US", "ES". */
+    @Column(name = "address_country", length = 2)
+    private String addressCountry;
+
+    // ── Billing account ─────────────────────────────────────────────────────
+    /** Cardholder display name — never store the full PAN or CVV. */
+    @Column(name = "billing_card_holder")
+    private String billingCardHolder;
+
+    /** Last four digits of the payment card, for display only. */
+    @Column(name = "billing_card_last4", length = 4)
+    private String billingCardLast4;
+
+    /** Card expiry in MM/YY format, for display only. */
+    @Column(name = "billing_card_expiry", length = 5)
+    private String billingCardExpiry;
+
+    /** When true, billing address is the same as the shipping address above. */
+    @Column(name = "billing_same_as_shipping", nullable = false)
+    @Builder.Default
+    private boolean billingSameAsShipping = true;
+
     @CreatedDate
     @Column(name = "created_at", updatable = false, nullable = false)
     private Instant createdAt;
