@@ -905,6 +905,60 @@ make us-infra-clean   # stop containers AND delete data volumes
 
 ---
 
+#### product-service
+
+```bash
+# 1. Start infrastructure (mongodb + keycloak + grafana-lgtm)
+make ps-infra-up
+
+# 2. Build JAR and run
+make ps-run
+
+# Shortcut: infra-up + run in one command
+make ps-dev
+```
+
+**Seed the product catalog (books — sci-fi & fantasy):**
+
+The MongoDB container auto-seeds on first start via `docker/mongo/init-products.js`. If the data volume already exists you can re-run the seed explicitly:
+
+```bash
+make ps-seed   # idempotent — skips silently if catalog already populated
+```
+
+To wipe and re-seed from scratch:
+
+```bash
+make ps-infra-clean   # destroy volumes
+make ps-infra-up      # re-create containers → init script runs automatically
+```
+
+**Call the API (token from any running Keycloak session):**
+
+```bash
+# Obtain a user token via Authorization Code flow (reuses the same Keycloak as user-service)
+TOKEN=$(make -s us-token)
+
+# List all products (paginated)
+curl -s -H "Authorization: Bearer $TOKEN" \
+     "http://localhost:8081/api/v1/products" | jq .
+
+# Filter by category
+curl -s -H "Authorization: Bearer $TOKEN" \
+     "http://localhost:8081/api/v1/products?category=science-fiction" | jq .
+curl -s -H "Authorization: Bearer $TOKEN" \
+     "http://localhost:8081/api/v1/products?category=fantasy" | jq .
+```
+
+**Stopping infrastructure:**
+
+```bash
+make ps-infra-down    # stop containers, keep data volumes
+make ps-infra-clean   # stop containers AND delete data volumes
+```
+
+---
+
 #### frontend-service
 
 ```bash

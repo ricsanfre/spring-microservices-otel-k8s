@@ -22,7 +22,7 @@ KEYCLOAK_OPERATOR_VERSION ?= 26.6.1  # https://github.com/keycloak/keycloak-k8s-
         us-token us-token-sa \
         ps-build ps-test ps-image \
         ps-infra-up ps-infra-down ps-infra-clean \
-        ps-run ps-dev \
+        ps-run ps-dev ps-seed \
         cs-build cs-test cs-image \
         cs-infra-up cs-infra-down cs-infra-clean \
         cs-run cs-dev \
@@ -127,6 +127,10 @@ ps-run: ps-build ## Build then run product-service JAR
 	java -jar product-service/target/product-service-*.jar
 
 ps-dev: ps-infra-up ps-run ## Full local dev loop: start infra, then run product-service
+
+ps-seed: ## Seed product-service MongoDB with 20 sci-fi & fantasy books (idempotent)
+	docker compose exec mongo \
+	    mongosh --quiet products /docker-entrypoint-initdb.d/init-products.js
 
 # ──────────────────────────────────────────────────────────────────────────────
 # cart-service — build & test
