@@ -68,24 +68,11 @@
         </dependency>
 
         <!-- ── Test ─────────────────────────────────────────────────────── -->
+        <!-- spring-boot-starter-data-mongodb-test brings spring-boot-starter-test,
+             spring-boot-testcontainers, and testcontainers-mongodb transitively -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-testcontainers</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers-junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers-mongodb</artifactId>
+            <artifactId>spring-boot-starter-data-mongodb-test</artifactId>
             <scope>test</scope>
         </dependency>
 

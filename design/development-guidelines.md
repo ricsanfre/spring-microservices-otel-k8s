@@ -583,6 +583,21 @@ spring:
 
 ### MongoDB — Spring Data MongoDB
 
+#### `application.yaml`
+
+```yaml
+spring:
+  mongodb:
+    uri: ${MONGODB_URI:mongodb://localhost:27017/products}
+```
+
+> **Spring Boot 4 migration note:** The MongoDB connection URI property was renamed in Spring Boot 4.
+> Use `spring.mongodb.uri` (and `spring.mongodb.host`, `spring.mongodb.port`, etc.).
+> The old `spring.data.mongodb.uri` is no longer recognised — the service will silently connect to the
+> default `test` database and all queries return empty results.
+> Properties that require Spring Data MongoDB (e.g. `spring.data.mongodb.auto-index-creation`,
+> `spring.data.mongodb.repositories.type`) are unchanged.
+
 #### Document conventions
 
 ```java

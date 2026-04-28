@@ -9,7 +9,7 @@ const SERVICE_URLS: Record<string, string> = {
 
 /**
  * Server-side fetch to a microservice with the current user's access_token forwarded.
- * Must only be called from Server Components or Route Handlers.
+ * Throws if there is no active session. Must only be called from Server Components or Route Handlers.
  */
 export async function apiFetch(
   service: keyof typeof SERVICE_URLS,
@@ -33,5 +33,33 @@ export async function apiFetch(
       ...init?.headers,
       Authorization: `Bearer ${session.accessToken}`,
     },
+  });
+}
+
+/**
+ * Server-side fetch to a public microservice endpoint.
+ * Forwards the access_token if a session exists, but does NOT require one.
+ * Use for endpoints that permit unauthenticated access on the backend (e.g. product catalog).
+ */
+export async function publicFetch(
+  service: keyof typeof SERVICE_URLS,
+  path: string,
+  init?: RequestInit,
+): Promise<Response> {
+  const session = await auth();
+  const url = `${SERVICE_URLS[service]}${path}`;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string>),
+  };
+  if (session?.accessToken) {
+    headers["Authorization"] = `Bearer ${session.accessToken}`;
+  }
+
+  return fetch(url, {
+    ...init,
+    cache: "no-store",
+    headers,
   });
 }

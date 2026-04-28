@@ -129,8 +129,8 @@ ps-run: ps-build ## Build then run product-service JAR
 ps-dev: ps-infra-up ps-run ## Full local dev loop: start infra, then run product-service
 
 ps-seed: ## Seed product-service MongoDB with 20 sci-fi & fantasy books (idempotent)
-	docker compose exec mongo \
-	    mongosh --quiet products /docker-entrypoint-initdb.d/init-products.js
+	docker compose cp docker/mongo/init-products.js mongo:/tmp/init-products.js
+	docker compose exec -T mongo mongosh --quiet products /tmp/init-products.js
 
 # ──────────────────────────────────────────────────────────────────────────────
 # cart-service — build & test

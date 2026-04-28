@@ -1,4 +1,4 @@
-import { apiFetch } from "@/lib/api";
+import { publicFetch } from "@/lib/api";
 
 interface Product {
   id: string;
@@ -20,7 +20,7 @@ export default async function ProductsPage() {
   let error: string | null = null;
 
   try {
-    const res = await apiFetch("products", "/api/v1/products?page=0&size=20");
+    const res = await publicFetch("products", "/api/v1/products?page=0&size=20");
     if (!res.ok) {
       error = `Failed to load products (HTTP ${res.status})`;
     } else {
