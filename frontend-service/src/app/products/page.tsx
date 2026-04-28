@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { publicFetch } from "@/lib/api";
 
 interface Product {
@@ -40,6 +41,15 @@ export default async function ProductsPage() {
       <div className="card-grid">
         {products.map((p) => (
           <div key={p.id} className="card">
+            {p.imageUrl && (
+              <Image
+                src={p.imageUrl}
+                alt={p.name}
+                width={200}
+                height={280}
+                style={{ width: "100%", height: "auto", borderRadius: "0.25rem", marginBottom: "0.5rem" }}
+              />
+            )}
             <h3>{p.name}</h3>
             <p style={{ fontSize: "0.8rem", color: "#64748b", margin: "0.25rem 0" }}>
               {p.category}
