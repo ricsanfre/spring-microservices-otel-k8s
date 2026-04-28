@@ -33,6 +33,11 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
+  name: valkey
+---
+apiVersion: v1
+kind: Namespace
+metadata:
   name: postgres
 ---
 apiVersion: v1

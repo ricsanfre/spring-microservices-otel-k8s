@@ -21,10 +21,11 @@
 12. [Code Style — Lombok](#12-code-style--lombok)
 13. [Testing Strategy](#13-testing-strategy)
 14. [Virtual Threads](#14-virtual-threads)
-15. [Quick Reference Checklist](#15-quick-reference-checklist)
-16. [Local Development Workflow (Docker Compose + Makefile)](#16-local-development-workflow-docker-compose--makefile)
-17. [Kubernetes Deployment](#17-kubernetes-deployment)
-18. [CI/CD — GitHub Actions](#18-cicd--github-actions)
+15. [Caching — Valkey / Spring Data Redis](#15-caching--valkey--spring-data-redis)
+16. [Quick Reference Checklist](#16-quick-reference-checklist)
+17. [Local Development Workflow (Docker Compose + Makefile)](#17-local-development-workflow-docker-compose--makefile)
+18. [Kubernetes Deployment](#18-kubernetes-deployment)
+19. [CI/CD — GitHub Actions](#19-cicd--github-actions)
 
 ---
 
@@ -1126,7 +1127,252 @@ Also set the corresponding JVM flag in the Jib container config (`-Dspring.threa
 
 ---
 
-## 15. Quick Reference Checklist
+## 16. Caching — Valkey / Spring Data Redis
+
+`cart-service` uses **Valkey** as its primary data store (not a secondary cache layer). Valkey is Redis-compatible, so `spring-boot-starter-data-redis` works without changes. The same guidelines apply to any future service that uses Valkey or Redis.
+
+### Dependency
+
+Add to the service's `pom.xml` (no version needed — managed by the root BOM):
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-redis</artifactId>
+</dependency>
+```
+
+### `application.yaml` connection config
+
+```yaml
+spring:
+  data:
+    redis:
+      host: ${VALKEY_HOST:localhost}
+      port: ${VALKEY_PORT:6379}
+      # password: ${VALKEY_PASSWORD:}    # uncomment if auth is enabled
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms          # wait indefinitely for a connection (adjust per SLA)
+```
+
+> **Local dev defaults** point at `localhost:6379` (the Docker Compose Valkey container on the `infra` profile).
+> In Kubernetes, `VALKEY_HOST` is overridden via the service's `ConfigMap` to `valkey.valkey.svc.cluster.local`.
+
+### `RedisTemplate` configuration
+
+Define a `RedisTemplate<String, Object>` bean with JSON serialization. Using `StringRedisSerializer` for keys and `GenericJackson2JsonRedisSerializer` for values keeps stored data human-readable and evolvable:
+
+```java
+@Configuration
+public class RedisConfig {
+
+    @Bean
+    public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory factory) {
+        RedisTemplate<String, Object> template = new RedisTemplate<>();
+        template.setConnectionFactory(factory);
+
+        StringRedisSerializer stringSerializer = new StringRedisSerializer();
+        GenericJackson2JsonRedisSerializer jsonSerializer =
+            new GenericJackson2JsonRedisSerializer();
+
+        template.setKeySerializer(stringSerializer);
+        template.setHashKeySerializer(stringSerializer);
+        template.setValueSerializer(jsonSerializer);
+        template.setHashValueSerializer(jsonSerializer);
+        template.afterPropertiesSet();
+        return template;
+    }
+}
+```
+
+> **Do not use the default `JdkSerializationRedisSerializer`** — it produces unreadable binary blobs, ties stored data to Java class internals, and prevents inspection with `valkey-cli`.
+
+### Key naming convention
+
+Keys **must** follow the pattern `{service}:{entity}:{id}` to prevent collisions when multiple services share a single Valkey instance:
+
+| Service | Entity | Key pattern | Example |
+|---------|--------|-------------|----------|
+| `cart-service` | shopping cart | `cart:{userId}` | `cart:550e8400-e29b-41d4-a716-446655440001` |
+
+Define key prefixes as constants, never as inline strings:
+
+```java
+public final class CacheKeys {
+    public static final String CART_PREFIX = "cart:";
+
+    public static String cartKey(UUID userId) {
+        return CART_PREFIX + userId;
+    }
+
+    private CacheKeys() {}
+}
+```
+
+### TTL management
+
+Always set a TTL on every write. **Never store data without an expiry** — unbounded growth will exhaust memory:
+
+```java
+@Service
+@RequiredArgsConstructor
+public class CartRepository {
+
+    private static final Duration CART_TTL = Duration.ofDays(7);
+
+    private final RedisTemplate<String, Object> redisTemplate;
+
+    public void save(UUID userId, CartData cart) {
+        String key = CacheKeys.cartKey(userId);
+        redisTemplate.opsForValue().set(key, cart, CART_TTL);
+    }
+
+    public Optional<CartData> findByUserId(UUID userId) {
+        Object raw = redisTemplate.opsForValue().get(CacheKeys.cartKey(userId));
+        return Optional.ofNullable((CartData) raw);
+    }
+
+    public void delete(UUID userId) {
+        redisTemplate.delete(CacheKeys.cartKey(userId));
+    }
+
+    /** Refresh TTL on every read so active carts never expire mid-session. */
+    public void refreshTtl(UUID userId) {
+        redisTemplate.expire(CacheKeys.cartKey(userId), CART_TTL);
+    }
+}
+```
+
+### `@Cacheable` / Spring Cache abstraction (secondary caches)
+
+For services that want a secondary **read-through cache** in front of a relational or document store (e.g. caching expensive product lookups), use the Spring Cache abstraction:
+
+```java
+// Enable Spring Cache in the application class:
+@SpringBootApplication
+@EnableCaching
+public class ProductServiceApplication { ... }
+```
+
+```yaml
+# application.yaml — wire the Spring Cache abstraction to Redis
+spring:
+  cache:
+    type: redis
+    redis:
+      time-to-live: 300000       # 5 minutes (milliseconds)
+      cache-null-values: false   # do not cache null (avoids masking 404s)
+```
+
+```java
+@Service
+@RequiredArgsConstructor
+public class ProductService {
+
+    private final ProductRepository productRepository;
+
+    @Cacheable(value = "products", key = "#id")
+    public ProductResponse findById(String id) {
+        return productRepository.findById(id)
+            .map(this::toResponse)
+            .orElseThrow(() -> new ResourceNotFoundException("Product", id));
+    }
+
+    @CacheEvict(value = "products", key = "#id")
+    public void deleteById(String id) {
+        productRepository.deleteById(id);
+    }
+
+    @CachePut(value = "products", key = "#result.id")
+    public ProductResponse update(String id, UpdateProductRequest request) {
+        // ... update logic ...
+    }
+}
+```
+
+> Use `@Cacheable` only for **idempotent, read-heavy** data. Avoid caching mutable data that requires complex cache invalidation logic — the complexity outweighs the benefit.
+
+### Preventing cache stampede
+
+When multiple threads miss the cache simultaneously (thundering herd), `@Cacheable` can issue redundant DB queries. Mitigate by:
+
+1. **Jittering TTLs** — add random offset: `Duration.ofMinutes(5).plus(Duration.ofSeconds(new Random().nextInt(60)))`
+2. **Keeping TTLs short** for high-cardinality data (user-specific caches)
+3. **Avoiding `@Cacheable`** on write-heavy or personalized data; use `RedisTemplate` directly with explicit TTL control
+
+### Resilience — graceful degradation on cache failure
+
+Valkey is a supporting infrastructure component. A cache outage must **never** take down the business service. Wrap cache operations with a circuit breaker or catch `RedisException` and fall through to the data store:
+
+```java
+public Optional<CartData> findByUserId(UUID userId) {
+    try {
+        Object raw = redisTemplate.opsForValue().get(CacheKeys.cartKey(userId));
+        return Optional.ofNullable((CartData) raw);
+    } catch (RedisException ex) {
+        log.warn("Valkey unavailable, serving empty cart for user {}", userId, ex);
+        return Optional.empty();   // caller treats missing cart as empty
+    }
+}
+```
+
+For services using the Spring Cache abstraction, configure a fallback via `CacheErrorHandler`:
+
+```java
+@Configuration
+public class CacheConfig extends CachingConfigurerSupport {
+
+    @Override
+    public CacheErrorHandler errorHandler() {
+        return new SimpleCacheErrorHandler();  // logs + ignores cache errors
+    }
+}
+```
+
+### Integration testing with TestContainers
+
+Use the `valkey/valkey` Docker image in TestContainers. Spring Boot's `@ServiceConnection` auto-wires the container port:
+
+```java
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Testcontainers
+class CartServiceIntegrationTest {
+
+    @Container
+    @ServiceConnection
+    static GenericContainer<?> valkey =
+        new GenericContainer<>("valkey/valkey:8-alpine")
+            .withExposedPorts(6379);
+
+    @Autowired TestRestTemplate restTemplate;
+
+    @Test
+    void addItem_givenValidRequest_returnsUpdatedCart() {
+        // Spring Boot connects to the mapped port automatically via @ServiceConnection
+        var response = restTemplate.exchange(
+            "/api/v1/cart/items/some-product-id",
+            HttpMethod.PUT,
+            buildRequest(),
+            CartResponse.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+}
+```
+
+> **`@ServiceConnection` with Valkey:** Spring Boot's built-in `@ServiceConnection` support covers `RedisContainer` from `org.testcontainers:testcontainers-redis`. For `valkey/valkey`, use `GenericContainer` with `withExposedPorts(6379)` and manually set `spring.data.redis.host` and `spring.data.redis.port` via `@DynamicPropertySource`:
+>
+> ```java
+> @DynamicPropertySource
+> static void redisProperties(DynamicPropertyRegistry registry) {
+>     registry.add("spring.data.redis.host", valkey::getHost);
+>     registry.add("spring.data.redis.port", () -> valkey.getMappedPort(6379));
+> }
+> ```
 
 When adding a new microservice, ensure all of the following are in place before merging:
 
@@ -1157,6 +1403,15 @@ When adding a new microservice, ensure all of the following are in place before 
 - [ ] Jib plugin configured in `pom.xml`
 - [ ] `spring.threads.virtual.enabled: true` in `application.yaml`
 
+### Caching (Valkey / Redis services only)
+- [ ] `spring-boot-starter-data-redis` in `pom.xml`
+- [ ] `VALKEY_HOST` / `VALKEY_PORT` environment variables in `ConfigMap` and `application.yaml` defaults
+- [ ] `RedisTemplate<String, Object>` bean with `StringRedisSerializer` (keys) + `GenericJackson2JsonRedisSerializer` (values)
+- [ ] Key naming follows `{service}:{entity}:{id}` pattern; key helpers in a `CacheKeys` constants class
+- [ ] Every write sets an explicit TTL — no unbounded keys
+- [ ] Cache errors caught and degraded gracefully (never propagate `RedisException` to callers)
+- [ ] Integration test uses `GenericContainer<>("valkey/valkey:8-alpine")` + `@DynamicPropertySource`
+
 ### Infrastructure
 - [ ] `ServiceAccount` defined in `k8s/{service}/serviceaccount.yaml`
 - [ ] Service-to-service base URLs configured via environment-specific properties (default `http://localhost:{port}` for local dev)
@@ -1180,7 +1435,7 @@ When adding a new microservice, ensure all of the following are in place before 
 
 ---
 
-## 16. Local Development Workflow (Docker Compose + Makefile)
+## 17. Local Development Workflow (Docker Compose + Makefile)
 
 The root `Makefile` and `compose.yaml` replace manual Docker Compose and Keycloak setup steps. Follow the pattern below when implementing each new microservice.
 
@@ -1265,7 +1520,7 @@ make us-infra-clean
 
 ---
 
-## 17. Kubernetes Deployment
+## 18. Kubernetes Deployment
 
 ### Local Kubernetes environment — k3d
 
@@ -1478,7 +1733,7 @@ Start services with `-Dspring-boot.run.profiles=local` to activate this profile.
 
 ---
 
-## 18. CI/CD — GitHub Actions
+## 19. CI/CD — GitHub Actions
 
 ### Pipeline overview
 

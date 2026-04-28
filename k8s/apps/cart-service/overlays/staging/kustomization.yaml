@@ -1,0 +1,34 @@
+# Staging overlay for cart-service
+# Patches the base resources with staging-specific image tags and configuration.
+#
+# Build & apply:
+#   kustomize build k8s/apps/cart-service/overlays/staging | kubectl apply -f -
+# or:
+#   kubectl apply -k k8s/apps/cart-service/overlays/staging
+resources:
+  - ../../base
+
+# Set the image to use the k3d local registry with an explicit tag.
+images:
+  - name: localhost:5000/cart-service
+    newTag: "latest"
+
+# Staging-specific patches
+patches:
+  # Scale to 1 replica on laptop (saves resources)
+  - patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: cart-service
+
+  # Overwrite imagePullPolicy to Always so the k3d registry is re-checked on each restart
+  - patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+    target:
+      kind: Deployment
+      name: cart-service

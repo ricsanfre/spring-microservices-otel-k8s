@@ -65,6 +65,28 @@ spec:
 #         - name: product-service
 #           port: 8081
 ---
+# ── cart-service (placeholder — add when service is implemented) ───────────
+# apiVersion: gateway.networking.k8s.io/v1
+# kind: HTTPRoute
+# metadata:
+#   name: cart-service
+#   namespace: e-commerce
+# spec:
+#   parentRefs:
+#     - name: eg
+#       namespace: envoy-gateway-system
+#       sectionName: https
+#   hostnames:
+#     - "api.local.test"
+#   rules:
+#     - matches:
+#         - path:
+#             type: PathPrefix
+#             value: /api/v1/cart
+#       backendRefs:
+#         - name: cart-service
+#           port: 8086
+---
 # ── Keycloak passthrough route ─────────────────────────────────────────────
 # Routes keycloak.local.test to the Keycloak service in the keycloak namespace.
 apiVersion: gateway.networking.k8s.io/v1

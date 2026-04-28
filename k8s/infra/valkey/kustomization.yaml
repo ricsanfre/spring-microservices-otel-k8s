@@ -1,0 +1,11 @@
+# Valkey Kustomize app — single-instance Deployment + ClusterIP Service
+# Namespace: valkey
+#
+# No operator required — Valkey is a single-instance cache for staging.
+# For production, consider the Bitnami Helm chart with persistence enabled.
+#
+# Apply:
+#   kubectl apply -k k8s/infra/valkey
+resources:
+  - deployment.yaml
+  - service.yaml

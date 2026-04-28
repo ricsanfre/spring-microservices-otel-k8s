@@ -1,0 +1,20 @@
+---
+# Non-sensitive configuration for cart-service.
+# Sensitive values (Keycloak secret) are injected via Secrets.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cart-service-config
+  namespace: e-commerce
+data:
+  SERVER_PORT: "8086"
+  # Valkey (Redis-compatible) — deployed in the valkey namespace
+  VALKEY_HOST: "valkey.valkey.svc.cluster.local"
+  VALKEY_PORT: "6379"
+  # Cart TTL (seconds) — 7 days
+  CART_TTL_SECONDS: "604800"
+  # Keycloak OIDC
+  KEYCLOAK_URL: "https://keycloak.local.test"
+  # OpenTelemetry Collector
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318"
+  OTEL_SERVICE_NAME: "cart-service"

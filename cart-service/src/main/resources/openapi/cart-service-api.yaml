@@ -1,0 +1,153 @@
+openapi: 3.1.0
+info:
+  title: Cart Service API
+  description: Shopping cart management — per-user cart backed by Valkey (Redis-compatible)
+  version: "1.0.0"
+
+servers:
+  - url: /api/v1
+
+tags:
+  - name: Cart
+    description: Shopping cart operations
+
+paths:
+
+  /cart:
+    get:
+      tags: [Cart]
+      operationId: getCart
+      summary: Get current user's cart (resolved from JWT sub)
+      responses:
+        "200":
+          description: Current cart contents
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartResponse'
+        "401":
+          description: Unauthorized
+
+    delete:
+      tags: [Cart]
+      operationId: clearCart
+      summary: Clear the entire cart (called by order-service after checkout)
+      responses:
+        "204":
+          description: Cart cleared
+        "401":
+          description: Unauthorized
+
+  /cart/items/{productId}:
+    put:
+      tags: [Cart]
+      operationId: upsertCartItem
+      summary: Add or update a cart item (set quantity to 0 to remove)
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CartItemRequest'
+      responses:
+        "200":
+          description: Updated cart
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartResponse'
+        "400":
+          description: Validation error
+        "401":
+          description: Unauthorized
+
+    delete:
+      tags: [Cart]
+      operationId: removeCartItem
+      summary: Remove a single item from the cart
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated cart (after removal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartResponse'
+        "401":
+          description: Unauthorized
+        "404":
+          description: Item not in cart
+
+components:
+  schemas:
+
+    CartItemResponse:
+      type: object
+      properties:
+        productId:
+          type: string
+          description: MongoDB ObjectId of the product
+        productName:
+          type: string
+        price:
+          type: number
+          format: double
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+        lineTotal:
+          type: number
+          format: double
+          description: price × quantity
+
+    CartResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+          description: Internal users.id (resolved from JWT sub via user-service)
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CartItemResponse'
+        totalItems:
+          type: integer
+          format: int32
+          description: Total number of distinct product lines
+        grandTotal:
+          type: number
+          format: double
+          description: Sum of all line totals
+        expiresAt:
+          type: string
+          format: date-time
+          description: When this cart will be evicted from Valkey (TTL-based)
+
+    CartItemRequest:
+      type: object
+      properties:
+        productName:
+          type: string
+          maxLength: 255
+        price:
+          type: number
+          format: double
+          minimum: 0.0
+        quantity:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Desired quantity. Set to 0 to remove the item from the cart.

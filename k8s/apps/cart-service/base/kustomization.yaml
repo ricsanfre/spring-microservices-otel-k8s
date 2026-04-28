@@ -1,0 +1,13 @@
+# cart-service Kustomize base
+# Deploys the core Kubernetes resources without any environment-specific configuration.
+# Environment-specific settings (image tag, resource limits, replicas) are applied
+# by the overlays in overlays/<env>/.
+resources:
+  - serviceaccount.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+
+commonLabels:
+  app.kubernetes.io/name: cart-service
+  app.kubernetes.io/part-of: e-commerce

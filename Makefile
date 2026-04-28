@@ -23,12 +23,16 @@ KEYCLOAK_OPERATOR_VERSION ?= 26.6.1  # https://github.com/keycloak/keycloak-k8s-
         ps-build ps-test ps-image \
         ps-infra-up ps-infra-down ps-infra-clean \
         ps-run ps-dev \
+        cs-build cs-test cs-image \
+        cs-infra-up cs-infra-down cs-infra-clean \
+        cs-run cs-dev \
         k3d-create k3d-delete k3d-info \
         k8s-namespaces k8s-operators k8s-keycloak-operator \
-        k8s-infra k8s-infra-cert-manager k8s-infra-postgres k8s-infra-mongodb \
+        k8s-infra k8s-infra-cert-manager k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey \
         k8s-infra-kafka k8s-infra-keycloak k8s-infra-envoy-gateway k8s-infra-monitoring k8s-infra-otel-collector k8s-up \
         k8s-apps-deploy k8s-apps-delete \
-        k8s-us-deploy k8s-us-delete k8s-us-image
+        k8s-us-deploy k8s-us-delete k8s-us-image \
+        k8s-cs-deploy k8s-cs-delete k8s-cs-image
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Help
@@ -123,6 +127,44 @@ ps-run: ps-build ## Build then run product-service JAR
 	java -jar product-service/target/product-service-*.jar
 
 ps-dev: ps-infra-up ps-run ## Full local dev loop: start infra, then run product-service
+
+# ──────────────────────────────────────────────────────────────────────────────
+# cart-service — build & test
+# ──────────────────────────────────────────────────────────────────────────────
+
+cs-build: ## Compile + package cart-service JAR (tests skipped)
+	$(MAVEN) -pl common,cart-service -am package -DskipTests --no-transfer-progress
+
+cs-test: ## Run cart-service unit + integration tests
+	$(MAVEN) -pl common,cart-service -am test --no-transfer-progress
+
+cs-image: cs-build ## Build cart-service container image to local Docker daemon (Jib)
+	$(MAVEN) -pl cart-service jib:dockerBuild \
+	    -Ddocker.registry=local \
+	    --no-transfer-progress
+
+# ──────────────────────────────────────────────────────────────────────────────
+# cart-service — infrastructure  (Docker Compose profiles: infra + auth + observability)
+# Valkey is part of the 'infra' profile — same as product-service / user-service.
+# ──────────────────────────────────────────────────────────────────────────────
+
+cs-infra-up: ## Start infrastructure for cart-service: valkey, keycloak, grafana-lgtm
+	docker compose $(_COMPOSE_PROFILES) up -d --wait
+
+cs-infra-down: ## Stop + remove infra containers (named volumes preserved)
+	docker compose $(_COMPOSE_PROFILES) down
+
+cs-infra-clean: ## Stop + remove infra containers AND delete data volumes
+	docker compose $(_COMPOSE_PROFILES) down -v
+
+# ──────────────────────────────────────────────────────────────────────────────
+# cart-service — run locally (JAR)
+# ──────────────────────────────────────────────────────────────────────────────
+
+cs-run: cs-build ## Build then run cart-service JAR
+	java -jar cart-service/target/cart-service-*.jar
+
+cs-dev: cs-infra-up cs-run ## Full local dev loop: start infra, then run cart-service
 
 # ──────────────────────────────────────────────────────────────────────────────
 # user-service — Keycloak tokens  (manual API testing with curl)
@@ -268,7 +310,10 @@ k8s-infra-monitoring: ## Deploy Grafana LGTM observability stack (lgtm-distribut
 k8s-infra-otel-collector: ## Deploy OpenTelemetry Collector via the OTel Operator
 	kubectl apply -k k8s/infra/otel-collector
 
-k8s-infra: k8s-infra-cert-manager k8s-infra-postgres k8s-infra-mongodb k8s-infra-kafka k8s-infra-keycloak k8s-infra-envoy-gateway k8s-infra-monitoring k8s-infra-otel-collector ## Deploy all infrastructure resources (cert-manager, postgres, mongodb, kafka, keycloak, envoy-gateway, monitoring, otel-collector)
+k8s-infra-valkey: ## Deploy Valkey (Redis-compatible cache) via plain Deployment
+	kubectl apply -k k8s/infra/valkey
+
+k8s-infra: k8s-infra-cert-manager k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey k8s-infra-kafka k8s-infra-keycloak k8s-infra-envoy-gateway k8s-infra-monitoring k8s-infra-otel-collector ## Deploy all infrastructure resources (cert-manager, postgres, mongodb, valkey, kafka, keycloak, envoy-gateway, monitoring, otel-collector)
 
 k8s-up: k3d-create k8s-operators k8s-infra ## Full staging environment setup (create cluster + install operators + deploy infra)
 
@@ -287,8 +332,21 @@ k8s-us-deploy: ## Deploy user-service to staging (Kustomize staging overlay)
 k8s-us-delete: ## Remove user-service from staging
 	kubectl delete -k k8s/apps/user-service/overlays/staging --ignore-not-found
 
+k8s-cs-image: cs-build ## Build + push cart-service image to k3d local registry
+	$(MAVEN) -pl cart-service jib:build \
+	    -Ddocker.registry=localhost:5000 \
+	    --no-transfer-progress
+
+k8s-cs-deploy: ## Deploy cart-service to staging (Kustomize staging overlay)
+	kubectl apply -k k8s/apps/cart-service/overlays/staging
+
+k8s-cs-delete: ## Remove cart-service from staging
+	kubectl delete -k k8s/apps/cart-service/overlays/staging --ignore-not-found
+
 k8s-apps-deploy: ## Deploy all services to staging
 	kubectl apply -k k8s/apps/user-service/overlays/staging
+	kubectl apply -k k8s/apps/cart-service/overlays/staging
 
 k8s-apps-delete: ## Remove all services from staging
 	kubectl delete -k k8s/apps/user-service/overlays/staging --ignore-not-found
+	kubectl delete -k k8s/apps/cart-service/overlays/staging --ignore-not-found

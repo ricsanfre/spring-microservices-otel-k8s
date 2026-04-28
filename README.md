@@ -19,6 +19,7 @@ Spring Boot microservice-based e-commerce platform implementing:
   - [reviews-service](#reviews-service--port-8083--mongodb)
   - [notification-service](#notification-service--port-8084--stateless)
   - [user-service](#user-service--port-8085--postgresql)
+  - [cart-service](#cart-service--port-8086--valkey)
 - [Kafka Events](#kafka-events)
 - [Data Models](#data-models)
 - [Observability](#observability)
@@ -39,6 +40,7 @@ Spring Boot microservice-based e-commerce platform implementing:
 | `reviews-service` | 8083 | MongoDB | Product reviews and ratings — validated against order history |
 | `notification-service` | 8084 | stateless | Order event notifications — Kafka consumer |
 | `user-service` | 8085 | PostgreSQL | User profile management; delegates identity to Keycloak |
+| `cart-service` | 8086 | Valkey | Shopping cart management; consumed by order-service at checkout |
 
 > **Entry point:** External traffic enters through **Envoy Gateway** (Kubernetes Gateway API). There is no Spring Cloud Gateway service — Envoy handles JWT validation via a `SecurityPolicy` referencing the Keycloak JWKS endpoint, then routes directly to Kubernetes services. Service-to-service calls use plain Kubernetes Service DNS (`http://service-name:port`), resolved by kube-proxy — no service discovery library required.
 
@@ -64,6 +66,7 @@ flowchart TD
             RS["reviews-service :8083\nMongoDB"]
             NS["notification-service :8084\nstateless"]
             US["user-service :8085\nPostgreSQL"]
+            CS["cart-service :8086\nValkey"]
         end
 
         subgraph MESSAGING["Async Messaging"]
@@ -74,6 +77,7 @@ flowchart TD
             MDB[("MongoDB\nproducts · reviews")]
             PG_O[("PostgreSQL\norders DB")]
             PG_U[("PostgreSQL\nusers DB")]
+            VK[("Valkey\ncart data")]
         end
     end
 
@@ -86,17 +90,20 @@ flowchart TD
     EG -- "HTTPRoute" --> OS
     EG -- "HTTPRoute" --> RS
     EG -- "HTTPRoute" --> US
+    EG -- "HTTPRoute" --> CS
 
     OS -- "publish\norder.created.v1" --> KAFKA
     KAFKA -- "consume" --> NS
 
     RS -. "Client Credentials\nhttp://order-service:8082" .-> OS
     RS -. "Client Credentials\nhttp://product-service:8081" .-> PS
+    OS -. "checkout\nhttp://cart-service:8086" .-> CS
 
     PS --- MDB
     RS --- MDB
     OS --- PG_O
     US --- PG_U
+    CS --- VK
 ```
 
 > Service-to-service calls use plain Kubernetes Service DNS (`http://service-name:port`). kube-proxy handles server-side load balancing across pods — no client-side discovery library required. See [design/adr-002-plain-kubernetes-dns-service-calls.md](design/adr-002-plain-kubernetes-dns-service-calls.md) for the full rationale.
@@ -127,6 +134,7 @@ One Keycloak client per service (all confidential, with service accounts enabled
 | `reviews-service` | Client Credentials | reviews-service resource server + service account |
 | `user-service` | Client Credentials | user-service resource server + service account |
 | `notification-service` | Client Credentials | notification-service resource server |
+| `cart-service` | Client Credentials | cart-service resource server + service account |
 
 > **`e-commerce-web` is a confidential client** — the `client_secret` lives only in the Next.js server environment (`KEYCLOAK_CLIENT_SECRET`). The browser never sees the JWT; Auth.js manages the OIDC session server-side and issues an HttpOnly cookie to the browser. See [ADR-007](design/adr-007-nextjs-bff-frontend.md).
 
@@ -400,6 +408,43 @@ erDiagram
 
 ---
 
+### cart-service · port 8086 · Valkey
+
+Manages the per-user shopping cart. Cart data is stored in **Valkey** (Redis-compatible in-memory cache) with a 7-day TTL keyed by `cart:{userId}`. `order-service` reads the cart at checkout and calls `DELETE /api/v1/cart` to clear it after a successful order placement.
+
+**REST API**
+
+| Method | Path | Description | Required Role |
+|--------|------|-------------|---------------|
+| `GET` | `/api/v1/cart` | Get own cart (resolved from JWT `sub`) | Any authenticated user |
+| `PUT` | `/api/v1/cart/items/{productId}` | Add / update item (qty=0 removes the item) | Any authenticated user |
+| `DELETE` | `/api/v1/cart/items/{productId}` | Remove a single item from the cart | Any authenticated user |
+| `DELETE` | `/api/v1/cart` | Clear entire cart (called by order-service after checkout) | Any authenticated user |
+
+**Cart data model (Valkey)**
+
+Each cart is stored as a single JSON value under key `cart:{userId}` with a TTL of 7 days.
+
+```json
+{
+  "userId":     "550e8400-e29b-41d4-a716-446655440001",
+  "items": [
+    {
+      "productId":   "64b1f2c3d4e5f6a7b8c9d0e1",
+      "productName": "Wireless Keyboard",
+      "price":       49.99,
+      "quantity":    2,
+      "lineTotal":   99.98
+    }
+  ],
+  "totalItems": 2,
+  "grandTotal": 99.98,
+  "expiresAt":  "2026-05-01T10:00:00Z"
+}
+```
+
+---
+
 ### MongoDB — products collection
 
 ```json
@@ -525,9 +570,10 @@ For local development without Kubernetes, all infrastructure runs via Docker Com
 | `grafana-lgtm` | `grafana/otel-lgtm:latest` | 3000, 4317, 4318 | `observability` | Observability stack (Loki, Tempo, Prometheus, Grafana) |
 | `postgres` | `postgres:16-alpine` | 5432 | `infra` | Single PostgreSQL instance — one database per service |
 | `mongo` | `mongo:7` | 27017 | `infra` | Single MongoDB instance — one database per service |
+| `valkey` | `valkey/valkey:8-alpine` | 6379 | `infra` | Valkey cache — shopping carts (TTL 7 days) |
 | `keycloak` | `quay.io/keycloak/keycloak:26.0` | 8180 | `auth` | OAuth2 / OIDC IAM — realm `e-commerce` auto-imported |
 
-> **Profiles:** `infra` starts the shared databases (PostgreSQL + MongoDB); `auth` starts Keycloak; `observability` starts the Grafana LGTM stack. All three are started together via `make us-infra-up`.
+> **Profiles:** `infra` starts the shared databases (PostgreSQL + MongoDB + Valkey); `auth` starts Keycloak; `observability` starts the Grafana LGTM stack. All three are started together via `make us-infra-up`.
 
 > **Keycloak realm auto-import:** `docker/keycloak/realm-e-commerce.json` is volume-mounted into Keycloak's import directory. On first start Keycloak creates realm `e-commerce` with client scopes, clients, and test users automatically — no manual Admin Console steps required.
 
@@ -566,6 +612,7 @@ flowchart TD
                     OS["order-service :8082"]
                     RS["reviews-service :8083"]
                     NS_SVC["notification-service :8084"]
+                    CS["cart-service :8086"]
                 end
 
                 subgraph NS_KC["keycloak"]
@@ -582,6 +629,10 @@ flowchart TD
 
                 subgraph NS_MDB["mongodb"]
                     MDB[("MongoDB Community\nreviews DB · notifications DB")]
+                end
+
+                subgraph NS_VK["valkey"]
+                    VK[("Valkey\ncart data")]
                 end
 
                 subgraph NS_MON["monitoring"]
@@ -608,6 +659,7 @@ flowchart TD
     GW -- "HTTPRoute /api/v1/users" --> US
     GW -- "HTTPRoute /api/v1/products" --> PS
     GW -- "HTTPRoute /api/v1/orders" --> OS
+    GW -- "HTTPRoute /api/v1/cart" --> CS
     GW -- "HTTPRoute keycloak.local.test" --> KC
     GW -- "HTTPRoute grafana.local.test" --> GRAFANA
 
@@ -618,6 +670,7 @@ flowchart TD
     %% ── Service-to-service (plain K8s DNS) ────────────────────────────────
     RS -. "http://order-service:8082" .-> OS
     RS -. "http://product-service:8081" .-> PS
+    OS -. "http://cart-service:8086" .-> CS
 
     %% ── Async messaging ─────────────────────────────────────────────────────
     OS -- "publish order-events" --> KF
@@ -628,6 +681,7 @@ flowchart TD
     OS --- PG
     PS --- MDB
     RS --- MDB
+    CS --- VK
 
     %% ── Observability (OTLP) ─────────────────────────────────────────────────
     US -- "OTLP :4317" --> OTELCOL
@@ -635,6 +689,7 @@ flowchart TD
     OS -- "OTLP :4317" --> OTELCOL
     RS -- "OTLP :4317" --> OTELCOL
     NS_SVC -- "OTLP :4317" --> OTELCOL
+    CS -- "OTLP :4317" --> OTELCOL
     OTELCOL -- "traces" --> TEMPO
     OTELCOL -- "logs" --> LOKI
     OTELCOL -- "metrics" --> MIMIR
@@ -653,6 +708,7 @@ flowchart TD
 | `kafka` | Strimzi operator + Kafka cluster |
 | `mongodb` | MongoDB Community operator + replica set |
 | `postgres` | CloudNativePG operator + PostgreSQL cluster |
+| `valkey` | Valkey single-instance Deployment (cart cache) |
 | `monitoring` | OTel Operator, OTel Collector, Grafana LGTM stack |
 
 #### `k8s/` directory layout
@@ -693,9 +749,13 @@ k8s/
 │   │   │   └── namespace.yaml
 │   │   ├── keycloak.yaml               ← Keycloak CR
 │   │   └── realm-import.yaml           ← KeycloakRealmImport CR
-│   └── otel-collector/
+│   ├── otel-collector/
+│   │   ├── kustomization.yaml
+│   │   └── collector.yaml              ← OpenTelemetryCollector CR (OTLP → Tempo/Loki/Mimir)
+│   └── valkey/
 │       ├── kustomization.yaml
-│       └── collector.yaml              ← OpenTelemetryCollector CR (OTLP → Tempo/Loki/Mimir)
+│       ├── deployment.yaml             ← single-replica Valkey Deployment (namespace: valkey)
+│       └── service.yaml                ← ClusterIP Service :6379
 ├── envoy-gateway/                      ← Kustomize app — Gateway API resources
 │   ├── kustomization.yaml
 │   ├── gateway-class.yaml
@@ -709,6 +769,10 @@ k8s/
     │       └── staging/               ← image tag patch + AUTH_KEYCLOAK_ISSUER env
     └── user-service/
         ├── base/                       ← Deployment, Service, ConfigMap, ServiceAccount, RBAC
+        └── overlays/
+            └── staging/               ← image tag patch + env-specific config
+    └── cart-service/
+        ├── base/                       ← Deployment, Service, ConfigMap, ServiceAccount
         └── overlays/
             └── staging/               ← image tag patch + env-specific config
 ```
@@ -820,6 +884,7 @@ curl -H "Authorization: Bearer $SA_TOKEN" \
 | `http://localhost:3001` | frontend-service (Next.js dev server) |
 | `http://localhost:8081/swagger-ui.html` | product-service Swagger UI |
 | `http://localhost:8082/swagger-ui.html` | order-service Swagger UI |
+| `http://localhost:8086/swagger-ui.html` | cart-service Swagger UI |
 | `http://localhost:8180/swagger-ui.html` | Keycloak Admin Console |
 | `http://localhost:3000` | Grafana Dashboards |
 
@@ -827,8 +892,8 @@ curl -H "Authorization: Bearer $SA_TOKEN" \
 
 | Username | Password | Client Role | Granted Scopes |
 |----------|----------|-------------|----------------|
-| `testuser` | `password` | `customer` on `e-commerce-web` | `openid profile email products:read orders:read orders:write reviews:read reviews:write users:read` |
-| `otheruser` | `password` | `customer` on `e-commerce-web` | `openid profile email products:read orders:read orders:write reviews:read reviews:write users:read` |
+| `testuser` | `password` | `customer` on `e-commerce-web` | `openid profile email products:read orders:read orders:write reviews:read reviews:write users:read cart:read cart:write` |
+| `otheruser` | `password` | `customer` on `e-commerce-web` | `openid profile email products:read orders:read orders:write reviews:read reviews:write users:read cart:read cart:write` |
 | `e-commerce-service` (client) | `e-commerce-service-secret` | — (M2M client credentials) | `users:resolve` |
 
 **Stopping infrastructure:**
@@ -987,6 +1052,7 @@ Or deploy each component individually:
 make k8s-infra-cert-manager    # self-signed CA + *.local.test wildcard cert
 make k8s-infra-postgres        # CNPG PostgreSQL cluster + per-service databases
 make k8s-infra-mongodb         # MongoDB replica set
+make k8s-infra-valkey          # Valkey cache Deployment (namespace: valkey)
 make k8s-infra-kafka           # Kafka cluster + topics
 make k8s-infra-keycloak        # Keycloak instance + realm import
 make k8s-infra-envoy-gateway   # GatewayClass, Gateway, HTTPRoutes, SecurityPolicy
@@ -999,6 +1065,9 @@ make k8s-infra-otel-collector  # OpenTelemetry Collector (fan-out to Tempo/Loki/
 ```bash
 # Build user-service image and push to the k3d local registry
 make k8s-us-image
+
+# Build cart-service image and push to the k3d local registry
+make k8s-cs-image
 ```
 
 #### 6. Deploy services
@@ -1010,7 +1079,8 @@ make k8s-apps-deploy
 Or deploy an individual service:
 
 ```bash
-make k8s-us-deploy
+make k8s-us-deploy   # user-service only
+make k8s-cs-deploy   # cart-service only
 ```
 
 #### One-shot full setup
@@ -1025,6 +1095,7 @@ make k8s-up   # k3d-create + k8s-operators + k8s-infra
 |-----|-------------|
 | `https://app.local.test` | frontend-service (Next.js BFF) |
 | `https://api.local.test/api/v1/users` | user-service via Envoy Gateway |
+| `https://api.local.test/api/v1/cart` | cart-service via Envoy Gateway |
 | `https://keycloak.local.test` | Keycloak Admin Console |
 | `https://grafana.local.test` | Grafana Dashboards |
 
@@ -1032,7 +1103,7 @@ make k8s-up   # k3d-create + k8s-operators + k8s-infra
 
 ---
 
-*Built with Java 25 · Spring Boot 4 · Next.js 15 · Auth.js v5 · Apache Kafka · MongoDB · PostgreSQL · Keycloak · Envoy Gateway · OpenTelemetry · k3d*
+*Built with Java 25 · Spring Boot 4 · Next.js 15 · Auth.js v5 · Apache Kafka · MongoDB · PostgreSQL · Valkey · Keycloak · Envoy Gateway · OpenTelemetry · k3d*
 
 
 

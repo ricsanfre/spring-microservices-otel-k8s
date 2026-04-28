@@ -1,0 +1,63 @@
+---
+# Valkey — single-instance Deployment
+# Namespace: valkey  (created by k8s/namespaces.yaml)
+#
+# Valkey is Redis-compatible; cart-service uses the Spring Data Redis client.
+# RDB persistence is enabled (save 60 1) so the cart survives Pod restarts
+# within a staging session. Data is lost when the PVC is deleted.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  namespace: valkey
+  labels:
+    app.kubernetes.io/name: valkey
+    app.kubernetes.io/part-of: e-commerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: valkey
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: valkey
+        app.kubernetes.io/part-of: e-commerce
+    spec:
+      containers:
+        - name: valkey
+          image: valkey/valkey:8-alpine
+          args:
+            - valkey-server
+            - "--save"
+            - "60"
+            - "1"
+            - "--loglevel"
+            - "warning"
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          emptyDir: {}   # stateless for staging; swap for PVC in production

@@ -18,7 +18,10 @@
 | Async messaging | Apache Kafka — topic `order.created.v1` |
 | Service discovery | Plain Kubernetes Service DNS — `http://service-name:port` via CoreDNS + kube-proxy |
 | Entry point / API Gateway | Envoy Gateway (Kubernetes Gateway API) |
-| Authentication / Authorization | OAuth2.0 + Keycloak (OIDC) || Frontend framework | Next.js 15 (App Router) + Auth.js v5 — BFF pattern; browser never holds JWT (see [ADR-007](design/adr-007-nextjs-bff-frontend.md)) || Observability | OpenTelemetry → Grafana LGTM (traces, metrics, logs) |
+| Authentication / Authorization | OAuth2.0 + Keycloak (OIDC) |
+| Shopping cart storage | Valkey (Redis-compatible in-memory cache) — key `cart:{userId}`, TTL 7 days |
+| Frontend framework | Next.js 15 (App Router) + Auth.js v5 — BFF pattern; browser never holds JWT (see [ADR-007](design/adr-007-nextjs-bff-frontend.md)) |
+| Observability | OpenTelemetry → Grafana LGTM (traces, metrics, logs) |
 | Deployment environment | k3d (k3s in Docker) |
 
 ---
@@ -34,6 +37,7 @@
 | `reviews-service` | 8083 | MongoDB | Product reviews; validates via order + product services |
 | `notification-service` | 8084 | stateless | Kafka consumer; sends notifications |
 | `user-service` | 8085 | PostgreSQL | User profile management; delegates identity to Keycloak |
+| `cart-service` | 8086 | Valkey | Shopping cart CRUD; consumed by order-service at checkout |
 
 > **Entry point:** All external traffic enters via **Envoy Gateway** (Kubernetes Gateway API). There is no `api-gateway` Spring service — Envoy handles JWT validation (`SecurityPolicy` → Keycloak JWKS) and routes directly to Kubernetes services. The `app.local.test` HTTPRoute for `frontend-service` has **no `SecurityPolicy`** — Auth.js handles authentication server-side.
 
@@ -149,6 +153,34 @@ Produce a `flowchart TD` diagram covering:
 
 ---
 
+#### cart-service · port 8086 · Valkey
+
+- **Cart key:** `cart:{userId}` (Valkey string key, JSON value)
+- **TTL:** 7 days (refreshed on every write)
+- **Backend:** Valkey (Redis-compatible OSS fork); `spring-boot-starter-data-redis`
+- **Integration:** `order-service` reads the cart at checkout then calls `DELETE /api/v1/cart` after a successful order placement
+- **REST API:**
+
+  | Method | Path | Description | Required Role |
+  |--------|------|-------------|---------------|
+  | `GET` | `/api/v1/cart` | Get own cart (resolved from JWT `sub`) | Any authenticated user |
+  | `PUT` | `/api/v1/cart/items/{productId}` | Add / update item (qty = 0 removes item) | Any authenticated user |
+  | `DELETE` | `/api/v1/cart/items/{productId}` | Remove a single item | Any authenticated user |
+  | `DELETE` | `/api/v1/cart` | Clear entire cart | Any authenticated user |
+
+- **Cart data model (Valkey JSON):**
+  ```json
+  {
+    "userId":     "<internal users.id UUID>",
+    "items":      [{"productId", "productName", "price", "quantity", "lineTotal"}],
+    "totalItems": 2,
+    "grandTotal": 99.98,
+    "expiresAt":  "2026-05-01T10:00:00Z"
+  }
+  ```
+
+---
+
 ### Phase 3c — Frontend Service (Next.js BFF)
 
 See [ADR-007](design/adr-007-nextjs-bff-frontend.md) for the full rationale.
@@ -193,8 +225,7 @@ One confidential client per service (service accounts enabled):
 | `order-service` | Client Credentials | Resource server + service account |
 | `reviews-service` | Client Credentials | Resource server + service account |
 | `user-service` | Client Credentials | Resource server + service account |
-| `notification-service` | Client Credentials | Resource server |
-
+| `notification-service` | Client Credentials | Resource server || `cart-service` | Client Credentials | Resource server + service account |
 > **`e-commerce-web` is a confidential client** — `client_secret` stored only in the Next.js server env. The browser receives an HttpOnly session cookie; the JWT never leaves the server.
 
 #### Token Flow 1 — User Authentication (Authorization Code + PKCE)
@@ -298,6 +329,7 @@ OTLP endpoints (HTTP): `:4318` — gRPC: `:4317` — Grafana UI: `:3000`
 | `keycloak` | `quay.io/keycloak/keycloak:latest` | 8180 | OAuth2 IAM; add dedicated PostgreSQL for prod |
 | `kafka` | `apache/kafka:latest` | 9092 | KRaft mode (no Zookeeper required) |
 | `mongodb` | `mongo:7` | 27017 | Shared MongoDB for products + reviews |
+| `valkey` | `valkey/valkey:8-alpine` | 6379 | Valkey cache — shopping carts (profile: `infra`) |
 | `db-orders` | `postgres:16` | 5432 | PostgreSQL exclusive to order-service |
 | `db-users` | `postgres:16` | 5433 | PostgreSQL exclusive to user-service |
 | `grafana-lgtm` | `grafana/otel-lgtm:latest` | 3000, 4317, 4318 | OTEL + Loki + Tempo + Prometheus + Grafana |
@@ -325,6 +357,7 @@ k3d cluster create e-commerce \
 | `e-commerce` | All business microservices |
 | `e-commerce-infra` | Keycloak, Kafka, MongoDB, PostgreSQL |
 | `envoy-gateway-system` | Envoy Gateway controller |
+| `valkey` | Valkey single-instance Deployment (cart cache) |
 | `monitoring` | Grafana LGTM stack |
 
 #### Envoy Gateway installation
@@ -354,11 +387,13 @@ k8s/
 ├── reviews-service/
 ├── notification-service/
 ├── user-service/
+├── cart-service/            ← (same files, ConfigMap includes VALKEY_HOST / VALKEY_PORT)
 └── infra/
     ├── keycloak/
     ├── kafka/
     ├── mongodb/
-    └── postgres/
+    ├── postgres/
+    └── valkey/                 ← single-replica Deployment + ClusterIP Service (namespace: valkey)
 ```
 
 #### Image build and import

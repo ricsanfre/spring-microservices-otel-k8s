@@ -71,6 +71,22 @@ services:
       retries: 5
       start_period: 20s
 
+  valkey:
+    image: valkey/valkey:8-alpine
+    profiles: [infra]
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey-data:/data
+    networks: [e-commerce]
+    command: ["valkey-server", "--save", "60", "1", "--loglevel", "warning"]
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   # ── IAM ─────────────────────────────────────────────────────────────────────
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
@@ -103,4 +119,5 @@ networks:
 volumes:
   postgres-data:
   mongo-data:
+  valkey-data:
   keycloak-data:

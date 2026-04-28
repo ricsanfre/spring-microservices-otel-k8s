@@ -1,0 +1,21 @@
+---
+# Valkey ClusterIP Service
+# Accessible inside the cluster as:
+#   valkey.valkey.svc.cluster.local:6379
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  namespace: valkey
+  labels:
+    app.kubernetes.io/name: valkey
+    app.kubernetes.io/part-of: e-commerce
+spec:
+  selector:
+    app.kubernetes.io/name: valkey
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+      protocol: TCP
+  type: ClusterIP
