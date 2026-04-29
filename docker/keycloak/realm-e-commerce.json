@@ -43,6 +43,14 @@
           "description": "Receive notification events"
         },
         {
+          "name": "cart:read",
+          "description": "Read own shopping cart"
+        },
+        {
+          "name": "cart:write",
+          "description": "Add, update, and remove items in own shopping cart"
+        },
+        {
           "name": "customer",
           "description": "Standard customer — read access to catalog + full order and review lifecycle",
           "composite": true,
@@ -54,7 +62,9 @@
                 "orders:write",
                 "reviews:read",
                 "reviews:write",
-                "users:read"
+                "users:read",
+                "cart:read",
+                "cart:write"
               ]
             }
           }
@@ -73,7 +83,9 @@
                 "reviews:read",
                 "reviews:write",
                 "users:read",
-                "notifications:receive"
+                "notifications:receive",
+                "cart:read",
+                "cart:write"
               ]
             }
           }
@@ -129,6 +141,18 @@
         "clientScope": "notifications:receive",
         "roles": [
           "notifications:receive"
+        ]
+      },
+      {
+        "clientScope": "cart:read",
+        "roles": [
+          "cart:read"
+        ]
+      },
+      {
+        "clientScope": "cart:write",
+        "roles": [
+          "cart:write"
         ]
       }
     ]
@@ -360,6 +384,24 @@
         "include.in.token.scope": "true",
         "display.on.consent.screen": "true"
       }
+    },
+    {
+      "name": "cart:read",
+      "description": "Read own shopping cart",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      }
+    },
+    {
+      "name": "cart:write",
+      "description": "Add, update, and remove items in own shopping cart",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      }
     }
   ],
   "clients": [
@@ -398,7 +440,9 @@
         "reviews:read",
         "reviews:write",
         "users:read",
-        "notifications:receive"
+        "notifications:receive",
+        "cart:read",
+        "cart:write"
       ]
     },
     {

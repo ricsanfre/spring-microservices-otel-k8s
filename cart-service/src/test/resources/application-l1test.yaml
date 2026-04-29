@@ -1,0 +1,36 @@
+# Test profile for Layer 1 (TestContainers) integration tests.
+# Redis host/port are injected via @DynamicPropertySource from the container.
+# JWT issuer validation is bypassed by the @MockitoBean JwtDecoder in CartControllerL1Test.
+# user-service calls are bypassed by the @MockitoBean UserServiceClient.
+
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Dummy URI prevents Spring Boot's NimbusJwtDecoder auto-config from
+          # performing OIDC discovery at startup. The real JwtDecoder bean is
+          # replaced by a Mockito mock, so this value is never actually used.
+          jwk-set-uri: http://localhost:65000/realms/e-commerce/protocol/openid-connect/certs
+      client:
+        provider:
+          user-service:
+            token-uri: http://localhost:65000/realms/e-commerce/protocol/openid-connect/token
+
+# Disable OTel tracing and metrics exporters — endpoints are not available in CI/test
+management:
+  tracing:
+    enabled: false
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: http://localhost:65000/v1/traces
+    logging:
+      export:
+        otlp:
+          endpoint: http://localhost:65000/v1/logs

@@ -63,6 +63,8 @@ Authorization decisions are expressed as standard OAuth2 `scope` values (RFC 674
 | `users:read` | Read own user profile | `e-commerce-web` |
 | `users:resolve` | Resolve IDP subject → internal user ID (M2M only) | `e-commerce-service` |
 | `notifications:receive` | Receive notification events | `e-commerce-web` (optional) |
+| `cart:read` | Read own shopping cart | `e-commerce-web` (optional) |
+| `cart:write` | Add, update, and remove items in own shopping cart | `e-commerce-web` (optional) |
 
 ### Spring Security
 
@@ -108,7 +110,8 @@ authenticated user.
 { "name": "customer", "composite": true,
   "composites": { "client": { "e-commerce-web": [
     "products:read", "orders:read", "orders:write",
-    "reviews:read", "reviews:write", "users:read"
+    "reviews:read", "reviews:write", "users:read",
+    "cart:read", "cart:write"
   ] } } }
 
 // clientScopeMappings (excerpt)
@@ -179,6 +182,7 @@ The following files were updated as part of this ADR:
 | `user-service/.../UserController.java` | `@PreAuthorize("hasRole('service-account')")` → `@PreAuthorize("hasAuthority('SCOPE_users:resolve')")` |
 | `user-service/.../UserControllerIntegrationTest.java` | JWT helpers updated to `scope` claim + `SCOPE_` authorities |
 | `user-service/.../UserServiceTest.java` | JWT helper updated to `scope` claim |
+| `cart-service/.../SecurityConfig.java` | Baseline requires `SCOPE_cart:read`; `@PreAuthorize` on each method uses `SCOPE_cart:read` or `SCOPE_cart:write` |
 | `design/development-guidelines.md` | §9 SecurityConfig example updated; §13 mock JWT examples updated |
 | `design/keycloak-configuration.md` | Realm roles → Client Scopes + Client Roles + clientScopeMappings; role-to-scope promotion mechanism documented |
 | `README.md` | Test accounts table: "Roles" → "Granted Scopes" |

@@ -7,6 +7,9 @@ info:
 servers:
   - url: /api/v1
 
+security:
+  - bearerAuth: []
+
 tags:
   - name: Cart
     description: Shopping cart operations
@@ -18,6 +21,8 @@ paths:
       tags: [Cart]
       operationId: getCart
       summary: Get current user's cart (resolved from JWT sub)
+      security:
+        - bearerAuth: [cart:read]
       responses:
         "200":
           description: Current cart contents
@@ -27,22 +32,30 @@ paths:
                 $ref: '#/components/schemas/CartResponse'
         "401":
           description: Unauthorized
+        "403":
+          description: Forbidden — requires scope cart:read
 
     delete:
       tags: [Cart]
       operationId: clearCart
       summary: Clear the entire cart (called by order-service after checkout)
+      security:
+        - bearerAuth: [cart:write]
       responses:
         "204":
           description: Cart cleared
         "401":
           description: Unauthorized
+        "403":
+          description: Forbidden — requires scope cart:write
 
   /cart/items/{productId}:
     put:
       tags: [Cart]
       operationId: upsertCartItem
       summary: Add or update a cart item (set quantity to 0 to remove)
+      security:
+        - bearerAuth: [cart:write]
       parameters:
         - name: productId
           in: path
@@ -66,11 +79,15 @@ paths:
           description: Validation error
         "401":
           description: Unauthorized
+        "403":
+          description: Forbidden — requires scope cart:write
 
     delete:
       tags: [Cart]
       operationId: removeCartItem
       summary: Remove a single item from the cart
+      security:
+        - bearerAuth: [cart:write]
       parameters:
         - name: productId
           in: path
@@ -86,6 +103,8 @@ paths:
                 $ref: '#/components/schemas/CartResponse'
         "401":
           description: Unauthorized
+        "403":
+          description: Forbidden — requires scope cart:write
         "404":
           description: Item not in cart
 
@@ -151,3 +170,12 @@ components:
           format: int32
           minimum: 0
           description: Desired quantity. Set to 0 to remove the item from the cart.
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        OAuth2 JWT bearer token issued by Keycloak. Required scopes per operation:
+        `cart:read` (GET /cart), `cart:write` (PUT/DELETE /cart/items/{productId}, DELETE /cart).

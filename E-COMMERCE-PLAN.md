@@ -163,10 +163,10 @@ Produce a `flowchart TD` diagram covering:
 
   | Method | Path | Description | Required Role |
   |--------|------|-------------|---------------|
-  | `GET` | `/api/v1/cart` | Get own cart (resolved from JWT `sub`) | Any authenticated user |
-  | `PUT` | `/api/v1/cart/items/{productId}` | Add / update item (qty = 0 removes item) | Any authenticated user |
-  | `DELETE` | `/api/v1/cart/items/{productId}` | Remove a single item | Any authenticated user |
-  | `DELETE` | `/api/v1/cart` | Clear entire cart | Any authenticated user |
+  | `GET` | `/api/v1/cart` | Get own cart (resolved from JWT `sub`) | `SCOPE_cart:read` |
+  | `PUT` | `/api/v1/cart/items/{productId}` | Add / update item (qty = 0 removes item) | `SCOPE_cart:write` |
+  | `DELETE` | `/api/v1/cart/items/{productId}` | Remove a single item | `SCOPE_cart:write` |
+  | `DELETE` | `/api/v1/cart` | Clear entire cart | `SCOPE_cart:write` |
 
 - **Cart data model (Valkey JSON):**
   ```json

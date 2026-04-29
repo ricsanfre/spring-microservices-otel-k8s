@@ -720,19 +720,202 @@ spring:
             token-uri: http://keycloak:8180/realms/e-commerce/protocol/openid-connect/token
 ```
 
-### Extracting the current user from a JWT
+### Extracting the current user from a JWT — per-service lazy resolution (ADR-004)
 
-Never accept `userId` from the request body for user-scoped operations. Always resolve from the JWT:
+Never accept `userId` from the request body for user-scoped operations. Always resolve from the JWT.
+Never store the IAM `sub` as a data key — always resolve to the internal `users.id` UUID first
+(see [ADR-004](adr-004-iam-portability-user-service-isolation.md) and [iam-portability.md](iam-portability.md)).
+
+Resolution is a two-step process:
+1. Extract the `sub` from the JWT
+2. Call `user-service` (`GET /api/v1/users/resolve?idp_subject={sub}`) to get the internal UUID, cached locally with a 10-min Caffeine TTL
+
+The pattern below is the reference implementation from `cart-service` and should be replicated in every service that needs to associate data with a user.
+
+#### Step 1 — HTTP interface for user-service
+
+Create a `client/UserServiceClient.java` HTTP Interface (Spring 6 `@HttpExchange`):
 
 ```java
-private UUID resolveUserId(Authentication authentication) {
-    Jwt jwt = (Jwt) authentication.getPrincipal();
-    String idpSubject = jwt.getSubject();           // Keycloak sub UUID
-    return userResolver.resolveInternalId(idpSubject); // per-service lazy resolution
+@HttpExchange("/api/v1")
+public interface UserServiceClient {
+
+    @GetExchange("/users/resolve")
+    UserResolveResponse resolveUser(@RequestParam("idp_subject") String idpSubject);
+
+    record UserResolveResponse(UUID id) {}
 }
 ```
 
-See [iam-portability.md](iam-portability.md) for the full lazy resolution design.
+#### Step 2 — Caching resolver service
+
+Create a `service/UserIdResolverService.java` that wraps the HTTP call with a Caffeine cache
+and a Resilience4j circuit breaker:
+
+```java
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class UserIdResolverService {
+
+    private final UserServiceClient userServiceClient;
+
+    @Cacheable(value = "userIdBySubject", key = "#idpSubject")
+    @CircuitBreaker(name = "user-service", fallbackMethod = "resolveInternalIdFallback")
+    public UUID resolveInternalId(String idpSubject) {
+        log.debug("Cache miss — resolving idp_subject={} via user-service", idpSubject);
+        try {
+            return userServiceClient.resolveUser(idpSubject).id();
+        } catch (HttpClientErrorException.NotFound e) {
+            throw new ResourceNotFoundException("User", idpSubject);
+        }
+    }
+
+    @CacheEvict(value = "userIdBySubject", key = "#idpSubject")
+    public void evict(String idpSubject) {}
+
+    private UUID resolveInternalIdFallback(String idpSubject, Throwable t) {
+        log.warn("user-service circuit open — cannot resolve idp_subject={}", idpSubject);
+        throw new IllegalStateException("User identity service unavailable. Retry in a moment.", t);
+    }
+}
+```
+
+#### Step 3 — Wire the RestClient + OAuth2 token + Caffeine cache
+
+Create a `config/HttpClientConfig.java` (annotated `@EnableCaching` here so each service only needs it in one place):
+
+```java
+@Configuration
+@EnableCaching
+public class HttpClientConfig {
+
+    @Bean
+    public UserServiceClient userServiceClient(
+            RestClient.Builder builder,
+            OAuth2AuthorizedClientManager authorizedClientManager,
+            @Value("${services.user-service.url:http://localhost:8085}") String userServiceUrl) {
+
+        RestClient restClient = builder
+                .baseUrl(userServiceUrl)
+                .requestInterceptor(new OAuth2ClientHttpRequestInterceptor(authorizedClientManager))
+                .build();
+
+        return HttpServiceProxyFactory
+                .builderFor(RestClientAdapter.create(restClient))
+                .build()
+                .createClient(UserServiceClient.class);
+    }
+
+    @Bean
+    public CacheManager cacheManager(
+            @Value("${cart.user-resolver.cache-ttl-minutes:10}") long ttlMinutes) {
+        CaffeineCacheManager manager = new CaffeineCacheManager("userIdBySubject");
+        manager.setCaffeine(
+                Caffeine.newBuilder().expireAfterWrite(ttlMinutes, TimeUnit.MINUTES));
+        return manager;
+    }
+}
+```
+
+> **Rename the `@Value` key** to match the service name (e.g. `orders.user-resolver.cache-ttl-minutes`).
+
+#### Step 4 — `application.yaml` additions
+
+```yaml
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          user-service:
+            client-id: e-commerce-service
+            client-secret: ${E_COMMERCE_SERVICE_CLIENT_SECRET:e-commerce-service-secret}
+            authorization-grant-type: client_credentials
+            scope: users:resolve
+        provider:
+          user-service:
+            token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
+
+# Downstream service URLs (override per env)
+services:
+  user-service:
+    url: ${USER_SERVICE_URL:http://localhost:8085}
+
+# Resilience4j — circuit breaker / retry / timeout for user-service
+resilience4j:
+  circuitbreaker:
+    instances:
+      user-service:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        register-health-indicator: true
+  retry:
+    instances:
+      user-service:
+        max-attempts: 3
+        wait-duration: 300ms
+        retry-exceptions:
+          - java.io.IOException
+          - org.springframework.web.client.ResourceAccessException
+  timelimiter:
+    instances:
+      user-service:
+        timeout-duration: 3s
+
+# Caffeine TTL for sub → internal userId cache (minutes)
+<service-name>:
+  user-resolver:
+    cache-ttl-minutes: 10
+```
+
+#### Step 5 — pom.xml additions
+
+```xml
+<!-- OAuth2 Client — Client Credentials for calling user-service -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-oauth2-client</artifactId>
+</dependency>
+<!-- Resilience4j -->
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
+</dependency>
+<!-- Caffeine in-process cache -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-cache</artifactId>
+</dependency>
+<dependency>
+    <groupId>com.github.ben-manes.caffeine</groupId>
+    <artifactId>caffeine</artifactId>
+</dependency>
+```
+
+#### Usage in controller
+
+```java
+@RestController
+@RequiredArgsConstructor
+public class OrderController implements OrderApi {
+
+    private final OrderService orderService;
+    private final UserIdResolverService userIdResolverService;
+
+    @Override
+    @PreAuthorize("hasAuthority('SCOPE_orders:write')")
+    public ResponseEntity<OrderResponse> placeOrder(PlaceOrderRequest request) {
+        String idpSubject = JwtUtils.getSubject(
+                SecurityContextHolder.getContext().getAuthentication());
+        UUID userId = userIdResolverService.resolveInternalId(idpSubject);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(orderService.place(userId, request));
+    }
+}
+```
 
 ---
 
@@ -1178,104 +1361,103 @@ spring:
 > **Local dev defaults** point at `localhost:6379` (the Docker Compose Valkey container on the `infra` profile).
 > In Kubernetes, `VALKEY_HOST` is overridden via the service's `ConfigMap` to `valkey.valkey.svc.cluster.local`.
 
-### `RedisTemplate` configuration
+### Three caching tiers
 
-Define a `RedisTemplate<String, Object>` bean with JSON serialization. Using `StringRedisSerializer` for keys and `GenericJackson2JsonRedisSerializer` for values keeps stored data human-readable and evolvable:
+This project uses three distinct caching mechanisms. Choose the right one for the job:
+
+| Tier | Technology | When to use | Example |
+|------|-----------|-------------|--------|
+| **Primary data store** | Valkey `StringRedisTemplate` + `ObjectMapper` | Service's canonical persistence is Valkey (cart, session) | `cart-service` |
+| **Secondary read-through cache** | Valkey `@Cacheable` + Redis `CacheManager` | Speed up expensive relational/document lookups | product catalog caching |
+| **Local in-process cache** | Caffeine + Spring `@Cacheable` | Short-lived, per-instance memoisation (sub → userId mapping) | ADR-004 lazy resolution |
+
+> Keep these tiers separate. Do **not** route the `CacheManager` used for ADR-004 resolution through Valkey — that would create a circular dependency between `cart-service`'s own data store and its identity lookup cache.
+
+### Valkey as primary data store — `StringRedisTemplate` pattern
+
+When Valkey is the **canonical persistence layer** (not a cache in front of another store), use
+`StringRedisTemplate` with manual `ObjectMapper` serialisation. This gives full control over the
+stored JSON format and avoids the type-metadata overhead of `GenericJackson2JsonRedisSerializer`:
 
 ```java
 @Configuration
 public class RedisConfig {
 
+    /**
+     * StringRedisTemplate stores keys and values as plain UTF-8 strings.
+     * JSON serialisation is handled manually in the repository via ObjectMapper.
+     */
     @Bean
-    public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory factory) {
-        RedisTemplate<String, Object> template = new RedisTemplate<>();
-        template.setConnectionFactory(factory);
+    public StringRedisTemplate stringRedisTemplate(RedisConnectionFactory factory) {
+        return new StringRedisTemplate(factory);
+    }
 
-        StringRedisSerializer stringSerializer = new StringRedisSerializer();
-        GenericJackson2JsonRedisSerializer jsonSerializer =
-            new GenericJackson2JsonRedisSerializer();
-
-        template.setKeySerializer(stringSerializer);
-        template.setHashKeySerializer(stringSerializer);
-        template.setValueSerializer(jsonSerializer);
-        template.setHashValueSerializer(jsonSerializer);
-        template.afterPropertiesSet();
-        return template;
+    /**
+     * Shared ObjectMapper with Java time support (Instant → ISO-8601).
+     * Mark @Primary so Spring Boot's autoconfigured ObjectMapper is replaced.
+     */
+    @Bean
+    @Primary
+    public ObjectMapper objectMapper() {
+        return new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 }
 ```
 
-> **Do not use the default `JdkSerializationRedisSerializer`** — it produces unreadable binary blobs, ties stored data to Java class internals, and prevents inspection with `valkey-cli`.
-
-### Key naming convention
-
-Keys **must** follow the pattern `{service}:{entity}:{id}` to prevent collisions when multiple services share a single Valkey instance:
-
-| Service | Entity | Key pattern | Example |
-|---------|--------|-------------|----------|
-| `cart-service` | shopping cart | `cart:{userId}` | `cart:550e8400-e29b-41d4-a716-446655440001` |
-
-Define key prefixes as constants, never as inline strings:
+The repository serialises/deserialises the domain object explicitly:
 
 ```java
-public final class CacheKeys {
-    public static final String CART_PREFIX = "cart:";
-
-    public static String cartKey(UUID userId) {
-        return CART_PREFIX + userId;
-    }
-
-    private CacheKeys() {}
-}
-```
-
-### TTL management
-
-Always set a TTL on every write. **Never store data without an expiry** — unbounded growth will exhaust memory:
-
-```java
-@Service
+@Repository
 @RequiredArgsConstructor
+@Slf4j
 public class CartRepository {
 
-    private static final Duration CART_TTL = Duration.ofDays(7);
+    static final Duration CART_TTL = Duration.ofDays(7);
+    private static final String KEY_PREFIX = "cart:";
 
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final StringRedisTemplate redisTemplate;
+    private final ObjectMapper objectMapper;
 
-    public void save(UUID userId, CartData cart) {
-        String key = CacheKeys.cartKey(userId);
-        redisTemplate.opsForValue().set(key, cart, CART_TTL);
+    public Optional<Cart> findByUserId(String userId) {
+        String json = redisTemplate.opsForValue().get(KEY_PREFIX + userId);
+        if (json == null) return Optional.empty();
+        try {
+            return Optional.of(objectMapper.readValue(json, Cart.class));
+        } catch (JsonProcessingException e) {
+            log.error("Failed to deserialise cart for user {}", userId, e);
+            return Optional.empty();
+        }
     }
 
-    public Optional<CartData> findByUserId(UUID userId) {
-        Object raw = redisTemplate.opsForValue().get(CacheKeys.cartKey(userId));
-        return Optional.ofNullable((CartData) raw);
+    public Cart save(Cart cart) {
+        cart.setExpiresAt(Instant.now().plus(CART_TTL));
+        try {
+            String json = objectMapper.writeValueAsString(cart);
+            redisTemplate.opsForValue().set(KEY_PREFIX + cart.getUserId(), json, CART_TTL);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException(
+                    "Failed to serialise cart for user " + cart.getUserId(), e);
+        }
+        return cart;
     }
 
-    public void delete(UUID userId) {
-        redisTemplate.delete(CacheKeys.cartKey(userId));
-    }
-
-    /** Refresh TTL on every read so active carts never expire mid-session. */
-    public void refreshTtl(UUID userId) {
-        redisTemplate.expire(CacheKeys.cartKey(userId), CART_TTL);
+    public void deleteByUserId(String userId) {
+        redisTemplate.delete(KEY_PREFIX + userId);
     }
 }
 ```
 
-### `@Cacheable` / Spring Cache abstraction (secondary caches)
+> **Do not use `JdkSerializationRedisSerializer`** — it produces unreadable binary blobs and ties stored data to Java class internals. Always use string-based keys and human-readable JSON values.
 
-For services that want a secondary **read-through cache** in front of a relational or document store (e.g. caching expensive product lookups), use the Spring Cache abstraction:
+### Valkey as secondary read-through cache — `@Cacheable` + Redis `CacheManager`
 
-```java
-// Enable Spring Cache in the application class:
-@SpringBootApplication
-@EnableCaching
-public class ProductServiceApplication { ... }
-```
+For services that want a secondary cache in front of a relational or document store, use the
+Spring Cache abstraction backed by Valkey:
 
 ```yaml
-# application.yaml — wire the Spring Cache abstraction to Redis
+# application.yaml
 spring:
   cache:
     type: redis
@@ -1285,30 +1467,25 @@ spring:
 ```
 
 ```java
-@Service
-@RequiredArgsConstructor
-public class ProductService {
+@Cacheable(value = "products", key = "#id")
+public ProductResponse findById(String id) { ... }
 
-    private final ProductRepository productRepository;
+@CacheEvict(value = "products", key = "#id")
+public void deleteById(String id) { ... }
 
-    @Cacheable(value = "products", key = "#id")
-    public ProductResponse findById(String id) {
-        return productRepository.findById(id)
-            .map(this::toResponse)
-            .orElseThrow(() -> new ResourceNotFoundException("Product", id));
-    }
-
-    @CacheEvict(value = "products", key = "#id")
-    public void deleteById(String id) {
-        productRepository.deleteById(id);
-    }
-
-    @CachePut(value = "products", key = "#result.id")
-    public ProductResponse update(String id, UpdateProductRequest request) {
-        // ... update logic ...
-    }
-}
+@CachePut(value = "products", key = "#result.id")
+public ProductResponse update(String id, UpdateProductRequest request) { ... }
 ```
+
+### Key naming convention
+
+Keys **must** follow the pattern `{service}:{entity}:{id}` to prevent collisions when multiple services share a single Valkey instance:
+
+| Service | Entity | Key pattern | Example |
+|---------|--------|-------------|----------|
+| `cart-service` | shopping cart | `cart:{userId}` | `cart:550e8400-e29b-41d4-a716-446655440001` |
+
+Define key prefixes as `private static final String` constants inside the repository class, never as inline strings. Always set a TTL on every write — **never store data without an expiry** to prevent unbounded memory growth.
 
 > Use `@Cacheable` only for **idempotent, read-heavy** data. Avoid caching mutable data that requires complex cache invalidation logic — the complexity outweighs the benefit.
 
@@ -1325,11 +1502,12 @@ When multiple threads miss the cache simultaneously (thundering herd), `@Cacheab
 Valkey is a supporting infrastructure component. A cache outage must **never** take down the business service. Wrap cache operations with a circuit breaker or catch `RedisException` and fall through to the data store:
 
 ```java
-public Optional<CartData> findByUserId(UUID userId) {
+public Optional<Cart> findByUserId(String userId) {
     try {
-        Object raw = redisTemplate.opsForValue().get(CacheKeys.cartKey(userId));
-        return Optional.ofNullable((CartData) raw);
-    } catch (RedisException ex) {
+        String json = redisTemplate.opsForValue().get(KEY_PREFIX + userId);
+        if (json == null) return Optional.empty();
+        return Optional.of(objectMapper.readValue(json, Cart.class));
+    } catch (RedisException | JsonProcessingException ex) {
         log.warn("Valkey unavailable, serving empty cart for user {}", userId, ex);
         return Optional.empty();   // caller treats missing cart as empty
     }
@@ -1421,11 +1599,22 @@ When adding a new microservice, ensure all of the following are in place before 
 ### Caching (Valkey / Redis services only)
 - [ ] `spring-boot-starter-data-redis` in `pom.xml`
 - [ ] `VALKEY_HOST` / `VALKEY_PORT` environment variables in `ConfigMap` and `application.yaml` defaults
-- [ ] `RedisTemplate<String, Object>` bean with `StringRedisSerializer` (keys) + `GenericJackson2JsonRedisSerializer` (values)
-- [ ] Key naming follows `{service}:{entity}:{id}` pattern; key helpers in a `CacheKeys` constants class
+- [ ] `StringRedisTemplate` bean (primary store) or `spring.cache.type: redis` (secondary cache) — never mix both patterns in one service without explicit naming
+- [ ] JSON serialisation via `StringRedisTemplate` + `ObjectMapper` (primary store) or `GenericJackson2JsonRedisSerializer` (secondary cache)
+- [ ] Key naming follows `{service}:{entity}:{id}` pattern; KEY_PREFIX constants defined inline or in a constants class
 - [ ] Every write sets an explicit TTL — no unbounded keys
 - [ ] Cache errors caught and degraded gracefully (never propagate `RedisException` to callers)
 - [ ] Integration test uses `GenericContainer<>("valkey/valkey:8-alpine")` + `@DynamicPropertySource`
+
+### Security — per-service lazy resolution (ADR-004)
+- [ ] `spring-boot-starter-oauth2-client`, `spring-cloud-starter-circuitbreaker-resilience4j`, `spring-boot-starter-cache`, `caffeine` in `pom.xml`
+- [ ] `UserServiceClient` HTTP Interface in `client/` package
+- [ ] `UserIdResolverService` with `@Cacheable("userIdBySubject")` + `@CircuitBreaker(name = "user-service")` in `service/` package
+- [ ] `HttpClientConfig` with `@EnableCaching`, `UserServiceClient` bean (RestClient + `OAuth2ClientHttpRequestInterceptor`), `CaffeineCacheManager` for `userIdBySubject`
+- [ ] `spring.security.oauth2.client.registration.user-service` with `grant-type: client_credentials`, `scope: users:resolve`
+- [ ] `services.user-service.url` property (default `http://localhost:8085`)
+- [ ] Resilience4j `user-service` circuit breaker / retry / timelimiter in `application.yaml`
+- [ ] Controller calls `userIdResolverService.resolveInternalId(JwtUtils.getSubject(auth))` — never uses JWT `sub` as a storage key directly
 
 ### Infrastructure
 - [ ] `ServiceAccount` defined in `k8s/{service}/serviceaccount.yaml`

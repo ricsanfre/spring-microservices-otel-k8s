@@ -21,6 +21,7 @@ flowchart TD
             CR_R("reviews:read / reviews:write")
             CR_U("users:read")
             CR_N("notifications:receive")
+            CR_CA("cart:read / cart:write")
         end
 
         subgraph SCOPES["Client Scopes"]
@@ -31,6 +32,7 @@ flowchart TD
             S4("users:read")
             S5("users:resolve")
             S6("notifications:receive")
+            S7("cart:read / cart:write")
         end
 
         subgraph CLIENTS["Clients"]
@@ -48,6 +50,7 @@ flowchart TD
         CR_C -->|composites| CR_O
         CR_C -->|composites| CR_R
         CR_C -->|composites| CR_U
+        CR_C -->|composites| CR_CA
         CR_A -->|composites| CR_C
         CR_A -->|composites| CR_N
 
@@ -56,6 +59,7 @@ flowchart TD
         CR_R -->|clientScopeMappings| S3
         CR_U -->|clientScopeMappings| S4
         CR_N -->|clientScopeMappings| S6
+        CR_CA -->|clientScopeMappings| S7
 
         S0 -->|defaultClientScopes| C1
         S1 -->|optionalClientScopes| C1
@@ -64,6 +68,7 @@ flowchart TD
         S4 -->|optionalClientScopes| C1
         S5 -->|defaultClientScopes| C2
         S6 -->|optionalClientScopes| C1
+        S7 -->|optionalClientScopes| C1
         C2 -->|owns service account| U3
         U1 -->|assigned role| CR_C
         U2 -->|assigned role| CR_C
@@ -137,6 +142,8 @@ See [ADR-006 — Scope-Based Authorization](adr-006-scope-based-authorization.md
 | `users:read` | Read own user profile | `e-commerce-web` (optional) |
 | `users:resolve` | Resolve IDP subject → internal user ID (M2M only) | `e-commerce-service` (default) |
 | `notifications:receive` | Receive notification events | `e-commerce-web` (optional) |
+| `cart:read` | Read own shopping cart | `e-commerce-web` (optional) |
+| `cart:write` | Add, update, and remove items in own shopping cart | `e-commerce-web` (optional) |
 
 > **Keycloak 26 — `basic` scope and the `sub` claim**: In Keycloak 26, the `sub` claim (user UUID)
 was moved out of the hard-coded token builder and into a dedicated `basic` client scope containing
@@ -171,7 +178,9 @@ when importing a partial realm — it must be explicitly defined in the realm JS
 | `reviews:write` | atomic | — |
 | `users:read` | atomic | — |
 | `notifications:receive` | atomic | — |
-| `customer` | composite | `products:read`, `orders:read`, `orders:write`, `reviews:read`, `reviews:write`, `users:read` |
+| `cart:read` | atomic | — |
+| `cart:write` | atomic | — |
+| `customer` | composite | `products:read`, `orders:read`, `orders:write`, `reviews:read`, `reviews:write`, `users:read`, `cart:read`, `cart:write` |
 | `admin` | composite | all `customer` scopes + `products:write` + `notifications:receive` |
 
 ### Usage in services
@@ -215,7 +224,8 @@ redirectUris:           http://localhost:3001/api/auth/callback/keycloak  (local
 webOrigins:             http://localhost:3001, https://app.local.test
 defaultClientScopes:    openid, basic, profile, email
 optionalClientScopes:   products:read, products:write, orders:read, orders:write,
-                        reviews:read, reviews:write, users:read, notifications:receive
+                        reviews:read, reviews:write, users:read, notifications:receive,
+                        cart:read, cart:write
 ```
 
 #### When is this used?
@@ -228,7 +238,7 @@ The **Next.js BFF** (`frontend-service`) uses this client to authenticate users 
        ?client_id=e-commerce-web
        &redirect_uri=http://localhost:3001/api/auth/callback/keycloak
        &response_type=code
-       &scope=openid email profile products:read orders:read orders:write reviews:read reviews:write users:read
+       &scope=openid email profile products:read orders:read orders:write reviews:read reviews:write users:read cart:read cart:write
        (no PKCE — confidential client holds the secret)
 
 2. User logs in on the Keycloak login page.
@@ -268,7 +278,7 @@ All the scopes it needs must be included in the `scope` parameter of the authori
   "email":             "testuser@example.com",
   "given_name":        "Test",
   "family_name":       "User",
-  "scope":             "openid profile email products:read orders:read orders:write reviews:read reviews:write users:read",
+  "scope":             "openid profile email products:read orders:read orders:write reviews:read reviews:write users:read cart:read cart:write",
   "exp":               1745600000,
   "iat":               1745596400
 }
