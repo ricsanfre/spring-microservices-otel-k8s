@@ -42,13 +42,14 @@ export default async function ProductsPage() {
         {products.map((p) => (
           <div key={p.id} className="card">
             {p.imageUrl && (
-              <Image
-                src={p.imageUrl}
-                alt={p.name}
-                width={200}
-                height={280}
-                style={{ width: "100%", height: "auto", borderRadius: "0.25rem", marginBottom: "0.5rem" }}
-              />
+              <div style={{ position: "relative", width: "100%", height: "240px", marginBottom: "0.5rem" }}>
+                <Image
+                  src={p.imageUrl}
+                  alt={p.name}
+                  fill
+                  style={{ objectFit: "cover", borderRadius: "0.25rem" }}
+                />
+              </div>
             )}
             <h3>{p.name}</h3>
             <p style={{ fontSize: "0.8rem", color: "#64748b", margin: "0.25rem 0" }}>
