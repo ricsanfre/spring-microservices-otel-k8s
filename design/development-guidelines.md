@@ -1748,22 +1748,33 @@ Realm files live in `docker/keycloak/`. Add or update realm clients in the JSON 
 
 ### Makefile pattern (per service)
 
+
+#### Common infrastructure targets
+
+These targets manage the shared Docker Compose infrastructure for all services:
+
+| Target         | Description                                         |
+|----------------|-----------------------------------------------------|
+| `infra-up`     | Start infra containers with healthcheck wait (`--wait`) |
+| `infra-down`   | Stop containers, keep named volumes                 |
+| `infra-clean`  | Stop containers **and** delete data volumes         |
+| `infra-logs`   | Tail infra container logs                           |
+| `infra-ps`     | Show container status                               |
+
+#### Per-service targets
+
 Makefile targets follow the prefix convention `<service-abbrev>-<action>`:
 
-| Target | Description |
-|--------|-------------|
-| `us-build` | Compile + package JAR (`-DskipTests`) |
-| `us-test` | Run unit + integration tests (Testcontainers — Docker required) |
-| `us-image` | Build container image to local Docker daemon via Jib |
-| `us-infra-up` | Start infra containers with healthcheck wait (`--wait`) |
-| `us-infra-down` | Stop containers, keep named volumes |
-| `us-infra-clean` | Stop containers **and** delete data volumes |
-| `us-infra-logs` | Tail infra container logs |
-| `us-infra-ps` | Show container status |
-| `us-run` | Build JAR then run with Spring profile `local` |
-| `us-dev` | `us-infra-up` + `us-run` in sequence |
-| `us-token` | Fetch user access token via password grant (needs `jq`) |
-| `us-token-sa` | Fetch service-account token via client credentials (needs `jq`) |
+| Target         | Description                                         |
+|----------------|-----------------------------------------------------|
+| `us-build`     | Compile + package JAR (`-DskipTests`)               |
+| `us-test`      | Run unit tests only (fast, no containers)           |
+| `us-verify`    | Run unit + integration tests (Testcontainers)       |
+| `us-image`     | Build container image to local Docker daemon via Jib|
+| `us-run`       | Build JAR then run with Spring profile `local`      |
+| `us-dev`       | `infra-up` + `us-run` in sequence                   |
+| `us-token`     | Fetch user access token via password grant (needs `jq`) |
+| `us-token-sa`  | Fetch service-account token via client credentials (needs `jq`) |
 
 Add analogous targets (`ps-*`, `os-*`, …) for each new service following the same structure.
 
@@ -1793,10 +1804,10 @@ TOKEN=$(make -s us-token)
 curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8085/api/v1/users/me | jq .
 
 # Tear down (preserves postgres data)
-make us-infra-down
+make infra-down
 
 # Hard reset (destroys all data)
-make us-infra-clean
+make infra-clean
 ```
 
 ---

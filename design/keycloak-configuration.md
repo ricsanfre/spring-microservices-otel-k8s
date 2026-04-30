@@ -443,10 +443,10 @@ Console steps are needed.
 > ```
 > Or to reset the entire local stack (Keycloak + Postgres + Mongo) at once:
 > ```bash
-> make us-infra-clean   # docker compose ... down -v
-> make us-infra-up
+> make infra-clean   # docker compose ... down -v
+> make infra-up
 > ```
-> `make us-infra-clean` runs `docker compose down -v` which removes **all** named volumes
+> `make infra-clean` runs `docker compose down -v` which removes **all** named volumes
 > (`keycloak-data`, `postgres-data`, `mongo-data`). Use it when you want a full environment reset.
 
 ---

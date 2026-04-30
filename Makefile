@@ -16,15 +16,14 @@ KEYCLOAK_OPERATOR_VERSION ?= 26.6.1  # https://github.com/keycloak/keycloak-k8s-
 
 .DEFAULT_GOAL := help
 .PHONY: help \
-        us-build us-test us-image \
-        us-infra-up us-infra-down us-infra-clean us-infra-logs us-infra-ps \
+        infra-up infra-down infra-clean infra-logs infra-ps \
+        infra-min-up infra-min-down infra-min-clean infra-min-logs infra-min-ps \
+        us-build us-test us-verify us-image \
         us-run us-dev \
         us-token us-token-sa \
-        ps-build ps-test ps-image \
-        ps-infra-up ps-infra-down ps-infra-clean \
+        ps-build ps-test ps-verify ps-image \
         ps-run ps-dev ps-seed \
-        cs-build cs-test cs-image \
-        cs-infra-up cs-infra-down cs-infra-clean \
+        cs-build cs-test cs-verify cs-image \
         cs-run cs-dev \
         k3d-create k3d-delete k3d-info \
         k8s-namespaces k8s-operators k8s-keycloak-operator \
@@ -46,6 +45,44 @@ help: ## Show this help
 	@echo ""
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Infrastructure (Docker Compose) — generic targets
+# ──────────────────────────────────────────────────────────────────────────────
+
+INFRA_PROFILES = --profile infra --profile auth --profile observability
+INFRA_MIN_PROFILES = --profile infra --profile auth
+
+infra-up: ## Start all infrastructure: infra, auth, observability (waits for healthy)
+	docker compose $(INFRA_PROFILES) up -d --wait
+
+infra-down: ## Stop + remove all infra containers (named volumes preserved)
+	docker compose $(INFRA_PROFILES) down
+
+infra-clean: ## Stop + remove all infra containers AND delete data volumes
+	docker compose $(INFRA_PROFILES) down -v
+
+infra-logs: ## Tail all infra container logs (Ctrl-C to stop)
+	docker compose $(INFRA_PROFILES) logs -f
+
+infra-ps: ## Show all infra container status
+	docker compose $(INFRA_PROFILES) ps
+
+# Minimal infra (no observability)
+infra-min-up: ## Start minimal infra: infra, auth (no observability)
+	docker compose $(INFRA_MIN_PROFILES) up -d --wait
+
+infra-min-down: ## Stop + remove minimal infra containers (named volumes preserved)
+	docker compose $(INFRA_MIN_PROFILES) down
+
+infra-min-clean: ## Stop + remove minimal infra containers AND delete data volumes
+	docker compose $(INFRA_MIN_PROFILES) down -v
+
+infra-min-logs: ## Tail minimal infra container logs (Ctrl-C to stop)
+	docker compose $(INFRA_MIN_PROFILES) logs -f
+
+infra-min-ps: ## Show minimal infra container status
+	docker compose $(INFRA_MIN_PROFILES) ps
+
+# ──────────────────────────────────────────────────────────────────────────────
 # user-service — build & test
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -63,26 +100,7 @@ us-image: us-build ## Build user-service container image to local Docker daemon 
 	    -Ddocker.registry=local \
 	    --no-transfer-progress
 
-# ──────────────────────────────────────────────────────────────────────────────
-# user-service — infrastructure  (Docker Compose profiles: infra + auth + observability)
-# ──────────────────────────────────────────────────────────────────────────────
 
-_COMPOSE_PROFILES := --profile infra --profile auth --profile observability
-
-us-infra-up: ## Start infrastructure: postgres, keycloak, grafana-lgtm (waits for healthy)
-	docker compose $(_COMPOSE_PROFILES) up -d --wait
-
-us-infra-down: ## Stop + remove infra containers (named volumes are preserved)
-	docker compose $(_COMPOSE_PROFILES) down
-
-us-infra-clean: ## Stop + remove infra containers AND delete data volumes
-	docker compose $(_COMPOSE_PROFILES) down -v
-
-us-infra-logs: ## Tail infra container logs (Ctrl-C to stop)
-	docker compose $(_COMPOSE_PROFILES) logs -f
-
-us-infra-ps: ## Show infra container status
-	docker compose $(_COMPOSE_PROFILES) ps
 
 # ──────────────────────────────────────────────────────────────────────────────
 # user-service — run locally (JAR, Spring profile: local)
@@ -111,19 +129,6 @@ ps-image: ps-build ## Build product-service container image to local Docker daem
 	$(MAVEN) -pl product-service jib:dockerBuild \
 	    -Ddocker.registry=local \
 	    --no-transfer-progress
-
-# ──────────────────────────────────────────────────────────────────────────────
-# product-service — infrastructure  (Docker Compose profiles: infra + auth + observability)
-# ──────────────────────────────────────────────────────────────────────────────
-
-ps-infra-up: ## Start infrastructure for product-service: mongodb, keycloak, grafana-lgtm
-	docker compose $(_COMPOSE_PROFILES) up -d --wait
-
-ps-infra-down: ## Stop + remove infra containers (named volumes preserved)
-	docker compose $(_COMPOSE_PROFILES) down
-
-ps-infra-clean: ## Stop + remove infra containers AND delete data volumes
-	docker compose $(_COMPOSE_PROFILES) down -v
 
 # ──────────────────────────────────────────────────────────────────────────────
 # product-service — run locally (JAR, Spring profile: local)
@@ -155,20 +160,6 @@ cs-image: cs-build ## Build cart-service container image to local Docker daemon 
 	$(MAVEN) -pl cart-service jib:dockerBuild \
 	    -Ddocker.registry=local \
 	    --no-transfer-progress
-
-# ──────────────────────────────────────────────────────────────────────────────
-# cart-service — infrastructure  (Docker Compose profiles: infra + auth + observability)
-# Valkey is part of the 'infra' profile — same as product-service / user-service.
-# ──────────────────────────────────────────────────────────────────────────────
-
-cs-infra-up: ## Start infrastructure for cart-service: valkey, keycloak, grafana-lgtm
-	docker compose $(_COMPOSE_PROFILES) up -d --wait
-
-cs-infra-down: ## Stop + remove infra containers (named volumes preserved)
-	docker compose $(_COMPOSE_PROFILES) down
-
-cs-infra-clean: ## Stop + remove infra containers AND delete data volumes
-	docker compose $(_COMPOSE_PROFILES) down -v
 
 # ──────────────────────────────────────────────────────────────────────────────
 # cart-service — run locally (JAR)

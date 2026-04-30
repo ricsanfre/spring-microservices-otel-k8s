@@ -573,7 +573,7 @@ For local development without Kubernetes, all infrastructure runs via Docker Com
 | `valkey` | `valkey/valkey:8-alpine` | 6379 | `infra` | Valkey cache — shopping carts (TTL 7 days) |
 | `keycloak` | `quay.io/keycloak/keycloak:26.0` | 8180 | `auth` | OAuth2 / OIDC IAM — realm `e-commerce` auto-imported |
 
-> **Profiles:** `infra` starts the shared databases (PostgreSQL + MongoDB + Valkey); `auth` starts Keycloak; `observability` starts the Grafana LGTM stack. All three are started together via `make us-infra-up`.
+> **Profiles:** `infra` starts the shared databases (PostgreSQL + MongoDB + Valkey); `auth` starts Keycloak; `observability` starts the Grafana LGTM stack. All three are started together via `make infra-up`.
 
 > **Keycloak realm auto-import:** `docker/keycloak/realm-e-commerce.json` is volume-mounted into Keycloak's import directory. On first start Keycloak creates realm `e-commerce` with client scopes, clients, and test users automatically — no manual Admin Console steps required.
 
@@ -841,12 +841,13 @@ mise doctor
 
 The root `Makefile` provides per-service targets. Run `make help` to see all targets.
 
+
 #### user-service
 
 ```bash
 # 1. Start infrastructure (postgres-users + keycloak + grafana-lgtm)
 #    Blocks until all healthchecks pass (~60–90 s on first run)
-make us-infra-up
+make infra-up
 
 # 2. Build JAR and run with Spring profile 'local'
 #    (disables Kubernetes discovery; uses static URLs)
@@ -899,8 +900,8 @@ curl -H "Authorization: Bearer $SA_TOKEN" \
 **Stopping infrastructure:**
 
 ```bash
-make us-infra-down    # stop containers, keep data volumes
-make us-infra-clean   # stop containers AND delete data volumes
+make infra-down    # stop containers, keep data volumes
+make infra-clean   # stop containers AND delete data volumes
 ```
 
 ---
@@ -909,7 +910,7 @@ make us-infra-clean   # stop containers AND delete data volumes
 
 ```bash
 # 1. Start infrastructure (mongodb + keycloak + grafana-lgtm)
-make ps-infra-up
+make infra-up
 
 # 2. Build JAR and run
 make ps-run
@@ -929,8 +930,8 @@ make ps-seed   # idempotent — skips silently if catalog already populated
 To wipe and re-seed from scratch:
 
 ```bash
-make ps-infra-clean   # destroy volumes
-make ps-infra-up      # re-create containers → init script runs automatically
+make infra-clean   # destroy volumes
+make infra-up      # re-create containers → init script runs automatically
 ```
 
 **Call the API (token from any running Keycloak session):**
@@ -953,8 +954,8 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 **Stopping infrastructure:**
 
 ```bash
-make ps-infra-down    # stop containers, keep data volumes
-make ps-infra-clean   # stop containers AND delete data volumes
+make infra-down    # stop containers, keep data volumes
+make infra-clean   # stop containers AND delete data volumes
 ```
 
 ---
@@ -977,6 +978,7 @@ npm run dev
 ```
 
 Make sure Keycloak is running (`make us-infra-up`) before starting the frontend — Auth.js needs to reach the Keycloak OIDC discovery endpoint at `http://localhost:8180/realms/e-commerce`.
+Make sure Keycloak is running (`make infra-up`) before starting the frontend — Auth.js needs to reach the Keycloak OIDC discovery endpoint at `http://localhost:8180/realms/e-commerce`.
 
 **Frontend source layout:**
 
