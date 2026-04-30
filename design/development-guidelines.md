@@ -1297,6 +1297,83 @@ Also mock the `JwtDecoder` bean to prevent Spring Boot from fetching the JWK Set
 JwtDecoder jwtDecoder;
 ```
 
+### Maven plugin configuration — Surefire & Failsafe
+
+Tests are split across two Maven plugins to allow a fast unit-only gate and a full integration gate:
+
+| Plugin | Phase | Runs | Command |
+|---|---|---|---|
+| `maven-surefire-plugin` | `test` | `*Test.java` only | `mvn test` |
+| `maven-failsafe-plugin` | `integration-test` / `verify` | `*IT.java` only | `mvn verify` |
+
+> See [ADR-012](adr-012-surefire-failsafe-test-separation.md) for rationale.
+
+#### Naming conventions
+
+| Class suffix | Type | Example |
+|---|---|---|
+| `*Test.java` | Unit test or `@WebMvcTest` slice — no infrastructure | `ProductServiceTest`, `ProductControllerTest` |
+| `*IT.java` | Integration test — starts real containers via TestContainers | `ProductControllerIT`, `UserControllerIT` |
+
+#### Root POM configuration
+
+Both plugins are configured in `<pluginManagement>` so the configuration is inherited by all child modules without repetition:
+
+```xml
+<!-- Surefire — excludes *IT.java -->
+<plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-surefire-plugin</artifactId>
+    <configuration>
+        <excludes>
+            <exclude>**/*IT.java</exclude>
+        </excludes>
+    </configuration>
+</plugin>
+
+<!-- Failsafe — includes only *IT.java, binds to integration-test + verify goals -->
+<plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-failsafe-plugin</artifactId>
+    <configuration>
+        <includes>
+            <include>**/*IT.java</include>
+        </includes>
+    </configuration>
+    <executions>
+        <execution>
+            <goals>
+                <goal>integration-test</goal>
+                <goal>verify</goal>
+            </goals>
+        </execution>
+    </executions>
+</plugin>
+```
+
+#### Service module activation
+
+Each service module that contains `*IT.java` tests must declare `maven-failsafe-plugin` in its `<build><plugins>` block (no additional configuration needed — it inherits everything from `pluginManagement`):
+
+```xml
+<plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-failsafe-plugin</artifactId>
+</plugin>
+```
+
+#### CI pipeline usage
+
+```bash
+# PR check — fast, no containers (~seconds)
+mvn test
+
+# Merge / deployment gate — full stack with TestContainers (~minutes)
+mvn verify
+```
+
+---
+
 ### Spring Boot 4 — key testing changes
 
 | Concern | Spring Boot 3 | Spring Boot 4 |

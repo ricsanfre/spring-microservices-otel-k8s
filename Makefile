@@ -52,8 +52,11 @@ help: ## Show this help
 us-build: ## Compile + package user-service JAR (tests skipped)
 	$(MAVEN) -pl common,user-service -am package -DskipTests --no-transfer-progress
 
-us-test: ## Run user-service unit + integration tests (Testcontainers — needs Docker)
+us-test: ## Run user-service unit tests only (fast, no containers)
 	$(MAVEN) -pl common,user-service -am test --no-transfer-progress
+
+us-verify: ## Run user-service unit + integration tests (Testcontainers — needs Docker)
+	$(MAVEN) -pl common,user-service -am verify --no-transfer-progress
 
 us-image: us-build ## Build user-service container image to local Docker daemon (Jib)
 	$(MAVEN) -pl user-service jib:dockerBuild \
@@ -98,8 +101,11 @@ us-dev: us-infra-up us-run ## Full local dev loop: start infra, then run service
 ps-build: ## Compile + package product-service JAR (tests skipped)
 	$(MAVEN) -pl common,product-service -am package -DskipTests --no-transfer-progress
 
-ps-test: ## Run product-service unit + integration tests
+ps-test: ## Run product-service unit tests only (fast, no containers)
 	$(MAVEN) -pl common,product-service -am test --no-transfer-progress
+
+ps-verify: ## Run product-service unit + integration tests (Testcontainers — needs Docker)
+	$(MAVEN) -pl common,product-service -am verify --no-transfer-progress
 
 ps-image: ps-build ## Build product-service container image to local Docker daemon (Jib)
 	$(MAVEN) -pl product-service jib:dockerBuild \
@@ -139,8 +145,11 @@ ps-seed: ## Seed product-service MongoDB with 20 sci-fi & fantasy books (idempot
 cs-build: ## Compile + package cart-service JAR (tests skipped)
 	$(MAVEN) -pl common,cart-service -am package -DskipTests --no-transfer-progress
 
-cs-test: ## Run cart-service unit + integration tests
+cs-test: ## Run cart-service unit tests only (fast, no containers)
 	$(MAVEN) -pl common,cart-service -am test --no-transfer-progress
+
+cs-verify: ## Run cart-service unit + integration tests (Testcontainers — needs Docker)
+	$(MAVEN) -pl common,cart-service -am verify --no-transfer-progress
 
 cs-image: cs-build ## Build cart-service container image to local Docker daemon (Jib)
 	$(MAVEN) -pl cart-service jib:dockerBuild \

@@ -5,7 +5,6 @@ import com.ricsanfre.cart.api.model.CartItemResponse;
 import com.ricsanfre.cart.api.model.CartResponse;
 import com.ricsanfre.cart.client.UserServiceClient;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -46,9 +45,8 @@ import static org.mockito.Mockito.when;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
-@Tag("L1")
 @ActiveProfiles("l1test")
-class CartControllerL1Test {
+class CartControllerIT {
 
     // ── Container ─────────────────────────────────────────────────────────────
 

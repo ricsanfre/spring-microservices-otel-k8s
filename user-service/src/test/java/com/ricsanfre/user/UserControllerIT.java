@@ -45,7 +45,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Testcontainers
 @ActiveProfiles("local")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class UserControllerIntegrationTest {
+class UserControllerIT {
 
     @Container
     @ServiceConnection

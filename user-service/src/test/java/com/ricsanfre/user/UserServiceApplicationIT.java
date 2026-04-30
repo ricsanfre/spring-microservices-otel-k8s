@@ -11,7 +11,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 @SpringBootTest
 @Testcontainers
 @ActiveProfiles("local")
-class UserServiceApplicationTests {
+class UserServiceApplicationIT {
 
     @Container
     @ServiceConnection

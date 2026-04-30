@@ -5,7 +5,6 @@ import com.ricsanfre.product.api.model.CreateProductRequest;
 import com.ricsanfre.product.api.model.UpdateProductRequest;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,10 +38,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @Testcontainers
-@Tag("L1")
 @ActiveProfiles("l1test")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class ProductControllerL1Test {
+class ProductControllerIT {
 
     @Container
     @ServiceConnection
