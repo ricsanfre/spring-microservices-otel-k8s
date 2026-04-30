@@ -123,14 +123,14 @@ class UserControllerIntegrationTest {
     @Test
     @Order(1)
     void getCurrentUser_unauthenticated_returns401() throws Exception {
-        mockMvc.perform(get("/users/me"))
+        mockMvc.perform(get("/api/v1/users/me"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     @Order(2)
     void getCurrentUser_firstCall_lazyRegistersAndReturnsFullProfile() throws Exception {
-        MvcResult result = mockMvc.perform(get("/users/me").with(userJwt()))
+        MvcResult result = mockMvc.perform(get("/api/v1/users/me").with(userJwt()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id", notNullValue()))
                 .andExpect(jsonPath("$.username").value("testuser"))
@@ -148,7 +148,7 @@ class UserControllerIntegrationTest {
     @Test
     @Order(3)
     void getCurrentUser_secondCall_returnsSameProfile() throws Exception {
-        mockMvc.perform(get("/users/me").with(userJwt()))
+        mockMvc.perform(get("/api/v1/users/me").with(userJwt()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(createdUserId.toString()));
     }
@@ -156,7 +156,7 @@ class UserControllerIntegrationTest {
     @Test
     @Order(4)
     void getUserById_existingId_returns200WithProfile() throws Exception {
-        mockMvc.perform(get("/users/{id}", createdUserId).with(userJwt()))
+        mockMvc.perform(get("/api/v1/users/{id}", createdUserId).with(userJwt()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(createdUserId.toString()))
                 .andExpect(jsonPath("$.email").value("testuser@example.com"));
@@ -165,7 +165,7 @@ class UserControllerIntegrationTest {
     @Test
     @Order(5)
     void getUserById_unknownId_returns404() throws Exception {
-        mockMvc.perform(get("/users/{id}", UUID.randomUUID()).with(userJwt()))
+        mockMvc.perform(get("/api/v1/users/{id}", UUID.randomUUID()).with(userJwt()))
                 .andExpect(status().isNotFound());
     }
 
@@ -177,7 +177,7 @@ class UserControllerIntegrationTest {
                 .lastName("Name")
                 .build();
 
-        mockMvc.perform(put("/users/{id}", createdUserId).with(userJwt())
+        mockMvc.perform(put("/api/v1/users/{id}", createdUserId).with(userJwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
@@ -190,14 +190,14 @@ class UserControllerIntegrationTest {
     @Order(7)
     void updateUser_otherUsersProfile_returns403() throws Exception {
         // First, register the second user
-        MvcResult r = mockMvc.perform(get("/users/me").with(otherUserJwt()))
+        MvcResult r = mockMvc.perform(get("/api/v1/users/me").with(otherUserJwt()))
                 .andExpect(status().isOk())
                 .andReturn();
         UUID otherId = UUID.fromString(
                 objectMapper.readTree(r.getResponse().getContentAsString()).get("id").asText());
 
         // Try to update the other user's profile using the first user's JWT
-        mockMvc.perform(put("/users/{id}", otherId).with(userJwt())
+        mockMvc.perform(put("/api/v1/users/{id}", otherId).with(userJwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new UpdateUserRequest())))
                 .andExpect(status().isForbidden());
@@ -206,7 +206,7 @@ class UserControllerIntegrationTest {
     @Test
     @Order(8)
     void updateUser_unknownId_returns404() throws Exception {
-        mockMvc.perform(put("/users/{id}", UUID.randomUUID()).with(userJwt())
+        mockMvc.perform(put("/api/v1/users/{id}", UUID.randomUUID()).with(userJwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new UpdateUserRequest())))
                 .andExpect(status().isNotFound());
@@ -215,7 +215,7 @@ class UserControllerIntegrationTest {
     @Test
     @Order(9)
     void resolveUser_withUsersResolveScope_returns200() throws Exception {
-        mockMvc.perform(get("/users/resolve").with(serviceAccountJwt())
+        mockMvc.perform(get("/api/v1/users/resolve").with(serviceAccountJwt())
                         .param("idp_subject", "test-sub-1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(createdUserId.toString()));
@@ -224,7 +224,7 @@ class UserControllerIntegrationTest {
     @Test
     @Order(10)
     void resolveUser_withoutUsersResolveScope_returns403() throws Exception {
-        mockMvc.perform(get("/users/resolve").with(userJwt())
+        mockMvc.perform(get("/api/v1/users/resolve").with(userJwt())
                         .param("idp_subject", "test-sub-1"))
                 .andExpect(status().isForbidden());
     }
@@ -232,7 +232,7 @@ class UserControllerIntegrationTest {
     @Test
     @Order(11)
     void resolveUser_unknownSubject_returns404() throws Exception {
-        mockMvc.perform(get("/users/resolve").with(serviceAccountJwt())
+        mockMvc.perform(get("/api/v1/users/resolve").with(serviceAccountJwt())
                         .param("idp_subject", "non-existent-sub"))
                 .andExpect(status().isNotFound());
     }
@@ -240,7 +240,7 @@ class UserControllerIntegrationTest {
     @Test
     @Order(12)
     void resolveUser_missingParam_returns400() throws Exception {
-        mockMvc.perform(get("/users/resolve").with(serviceAccountJwt()))
+        mockMvc.perform(get("/api/v1/users/resolve").with(serviceAccountJwt()))
                 .andExpect(status().isBadRequest());
     }
 }

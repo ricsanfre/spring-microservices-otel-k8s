@@ -23,6 +23,9 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                 .requestMatchers("/api-docs/**", "/swagger-ui/**").permitAll()
+                // Service accounts with users:resolve scope can access the resolve endpoint;
+                // users with users:read scope are also permitted (method security enforces users:resolve).
+                .requestMatchers("/api/v1/users/resolve").hasAnyAuthority("SCOPE_users:resolve", "SCOPE_users:read")
                 .anyRequest().hasAuthority("SCOPE_users:read")
             )
             // Spring Security default: reads 'scope'/'scp' claim → SCOPE_ prefix authorities.
