@@ -31,3 +31,29 @@ spec:
 
   # Expose a read-write Service at postgres-rw.postgres.svc.cluster.local:5432
   # and a read-only Service at postgres-ro.postgres.svc.cluster.local:5432
+
+  # Provision application roles from Kubernetes Secrets so Spring Boot services
+  # can authenticate.  Secrets must exist in the 'postgres' namespace before the
+  # Cluster CR is applied (or created in the same kubectl apply batch).
+  #
+  # Local setup:
+  #   kubectl create secret generic users-db-secret \
+  #     --from-literal=username=users_owner --from-literal=password=<CHANGE_ME> \
+  #     --namespace postgres
+  #   kubectl create secret generic keycloak-db-secret \
+  #     --from-literal=username=keycloak_owner --from-literal=password=<CHANGE_ME> \
+  #     --namespace postgres
+  managed:
+    roles:
+      - name: users_owner
+        ensure: present
+        login: true
+        inherit: true
+        passwordSecret:
+          name: users-db-secret
+      - name: keycloak_owner
+        ensure: present
+        login: true
+        inherit: true
+        passwordSecret:
+          name: keycloak-db-secret

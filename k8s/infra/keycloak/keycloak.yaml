@@ -1,23 +1,16 @@
 # Keycloak Operator — Keycloak CR
 # Namespace: keycloak
 #
-# Apply:
-#   kubectl apply -f k8s/infra/keycloak/keycloak.yaml
----
-# Admin credentials secret — override before applying:
+# Prerequisites — create secrets before applying:
 #   kubectl create secret generic keycloak-admin-secret \
-#     --from-literal=username=admin \
-#     --from-literal=password=<CHANGE_ME> \
-#     --namespace keycloak --dry-run=client -o yaml | kubectl apply -f -
-apiVersion: v1
-kind: Secret
-metadata:
-  name: keycloak-admin-secret
-  namespace: keycloak
-type: kubernetes.io/basic-auth
-stringData:
-  username: admin
-  password: "change-me"
+#     --from-literal=username=admin --from-literal=password=<CHANGE_ME> \
+#     --namespace keycloak
+#   kubectl create secret generic keycloak-db-secret \
+#     --from-literal=username=keycloak_owner --from-literal=password=<CHANGE_ME> \
+#     --namespace keycloak
+#
+# Apply:
+#   kubectl apply -k k8s/infra/keycloak
 ---
 apiVersion: k8s.keycloak.org/v2alpha1
 kind: Keycloak
@@ -55,17 +48,6 @@ spec:
       value: "true"
     - name: metrics-enabled
       value: "true"
----
-# Keycloak DB secret — override before applying
-apiVersion: v1
-kind: Secret
-metadata:
-  name: keycloak-db-secret
-  namespace: keycloak
-type: kubernetes.io/basic-auth
-stringData:
-  username: keycloak_owner
-  password: "change-me"
 ---
 # TLS certificate for keycloak.local.test (separate from the envoy-gateway wildcard)
 apiVersion: cert-manager.io/v1

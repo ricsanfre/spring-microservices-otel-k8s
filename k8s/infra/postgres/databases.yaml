@@ -1,17 +1,17 @@
-# CloudNativePG — per-service Database CRs + Secrets
-# Each service gets its own database and a dedicated Postgres role.
+# CloudNativePG — per-service Database CRs
+# Each service gets its own database owned by a dedicated PostgreSQL role.
+# Role passwords are managed by CNPG managed.roles (see cluster.yaml).
+#
+# Prerequisites — create credential secrets in the 'postgres' namespace before applying:
+#   kubectl create secret generic users-db-secret \
+#     --from-literal=username=users_owner --from-literal=password=<CHANGE_ME> \
+#     --namespace postgres
+#   kubectl create secret generic keycloak-db-secret \
+#     --from-literal=username=keycloak_owner --from-literal=password=<CHANGE_ME> \
+#     --namespace postgres
 #
 # Apply:
-#   kubectl apply -f k8s/infra/postgres/databases.yaml
----
-# ── Superuser secret (used in cluster.yaml bootstrap) ──────────────────────
-# Generate with:
-#   kubectl create secret generic postgres-superuser-secret \
-#     --from-literal=username=postgres \
-#     --from-literal=password=<CHANGE_ME> \
-#     --namespace postgres --dry-run=client -o yaml | kubectl apply -f -
-#
-# NOTE: Do NOT commit real credentials. Use a secrets manager or sealed-secrets in production.
+#   kubectl apply -k k8s/infra/postgres
 
 # ── user-service database ──────────────────────────────────────────────────
 ---
@@ -25,21 +25,19 @@ spec:
   owner: users_owner
   cluster:
     name: postgres
+
+# ── keycloak database ──────────────────────────────────────────────────────
 ---
-apiVersion: v1
-kind: Secret
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
 metadata:
-  name: users-db-secret
+  name: keycloak-db
   namespace: postgres
-type: kubernetes.io/basic-auth
-stringData:
-  username: users_owner
-  # Override with a real password via:
-  #   kubectl create secret generic users-db-secret \
-  #     --from-literal=username=users_owner \
-  #     --from-literal=password=<CHANGE_ME> \
-  #     --namespace postgres --dry-run=client -o yaml | kubectl apply -f -
-  password: "change-me"
+spec:
+  name: keycloak
+  owner: keycloak_owner
+  cluster:
+    name: postgres
 
 # ── order-service database ─────────────────────────────────────────────────
 ---
@@ -53,13 +51,3 @@ spec:
   owner: orders_owner
   cluster:
     name: postgres
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: orders-db-secret
-  namespace: postgres
-type: kubernetes.io/basic-auth
-stringData:
-  username: orders_owner
-  password: "change-me"
