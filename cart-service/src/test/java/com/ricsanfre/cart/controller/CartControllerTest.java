@@ -4,8 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ricsanfre.cart.api.model.CartItemRequest;
 import com.ricsanfre.cart.api.model.CartItemResponse;
 import com.ricsanfre.cart.api.model.CartResponse;
+import com.ricsanfre.cart.client.OrderServiceClient;
 import com.ricsanfre.cart.service.CartService;
 import com.ricsanfre.cart.service.UserIdResolverService;
+import com.ricsanfre.common.exception.BusinessRuleException;
 import com.ricsanfre.common.exception.GlobalExceptionHandler;
 import com.ricsanfre.common.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.Test;
@@ -74,6 +76,7 @@ class CartControllerTest {
                     .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                     .authorizeHttpRequests(auth -> auth
                             .requestMatchers(HttpMethod.GET, "/api/v1/cart").hasAuthority("SCOPE_cart:read")
+                            .requestMatchers(HttpMethod.POST, "/api/v1/cart/checkout").hasAuthority("SCOPE_cart:read")
                             .requestMatchers(HttpMethod.PUT, "/api/v1/cart/items/**").hasAuthority("SCOPE_cart:write")
                             .requestMatchers(HttpMethod.DELETE, "/api/v1/cart/items/**").hasAuthority("SCOPE_cart:write")
                             .requestMatchers(HttpMethod.DELETE, "/api/v1/cart").hasAuthority("SCOPE_cart:write")
@@ -250,5 +253,43 @@ class CartControllerTest {
 
         mockMvc.perform(get("/api/v1/cart").with(readJwt()))
                 .andExpect(status().isInternalServerError());
+    }
+
+    // ── POST /api/v1/cart/checkout ──────────────────────────────────────
+
+    @Test
+    void checkout_withReadScope_returns201() throws Exception {
+        when(userIdResolverService.resolveInternalId(SUB)).thenReturn(USER_ID);
+
+        OrderServiceClient.OrderResponse fakeOrder = new OrderServiceClient.OrderResponse(
+                java.util.UUID.randomUUID(), USER_ID, "PENDING", List.of(), 19.98, null, null);
+        when(cartService.checkout(USER_ID)).thenReturn(fakeOrder);
+
+        mockMvc.perform(post("/api/v1/cart/checkout").with(readJwt()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("PENDING"));
+    }
+
+    @Test
+    void checkout_noAuth_returns401() throws Exception {
+        mockMvc.perform(post("/api/v1/cart/checkout"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void checkout_writeOnlyScope_returns403() throws Exception {
+        mockMvc.perform(post("/api/v1/cart/checkout")
+                        .with(jwt().jwt(j -> j.subject(SUB).claim("scope", "cart:write"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void checkout_emptyCart_returns409() throws Exception {
+        when(userIdResolverService.resolveInternalId(SUB)).thenReturn(USER_ID);
+        when(cartService.checkout(USER_ID))
+                .thenThrow(new BusinessRuleException("Cart is empty for user " + USER_ID));
+
+        mockMvc.perform(post("/api/v1/cart/checkout").with(readJwt()))
+                .andExpect(status().isConflict());
     }
 }

@@ -1,14 +1,16 @@
 package com.ricsanfre.order.service;
 
+import com.ricsanfre.common.exception.BusinessRuleException;
+import com.ricsanfre.common.exception.BusinessRuleException;
 import com.ricsanfre.common.exception.ResourceNotFoundException;
 import com.ricsanfre.order.api.model.CreateOrderRequest;
 import com.ricsanfre.order.api.model.OrderItemRequest;
 import com.ricsanfre.order.api.model.OrderResponse;
 import com.ricsanfre.order.api.model.UpdateOrderStatusRequest;
+import com.ricsanfre.order.client.ProductServiceClient;
 import com.ricsanfre.order.domain.Order;
 import com.ricsanfre.order.domain.OrderItem;
 import com.ricsanfre.order.domain.OrderStatus;
-import com.ricsanfre.order.kafka.OrderCreatedEvent;
 import com.ricsanfre.order.kafka.OrderEventPublisher;
 import com.ricsanfre.order.repository.OrderRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,7 +19,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -44,6 +51,9 @@ class OrderServiceTest {
 
     @Mock
     private OrderEventPublisher eventPublisher;
+
+    @Mock
+    private ProductServiceClient productServiceClient;
 
     @InjectMocks
     private OrderService orderService;
@@ -88,7 +98,7 @@ class OrderServiceTest {
         assertThat(response.getTotalAmount()).isEqualTo(19.98);
         assertThat(response.getItems()).hasSize(1);
         verify(orderRepository).save(any(Order.class));
-        verify(eventPublisher).publishOrderCreated(any(OrderCreatedEvent.class));
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
@@ -105,7 +115,7 @@ class OrderServiceTest {
         assertThatThrownBy(() -> orderService.createOrder(request, ownerAuth))
                 .isInstanceOf(ResourceNotFoundException.class);
         verify(orderRepository, never()).save(any());
-        verify(eventPublisher, never()).publishOrderCreated(any());
+        verifyNoInteractions(eventPublisher);
     }
 
     // ── findById ──────────────────────────────────────────────────────────────
@@ -205,6 +215,76 @@ class OrderServiceTest {
                 .build();
 
         assertThatThrownBy(() -> orderService.updateStatus(ORDER_ID, request))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    // ── confirmOrder ──────────────────────────────────────────────────────────
+
+    @Test
+    void confirmOrder_happyPath_confirmsOrderAndPublishesEvent() {
+        Order order = buildOrder(ORDER_ID, USER_ID);
+        when(orderRepository.findById(ORDER_ID)).thenReturn(Optional.of(order));
+        when(userIdResolverService.resolveInternalId(SUB)).thenReturn(USER_ID);
+        doNothing().when(productServiceClient).reserveStock(any());
+        when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        OrderResponse response = orderService.confirmOrder(ORDER_ID, ownerAuth);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
+        assertThat(response.getStatus()).isEqualTo(com.ricsanfre.order.api.model.OrderStatus.CONFIRMED);
+        verify(orderRepository).save(order);
+        verify(eventPublisher).publishOrderConfirmed(any());
+    }
+
+    @Test
+    void confirmOrder_orderNotPending_throwsBusinessRuleException() {
+        Order order = buildOrder(ORDER_ID, USER_ID);
+        order.setStatus(OrderStatus.CONFIRMED);
+        when(orderRepository.findById(ORDER_ID)).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> orderService.confirmOrder(ORDER_ID, ownerAuth))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("cannot be confirmed");
+
+        verify(productServiceClient, never()).reserveStock(any());
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void confirmOrder_notOwner_throwsAccessDeniedException() {
+        Order order = buildOrder(ORDER_ID, USER_ID);
+        when(orderRepository.findById(ORDER_ID)).thenReturn(Optional.of(order));
+        when(userIdResolverService.resolveInternalId("other-sub")).thenReturn(OTHER_USER_ID);
+
+        assertThatThrownBy(() -> orderService.confirmOrder(ORDER_ID, otherAuth))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verify(productServiceClient, never()).reserveStock(any());
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void confirmOrder_insufficientStock_throwsBusinessRuleException() {
+        Order order = buildOrder(ORDER_ID, USER_ID);
+        when(orderRepository.findById(ORDER_ID)).thenReturn(Optional.of(order));
+        when(userIdResolverService.resolveInternalId(SUB)).thenReturn(USER_ID);
+        doThrow(HttpClientErrorException.create(HttpStatus.CONFLICT, "conflict", HttpHeaders.EMPTY, new byte[0], null))
+                .when(productServiceClient).reserveStock(any());
+
+        assertThatThrownBy(() -> orderService.confirmOrder(ORDER_ID, ownerAuth))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("Insufficient stock");
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+        verify(orderRepository, never()).save(any());
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void confirmOrder_orderNotFound_throwsResourceNotFoundException() {
+        when(orderRepository.findById(ORDER_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> orderService.confirmOrder(ORDER_ID, ownerAuth))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 

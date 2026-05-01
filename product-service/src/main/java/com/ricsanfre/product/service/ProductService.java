@@ -1,9 +1,12 @@
 package com.ricsanfre.product.service;
 
+import com.ricsanfre.common.exception.BusinessRuleException;
 import com.ricsanfre.common.exception.ResourceNotFoundException;
 import com.ricsanfre.product.api.model.CreateProductRequest;
 import com.ricsanfre.product.api.model.ProductPage;
 import com.ricsanfre.product.api.model.ProductResponse;
+import com.ricsanfre.product.api.model.StockReserveItem;
+import com.ricsanfre.product.api.model.StockReserveRequest;
 import com.ricsanfre.product.api.model.UpdateProductRequest;
 import com.ricsanfre.product.domain.Product;
 import com.ricsanfre.product.repository.ProductRepository;
@@ -12,10 +15,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -79,6 +84,46 @@ public class ProductService {
         }
         productRepository.deleteById(id);
     }
+
+    /**
+     * Atomically reserves stock for all items in a confirmed order.
+     *
+     * <p>Validates that every product has sufficient stock before persisting any change.
+     * If any product has insufficient stock, throws {@link BusinessRuleException} with HTTP 409.
+     */
+    @Transactional
+    public void reserveStock(StockReserveRequest request) {
+        List<StockReserveItem> items = request.getItems();
+        log.info("Reserving stock for {} items", items.size());
+
+        // Load all products first; fail fast if any is not found
+        List<Product> products = items.stream()
+                .map(item -> productRepository.findById(item.getProductId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Product", item.getProductId())))
+                .toList();
+
+        // Validate sufficient stock for every item before mutating anything
+        for (int i = 0; i < items.size(); i++) {
+            StockReserveItem item = items.get(i);
+            Product product = products.get(i);
+            if (product.getStockQty() < item.getQuantity()) {
+                throw new BusinessRuleException(
+                        "Insufficient stock for product %s: available=%d requested=%d"
+                                .formatted(item.getProductId(), product.getStockQty(), item.getQuantity()));
+            }
+        }
+
+        // Apply reservation
+        for (int i = 0; i < items.size(); i++) {
+            Product product = products.get(i);
+            product.setStockQty(product.getStockQty() - items.get(i).getQuantity());
+            productRepository.save(product);
+            log.info("Reserved {} units for product={}, remaining={}",
+                    items.get(i).getQuantity(), product.getId(), product.getStockQty());
+        }
+    }
+
+    // ── Mapping ──────────────────────────────────────────────────────────────
 
     private ProductResponse toResponse(Product p) {
         return ProductResponse.builder()

@@ -17,10 +17,11 @@ paths:
     post:
       tags: [Orders]
       operationId: createOrder
-      summary: Place a new order
+      summary: Place a new order (PENDING preview)
       description: |
-        Creates a new order for the currently authenticated user.
-        Publishes an `OrderCreatedEvent` to `order.created.v1` Kafka topic on success.
+        Creates a new PENDING order for the currently authenticated user.
+        Does NOT reserve stock and does NOT publish a Kafka event.
+        The cart is NOT cleared. Call `POST /orders/{id}/confirm` to confirm and reserve stock.
       requestBody:
         required: true
         content:
@@ -38,6 +39,37 @@ paths:
           description: Validation error
         "401":
           description: Unauthorized
+
+  /orders/{id}/confirm:
+    post:
+      tags: [Orders]
+      operationId: confirmOrder
+      summary: Confirm a PENDING order (reserve stock → CONFIRMED → publish Kafka event)
+      description: |
+        Verifies that the order is PENDING and owned by the caller, then calls
+        product-service to atomically reserve stock. On success the order transitions
+        PENDING → CONFIRMED and an `order.confirmed.v1` Kafka event is published.
+        Returns 409 if stock is insufficient (order stays PENDING, cart stays intact).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Order confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        "403":
+          description: Caller is not the order owner
+        "404":
+          description: Order not found
+        "409":
+          description: Insufficient stock for one or more items
 
   /orders/{id}:
     get:

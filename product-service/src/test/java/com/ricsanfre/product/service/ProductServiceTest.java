@@ -4,9 +4,12 @@ import com.ricsanfre.common.exception.ResourceNotFoundException;
 import com.ricsanfre.product.api.model.CreateProductRequest;
 import com.ricsanfre.product.api.model.ProductPage;
 import com.ricsanfre.product.api.model.ProductResponse;
+import com.ricsanfre.product.api.model.StockReserveItem;
+import com.ricsanfre.product.api.model.StockReserveRequest;
 import com.ricsanfre.product.api.model.UpdateProductRequest;
 import com.ricsanfre.product.domain.Product;
 import com.ricsanfre.product.repository.ProductRepository;
+import com.ricsanfre.common.exception.BusinessRuleException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -194,5 +197,65 @@ class ProductServiceTest {
         assertThatThrownBy(() -> productService.delete("missing"))
                 .isInstanceOf(ResourceNotFoundException.class);
         verify(productRepository, never()).deleteById(any());
+    }
+
+    // ── reserveStock ─────────────────────────────────────────────────────────
+
+    @Test
+    void reserveStock_sufficientStock_decrementsAllProducts() {
+        var p1 = buildProduct("prod-1", "electronics");
+        p1.setStockQty(10);
+        var p2 = buildProduct("prod-2", "books");
+        p2.setStockQty(5);
+
+        when(productRepository.findById("prod-1")).thenReturn(Optional.of(p1));
+        when(productRepository.findById("prod-2")).thenReturn(Optional.of(p2));
+        when(productRepository.save(any(Product.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        var request = StockReserveRequest.builder()
+                .items(List.of(
+                        StockReserveItem.builder().productId("prod-1").quantity(3).build(),
+                        StockReserveItem.builder().productId("prod-2").quantity(2).build()))
+                .build();
+
+        productService.reserveStock(request);
+
+        assertThat(p1.getStockQty()).isEqualTo(7);
+        assertThat(p2.getStockQty()).isEqualTo(3);
+        verify(productRepository, times(2)).save(any(Product.class));
+    }
+
+    @Test
+    void reserveStock_insufficientStock_throwsBusinessRuleException() {
+        var p1 = buildProduct("prod-1", "electronics");
+        p1.setStockQty(1);
+
+        when(productRepository.findById("prod-1")).thenReturn(Optional.of(p1));
+
+        var request = StockReserveRequest.builder()
+                .items(List.of(
+                        StockReserveItem.builder().productId("prod-1").quantity(5).build()))
+                .build();
+
+        assertThatThrownBy(() -> productService.reserveStock(request))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("prod-1");
+
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void reserveStock_productNotFound_throwsResourceNotFoundException() {
+        when(productRepository.findById("missing")).thenReturn(Optional.empty());
+
+        var request = StockReserveRequest.builder()
+                .items(List.of(
+                        StockReserveItem.builder().productId("missing").quantity(1).build()))
+                .build();
+
+        assertThatThrownBy(() -> productService.reserveStock(request))
+                .isInstanceOf(ResourceNotFoundException.class);
+
+        verify(productRepository, never()).save(any());
     }
 }

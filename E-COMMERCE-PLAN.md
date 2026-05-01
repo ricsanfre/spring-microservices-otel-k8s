@@ -15,12 +15,13 @@
 | User reviews database | MongoDB |
 | User profiles database | PostgreSQL |
 | Notification service storage | Stateless (no DB) |
-| Async messaging | Apache Kafka — topic `order.created.v1` |
+| Async messaging | Apache Kafka — topics `order.confirmed.v1` (confirmation + stock reserved) |
 | Service discovery | Plain Kubernetes Service DNS — `http://service-name:port` via CoreDNS + kube-proxy |
 | Entry point / API Gateway | Envoy Gateway (Kubernetes Gateway API) |
 | Authentication / Authorization | OAuth2.0 + Keycloak (OIDC) |
 | Shopping cart storage | Valkey (Redis-compatible in-memory cache) — key `cart:{userId}`, TTL 7 days |
 | Frontend framework | Next.js 15 (App Router) + Auth.js v5 — BFF pattern; browser never holds JWT (see [ADR-007](design/adr-007-nextjs-bff-frontend.md)) |
+| Two-phase checkout | `POST /cart/checkout` (cart-service, creates `PENDING` preview) → `POST /orders/{id}/confirm` (order-service, reserves stock, publishes Kafka event). Cart cleared via Kafka consumer, not HTTP callback (see [ADR-013](design/adr-013-two-phase-checkout-flow.md)) |
 | Observability | OpenTelemetry → Grafana LGTM (traces, metrics, logs) |
 | Deployment environment | k3d (k3s in Docker) |
 
@@ -37,7 +38,7 @@
 | `reviews-service` | 8083 | MongoDB | Product reviews; validates via order + product services |
 | `notification-service` | 8084 | stateless | Kafka consumer; sends notifications |
 | `user-service` | 8085 | PostgreSQL | User profile management; delegates identity to Keycloak |
-| `cart-service` | 8086 | Valkey | Shopping cart CRUD; consumed by order-service at checkout |
+| `cart-service` | 8086 | Valkey | Shopping cart CRUD; initiates checkout to order-service; clears cart on `order.confirmed.v1` Kafka event |
 
 > **Entry point:** All external traffic enters via **Envoy Gateway** (Kubernetes Gateway API). There is no `api-gateway` Spring service — Envoy handles JWT validation (`SecurityPolicy` → Keycloak JWKS) and routes directly to Kubernetes services. The `app.local.test` HTTPRoute for `frontend-service` has **no `SecurityPolicy`** — Auth.js handles authentication server-side.
 
@@ -83,6 +84,7 @@ Produce a `flowchart TD` diagram covering:
   | `POST` | `/api/v1/products` | `ADMIN` |
   | `PUT` | `/api/v1/products/{id}` | `ADMIN` |
   | `DELETE` | `/api/v1/products/{id}` | `ADMIN` |
+  | `POST` | `/api/v1/products/stock/reserve` | M2M only (`SCOPE_products:write`) |
 
 ---
 
@@ -97,6 +99,7 @@ Produce a `flowchart TD` diagram covering:
   | Method | Path | Required Role |
   |--------|------|---------------|
   | `POST` | `/api/v1/orders` | Any authenticated user |
+  | `POST` | `/api/v1/orders/{id}/confirm` | Owner (`SCOPE_orders:write`) |
   | `GET` | `/api/v1/orders/{id}` | Owner or `ADMIN` |
   | `GET` | `/api/v1/orders/user/{userId}` | Owner or `ADMIN` |
   | `PUT` | `/api/v1/orders/{id}/status` | `ADMIN` |
@@ -158,12 +161,16 @@ Produce a `flowchart TD` diagram covering:
 - **Cart key:** `cart:{userId}` (Valkey string key, JSON value)
 - **TTL:** 7 days (refreshed on every write)
 - **Backend:** Valkey (Redis-compatible OSS fork); `spring-boot-starter-data-redis`
-- **Integration:** `order-service` reads the cart at checkout then calls `DELETE /api/v1/cart` after a successful order placement
+- **Integration (two-phase checkout):**
+  1. `POST /cart/checkout` — cart-service reads the cart and calls `POST /api/v1/orders` on order-service (using Client Credentials grant via `e-commerce-service` Keycloak client) to create a `PENDING` order. Returns the `OrderResponse` to the browser for user review. Cart is **not** cleared yet.
+  2. `POST /orders/{id}/confirm` (order-service) — reserves stock via `POST /api/v1/products/stock/reserve`, transitions `PENDING` → `CONFIRMED`, publishes `order.confirmed.v1` Kafka event.
+  3. cart-service **consumes `order.confirmed.v1`** and clears the cart for the `userId` in the event payload. No direct HTTP callback from order-service (avoids circular dependency).
 - **REST API:**
 
   | Method | Path | Description | Required Role |
   |--------|------|-------------|---------------|
-  | `GET` | `/api/v1/cart` | Get own cart (resolved from JWT `sub`) | `SCOPE_cart:read` |
+  | `GET` | `/api/v1/cart` | Get own cart | `SCOPE_cart:read` |
+  | `POST` | `/api/v1/cart/checkout` | Initiate checkout (creates `PENDING` order preview) | `SCOPE_cart:read` |
   | `PUT` | `/api/v1/cart/items/{productId}` | Add / update item (qty = 0 removes item) | `SCOPE_cart:write` |
   | `DELETE` | `/api/v1/cart/items/{productId}` | Remove a single item | `SCOPE_cart:write` |
   | `DELETE` | `/api/v1/cart` | Clear entire cart | `SCOPE_cart:write` |
@@ -268,11 +275,13 @@ reviews-service → Keycloak (client_id + client_secret) → service account JWT
 
 ### Phase 5 — Kafka Events
 
-| Topic | Producer | Consumer | Description |
-|-------|----------|----------|-------------|
-| `order.created.v1` | `order-service` | `notification-service` | Fired on every new order placement |
+| Topic | Producer | Consumer(s) | Description |
+|-------|----------|-------------|-------------|
+| `order.confirmed.v1` | `order-service` | `notification-service`, `cart-service` | Fired when an order is confirmed and stock reserved |
 
-**`OrderCreatedEvent` payload:**
+> **Why `order.confirmed.v1` and not `order.created.v1`?** In the two-phase checkout design, `POST /orders` creates a `PENDING` preview for user review. Only the explicit `POST /orders/{id}/confirm` call (which validates stock and completes the transaction) represents a real purchase. Notifications and cart clearing are therefore tied to the confirmation event, not the creation event.
+
+**`OrderConfirmedEvent` payload:**
 
 ```json
 {
@@ -280,9 +289,13 @@ reviews-service → Keycloak (client_id + client_secret) → service account JWT
   "userId":      "550e8400-e29b-41d4-a716-446655440001",
   "totalAmount": 149.98,
   "itemCount":   2,
-  "createdAt":   "2026-04-23T10:00:00Z"
+  "confirmedAt": "2026-04-23T10:15:00Z"
 }
 ```
+
+**Consumer behaviour:**
+- `notification-service` (group `notification-group`): sends confirmation email / push notification
+- `cart-service` (group `cart-service-group`): calls `cartService.clearCart(event.userId())` internally
 
 ---
 

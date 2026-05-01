@@ -49,6 +49,31 @@ paths:
         "403":
           description: Forbidden — requires scope cart:write
 
+  /cart/checkout:
+    post:
+      tags: [Cart]
+      operationId: checkout
+      summary: Create a PENDING order from current cart (Phase 1 of two-phase checkout)
+      description: |
+        Reads the current user's cart and calls order-service `POST /orders` to create a
+        PENDING order preview. The cart is NOT cleared at this point.
+        Call `POST /orders/{id}/confirm` on order-service to reserve stock and confirm.
+      security:
+        - bearerAuth: [cart:read]
+      responses:
+        "201":
+          description: PENDING order created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        "400":
+          description: Cart is empty
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden — requires scope cart:read
+
   /cart/items/{productId}:
     put:
       tags: [Cart]
@@ -170,6 +195,49 @@ components:
           format: int32
           minimum: 0
           description: Desired quantity. Set to 0 to remove the item from the cart.
+
+    OrderResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItemResponse'
+        totalAmount:
+          type: number
+          format: double
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    OrderItemResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        productId:
+          type: string
+        quantity:
+          type: integer
+        unitPrice:
+          type: number
+          format: double
+
+    OrderStatus:
+      type: string
+      enum: [PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED]
 
   securitySchemes:
     bearerAuth:

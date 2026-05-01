@@ -18,11 +18,17 @@ import org.springframework.stereotype.Component;
 public class OrderEventPublisher {
 
     static final String TOPIC_ORDER_CREATED = "order.created.v1";
+    static final String TOPIC_ORDER_CONFIRMED = "order.confirmed.v1";
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
     public void publishOrderCreated(OrderCreatedEvent event) {
         log.info("Publishing OrderCreatedEvent orderId={} userId={}", event.orderId(), event.userId());
         kafkaTemplate.send(TOPIC_ORDER_CREATED, event.orderId().toString(), event);
+    }
+
+    public void publishOrderConfirmed(OrderConfirmedEvent event) {
+        log.info("Publishing OrderConfirmedEvent orderId={} userId={}", event.orderId(), event.userId());
+        kafkaTemplate.send(TOPIC_ORDER_CONFIRMED, event.orderId().toString(), event);
     }
 }

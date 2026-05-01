@@ -1,8 +1,10 @@
 package com.ricsanfre.cart.service;
 
 import com.ricsanfre.cart.api.model.CartItemRequest;
+import com.ricsanfre.cart.client.OrderServiceClient;
 import com.ricsanfre.cart.domain.Cart;
 import com.ricsanfre.cart.repository.CartRepository;
+import com.ricsanfre.common.exception.BusinessRuleException;
 import com.ricsanfre.common.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,9 @@ class CartServiceTest {
 
     @Mock
     private CartRepository cartRepository;
+
+    @Mock
+    private OrderServiceClient orderServiceClient;
 
     @InjectMocks
     private CartService cartService;
@@ -263,5 +268,53 @@ class CartServiceTest {
         ArgumentCaptor<Cart> captor = ArgumentCaptor.forClass(Cart.class);
         verify(cartRepository).save(captor.capture());
         assertThat(captor.getValue().getUserId()).isEqualTo(USER_ID.toString());
+    }
+
+    // ── checkout ─────────────────────────────────────────────────────────────
+
+    @Test
+    void checkout_cartWithItems_callsOrderServiceAndReturnsResponse() {
+        Cart stored = cartWithItem(PRODUCT_A, 9.99, 2);
+        when(cartRepository.findByUserId(USER_ID.toString())).thenReturn(Optional.of(stored));
+
+        OrderServiceClient.OrderResponse fakeResponse = new OrderServiceClient.OrderResponse(
+                java.util.UUID.randomUUID(), USER_ID, "PENDING", List.of(), 19.98, null, null);
+        when(orderServiceClient.createOrder(any())).thenReturn(fakeResponse);
+
+        OrderServiceClient.OrderResponse result = cartService.checkout(USER_ID);
+
+        assertThat(result.totalAmount()).isEqualTo(19.98);
+        assertThat(result.status()).isEqualTo("PENDING");
+        verify(orderServiceClient).createOrder(argThat(req ->
+                req.items().size() == 1 &&
+                req.items().get(0).productId().equals(PRODUCT_A) &&
+                req.items().get(0).quantity() == 2 &&
+                req.items().get(0).unitPrice() == 9.99));
+    }
+
+    @Test
+    void checkout_cartNotFound_throwsBusinessRuleException() {
+        when(cartRepository.findByUserId(USER_ID.toString())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> cartService.checkout(USER_ID))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("empty");
+
+        verifyNoInteractions(orderServiceClient);
+    }
+
+    @Test
+    void checkout_emptyCart_throwsBusinessRuleException() {
+        Cart emptyCart = Cart.builder()
+                .userId(USER_ID.toString())
+                .items(new ArrayList<>())
+                .build();
+        when(cartRepository.findByUserId(USER_ID.toString())).thenReturn(Optional.of(emptyCart));
+
+        assertThatThrownBy(() -> cartService.checkout(USER_ID))
+                .isInstanceOf(BusinessRuleException.class)
+                .hasMessageContaining("empty");
+
+        verifyNoInteractions(orderServiceClient);
     }
 }

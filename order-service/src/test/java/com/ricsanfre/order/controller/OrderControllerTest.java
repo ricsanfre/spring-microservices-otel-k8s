@@ -6,6 +6,7 @@ import com.ricsanfre.order.api.model.OrderItemResponse;
 import com.ricsanfre.order.api.model.OrderResponse;
 import com.ricsanfre.order.api.model.UpdateOrderStatusRequest;
 import com.ricsanfre.order.service.OrderService;
+import com.ricsanfre.common.exception.BusinessRuleException;
 import com.ricsanfre.common.exception.GlobalExceptionHandler;
 import com.ricsanfre.common.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.Test;
@@ -70,6 +71,7 @@ class OrderControllerTest {
                     .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                     .authorizeHttpRequests(auth -> auth
                             .requestMatchers(HttpMethod.POST, "/api/v1/orders").hasAuthority("SCOPE_orders:write")
+                            .requestMatchers(HttpMethod.POST, "/api/v1/orders/*/confirm").hasAuthority("SCOPE_orders:write")
                             .requestMatchers(HttpMethod.GET, "/api/v1/orders/**").hasAuthority("SCOPE_orders:read")
                             .requestMatchers(HttpMethod.PUT, "/api/v1/orders/*/status").hasAuthority("SCOPE_orders:write")
                             .anyRequest().authenticated())
@@ -257,5 +259,66 @@ class OrderControllerTest {
                         .content(objectMapper.writeValueAsBytes(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CONFIRMED"));
+    }
+
+    // ── POST /api/v1/orders/{id}/confirm ────────────────────────────────
+
+    @Test
+    void confirmOrder_withWriteScope_returns200() throws Exception {
+        OrderResponse confirmed = OrderResponse.builder()
+                .id(ORDER_ID)
+                .userId(USER_ID)
+                .status(com.ricsanfre.order.api.model.OrderStatus.CONFIRMED)
+                .totalAmount(19.98)
+                .items(List.of())
+                .createdAt(OffsetDateTime.now())
+                .build();
+        when(orderService.confirmOrder(eq(ORDER_ID), any())).thenReturn(confirmed);
+
+        mockMvc.perform(post("/api/v1/orders/{id}/confirm", ORDER_ID)
+                        .with(jwt().jwt(j -> j.subject("sub-1").claim("scope", "orders:write"))
+                                .authorities(org.springframework.security.core.authority.AuthorityUtils
+                                        .createAuthorityList("SCOPE_orders:write"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"));
+    }
+
+    @Test
+    void confirmOrder_noAuthentication_returns401() throws Exception {
+        mockMvc.perform(post("/api/v1/orders/{id}/confirm", ORDER_ID))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void confirmOrder_readScopeOnly_returns403() throws Exception {
+        mockMvc.perform(post("/api/v1/orders/{id}/confirm", ORDER_ID)
+                        .with(jwt().jwt(j -> j.subject("sub-1").claim("scope", "orders:read"))
+                                .authorities(org.springframework.security.core.authority.AuthorityUtils
+                                        .createAuthorityList("SCOPE_orders:read"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void confirmOrder_orderNotFound_returns404() throws Exception {
+        when(orderService.confirmOrder(eq(ORDER_ID), any()))
+                .thenThrow(new ResourceNotFoundException("Order", ORDER_ID.toString()));
+
+        mockMvc.perform(post("/api/v1/orders/{id}/confirm", ORDER_ID)
+                        .with(jwt().jwt(j -> j.subject("sub-1").claim("scope", "orders:write"))
+                                .authorities(org.springframework.security.core.authority.AuthorityUtils
+                                        .createAuthorityList("SCOPE_orders:write"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void confirmOrder_insufficientStock_returns409() throws Exception {
+        when(orderService.confirmOrder(eq(ORDER_ID), any()))
+                .thenThrow(new BusinessRuleException("Insufficient stock for one or more items"));
+
+        mockMvc.perform(post("/api/v1/orders/{id}/confirm", ORDER_ID)
+                        .with(jwt().jwt(j -> j.subject("sub-1").claim("scope", "orders:write"))
+                                .authorities(org.springframework.security.core.authority.AuthorityUtils
+                                        .createAuthorityList("SCOPE_orders:write"))))
+                .andExpect(status().isConflict());
     }
 }

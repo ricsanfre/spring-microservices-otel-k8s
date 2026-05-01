@@ -3,9 +3,12 @@ package com.ricsanfre.product.controller;
 import tools.jackson.databind.ObjectMapper;
 import com.ricsanfre.common.exception.GlobalExceptionHandler;
 import com.ricsanfre.common.exception.ResourceNotFoundException;
+import com.ricsanfre.common.exception.BusinessRuleException;
 import com.ricsanfre.product.api.model.CreateProductRequest;
 import com.ricsanfre.product.api.model.ProductPage;
 import com.ricsanfre.product.api.model.ProductResponse;
+import com.ricsanfre.product.api.model.StockReserveItem;
+import com.ricsanfre.product.api.model.StockReserveRequest;
 import com.ricsanfre.product.api.model.UpdateProductRequest;
 import com.ricsanfre.product.service.ProductService;
 import org.junit.jupiter.api.Test;
@@ -216,5 +219,53 @@ class ProductControllerTest {
         mockMvc.perform(delete("/api/v1/products/missing")
                         .with(jwt().authorities(new SimpleGrantedAuthority("SCOPE_products:write"))))
                 .andExpect(status().isNotFound());
+    }
+
+    // ── POST /api/v1/products/stock/reserve ──────────────────────────────────
+
+    @Test
+    void reserveStock_withWriteScope_returns200() throws Exception {
+        doNothing().when(productService).reserveStock(any());
+
+        StockReserveRequest request = StockReserveRequest.builder()
+                .items(List.of(
+                        StockReserveItem.builder().productId("prod-1").quantity(3).build()))
+                .build();
+
+        mockMvc.perform(post("/api/v1/products/stock/reserve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request))
+                        .with(jwt().authorities(new SimpleGrantedAuthority("SCOPE_products:write"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void reserveStock_noAuth_returns401() throws Exception {
+        StockReserveRequest request = StockReserveRequest.builder()
+                .items(List.of(
+                        StockReserveItem.builder().productId("prod-1").quantity(3).build()))
+                .build();
+
+        mockMvc.perform(post("/api/v1/products/stock/reserve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void reserveStock_insufficientStock_returns409() throws Exception {
+        doThrow(new BusinessRuleException("Insufficient stock for product prod-1"))
+                .when(productService).reserveStock(any());
+
+        StockReserveRequest request = StockReserveRequest.builder()
+                .items(List.of(
+                        StockReserveItem.builder().productId("prod-1").quantity(99).build()))
+                .build();
+
+        mockMvc.perform(post("/api/v1/products/stock/reserve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request))
+                        .with(jwt().authorities(new SimpleGrantedAuthority("SCOPE_products:write"))))
+                .andExpect(status().isConflict());
     }
 }

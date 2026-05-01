@@ -3,8 +3,10 @@ package com.ricsanfre.cart.service;
 import com.ricsanfre.cart.api.model.CartItemRequest;
 import com.ricsanfre.cart.api.model.CartItemResponse;
 import com.ricsanfre.cart.api.model.CartResponse;
+import com.ricsanfre.cart.client.OrderServiceClient;
 import com.ricsanfre.cart.domain.Cart;
 import com.ricsanfre.cart.repository.CartRepository;
+import com.ricsanfre.common.exception.BusinessRuleException;
 import com.ricsanfre.common.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +25,7 @@ import java.util.UUID;
 public class CartService {
 
     private final CartRepository cartRepository;
+    private final OrderServiceClient orderServiceClient;
 
     public CartResponse getCart(UUID userId) {
         Cart cart = cartRepository.findByUserId(userId.toString())
@@ -76,6 +79,23 @@ public class CartService {
     public void clearCart(UUID userId) {
         log.info("Clear cart for user={}", userId);
         cartRepository.deleteByUserId(userId.toString());
+    }
+
+    public OrderServiceClient.OrderResponse checkout(UUID userId) {
+        Cart cart = cartRepository.findByUserId(userId.toString())
+                .orElseThrow(() -> new BusinessRuleException("Cart is empty for user " + userId));
+
+        if (cart.getItems() == null || cart.getItems().isEmpty()) {
+            throw new BusinessRuleException("Cart is empty for user " + userId);
+        }
+
+        List<OrderServiceClient.OrderItemRequest> items = cart.getItems().stream()
+                .map(i -> new OrderServiceClient.OrderItemRequest(
+                        i.getProductId(), i.getQuantity(), i.getPrice()))
+                .toList();
+
+        log.info("Initiating checkout for userId={} with {} items", userId, items.size());
+        return orderServiceClient.createOrder(new OrderServiceClient.CreateOrderRequest(items));
     }
 
     // ── Mapping ──────────────────────────────────────────────────────────────

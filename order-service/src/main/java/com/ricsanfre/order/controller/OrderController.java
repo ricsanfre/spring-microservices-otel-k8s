@@ -51,4 +51,11 @@ public class OrderController implements OrdersApi {
     public ResponseEntity<OrderResponse> updateOrderStatus(UUID id, UpdateOrderStatusRequest updateOrderStatusRequest) {
         return ResponseEntity.ok(orderService.updateStatus(id, updateOrderStatusRequest));
     }
+
+    @Override
+    @PreAuthorize("hasAuthority('SCOPE_orders:write')")
+    public ResponseEntity<OrderResponse> confirmOrder(UUID id) {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        return ResponseEntity.ok(orderService.confirmOrder(id, auth));
+    }
 }

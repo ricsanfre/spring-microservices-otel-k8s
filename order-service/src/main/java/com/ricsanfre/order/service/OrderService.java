@@ -1,15 +1,17 @@
 package com.ricsanfre.order.service;
 
+import com.ricsanfre.common.exception.BusinessRuleException;
 import com.ricsanfre.common.exception.ResourceNotFoundException;
 import com.ricsanfre.common.security.JwtUtils;
 import com.ricsanfre.order.api.model.CreateOrderRequest;
 import com.ricsanfre.order.api.model.OrderItemResponse;
 import com.ricsanfre.order.api.model.OrderResponse;
 import com.ricsanfre.order.api.model.UpdateOrderStatusRequest;
+import com.ricsanfre.order.client.ProductServiceClient;
 import com.ricsanfre.order.domain.Order;
 import com.ricsanfre.order.domain.OrderItem;
 import com.ricsanfre.order.domain.OrderStatus;
-import com.ricsanfre.order.kafka.OrderCreatedEvent;
+import com.ricsanfre.order.kafka.OrderConfirmedEvent;
 import com.ricsanfre.order.kafka.OrderEventPublisher;
 import com.ricsanfre.order.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
@@ -18,7 +20,9 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.HttpClientErrorException;
 
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -33,6 +37,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final UserIdResolverService userIdResolverService;
     private final OrderEventPublisher eventPublisher;
+    private final ProductServiceClient productServiceClient;
 
     // ── Create ────────────────────────────────────────────────────────────────
 
@@ -63,15 +68,45 @@ public class OrderService {
         order.setItems(items);
 
         Order saved = orderRepository.save(order);
-        log.info("Created order id={} for userId={} with {} items, total={}",
+        log.info("Created PENDING order id={} for userId={} with {} items, total={}",
                 saved.getId(), saved.getUserId(), saved.getItems().size(), saved.getTotalAmount());
 
-        eventPublisher.publishOrderCreated(new OrderCreatedEvent(
+        return toResponse(saved);
+    }
+
+    // ── Confirm ───────────────────────────────────────────────────────────────
+
+    public OrderResponse confirmOrder(UUID id, Authentication auth) {
+        Order order = findOrderById(id);
+
+        if (order.getStatus() != OrderStatus.PENDING) {
+            throw new BusinessRuleException(
+                    "Order " + id + " cannot be confirmed: status is " + order.getStatus());
+        }
+
+        checkOwnerOrServiceAccount(order.getUserId(), auth);
+
+        List<ProductServiceClient.StockReserveItem> items = order.getItems().stream()
+                .map(i -> new ProductServiceClient.StockReserveItem(i.getProductId(), i.getQuantity()))
+                .toList();
+
+        try {
+            productServiceClient.reserveStock(new ProductServiceClient.StockReserveRequest(items));
+        } catch (HttpClientErrorException.Conflict ex) {
+            throw new BusinessRuleException("Insufficient stock for one or more items in order " + id);
+        }
+
+        order.setStatus(OrderStatus.CONFIRMED);
+        Order saved = orderRepository.save(order);
+
+        log.info("Confirmed order id={} for userId={}", saved.getId(), saved.getUserId());
+
+        eventPublisher.publishOrderConfirmed(new OrderConfirmedEvent(
                 saved.getId(),
                 saved.getUserId(),
                 saved.getTotalAmount(),
                 saved.getItems().size(),
-                saved.getCreatedAt()));
+                Instant.now()));
 
         return toResponse(saved);
     }

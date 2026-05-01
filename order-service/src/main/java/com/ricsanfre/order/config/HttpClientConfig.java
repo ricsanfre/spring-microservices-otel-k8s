@@ -1,6 +1,7 @@
 package com.ricsanfre.order.config;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.ricsanfre.order.client.ProductServiceClient;
 import com.ricsanfre.order.client.UserServiceClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.CacheManager;
@@ -46,6 +47,24 @@ public class HttpClientConfig {
                 .build();
 
         return factory.createClient(UserServiceClient.class);
+    }
+
+    @Bean
+    public ProductServiceClient productServiceClient(
+            RestClient.Builder builder,
+            OAuth2AuthorizedClientManager authorizedClientManager,
+            @Value("${services.product-service.url:http://localhost:8083}") String productServiceUrl) {
+
+        RestClient restClient = builder
+                .baseUrl(productServiceUrl)
+                .requestInterceptor(new OAuth2ClientHttpRequestInterceptor(authorizedClientManager))
+                .build();
+
+        HttpServiceProxyFactory factory = HttpServiceProxyFactory
+                .builderFor(RestClientAdapter.create(restClient))
+                .build();
+
+        return factory.createClient(ProductServiceClient.class);
     }
 
     @Bean

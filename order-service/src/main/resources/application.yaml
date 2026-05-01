@@ -25,15 +25,22 @@ spring:
           issuer-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce
       # Client Credentials — used to obtain a service account token when calling user-service
       client:
+        provider:
+          user-service:
+            token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
+          product-service:
+            token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
         registration:
           user-service:
             client-id: e-commerce-service
             client-secret: ${E_COMMERCE_SERVICE_CLIENT_SECRET:e-commerce-service-secret}
             authorization-grant-type: client_credentials
             scope: users:resolve
-        provider:
-          user-service:
-            token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
+          product-service:
+            client-id: e-commerce-service
+            client-secret: ${E_COMMERCE_SERVICE_CLIENT_SECRET:e-commerce-service-secret}
+            authorization-grant-type: client_credentials
+            scope: products:write
 
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
@@ -56,6 +63,8 @@ server:
 services:
   user-service:
     url: ${USER_SERVICE_URL:http://localhost:8085}
+  product-service:
+    url: ${PRODUCT_SERVICE_URL:http://localhost:8083}
 
 # Resilience4j — circuit breaker for user-service calls
 resilience4j:

@@ -4,6 +4,7 @@ import com.ricsanfre.product.api.ProductsApi;
 import com.ricsanfre.product.api.model.CreateProductRequest;
 import com.ricsanfre.product.api.model.ProductPage;
 import com.ricsanfre.product.api.model.ProductResponse;
+import com.ricsanfre.product.api.model.StockReserveRequest;
 import com.ricsanfre.product.api.model.UpdateProductRequest;
 import com.ricsanfre.product.service.ProductService;
 import lombok.RequiredArgsConstructor;
@@ -53,5 +54,12 @@ public class ProductController implements ProductsApi {
     public ResponseEntity<Void> deleteProduct(String id) {
         productService.delete(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @Override
+    @PreAuthorize("hasAuthority('SCOPE_products:write')")
+    public ResponseEntity<Void> reserveStock(StockReserveRequest stockReserveRequest) {
+        productService.reserveStock(stockReserveRequest);
+        return ResponseEntity.ok().build();
     }
 }

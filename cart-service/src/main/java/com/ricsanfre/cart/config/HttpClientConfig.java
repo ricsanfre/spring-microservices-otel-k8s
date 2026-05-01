@@ -1,5 +1,6 @@
 package com.ricsanfre.cart.config;
 
+import com.ricsanfre.cart.client.OrderServiceClient;
 import com.ricsanfre.cart.client.UserServiceClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.CacheManager;
@@ -47,6 +48,24 @@ public class HttpClientConfig {
                 .build();
 
         return factory.createClient(UserServiceClient.class);
+    }
+
+    @Bean
+    public OrderServiceClient orderServiceClient(
+            RestClient.Builder builder,
+            OAuth2AuthorizedClientManager authorizedClientManager,
+            @Value("${services.order-service.url:http://localhost:8082}") String orderServiceUrl) {
+
+        RestClient restClient = builder
+                .baseUrl(orderServiceUrl)
+                .requestInterceptor(new OAuth2ClientHttpRequestInterceptor(authorizedClientManager))
+                .build();
+
+        HttpServiceProxyFactory factory = HttpServiceProxyFactory
+                .builderFor(RestClientAdapter.create(restClient))
+                .build();
+
+        return factory.createClient(OrderServiceClient.class);
     }
 
     @Bean

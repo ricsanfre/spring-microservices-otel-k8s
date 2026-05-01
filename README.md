@@ -3,7 +3,7 @@
 Spring Boot microservice-based e-commerce platform implementing:
 
 - **Polyglot persistence** — MongoDB (products, reviews) and PostgreSQL (orders, users)
-- **Event-driven architecture** — Apache Kafka (`order.created.v1`)
+- **Event-driven architecture** — Apache Kafka (`order.confirmed.v1`) with two-phase checkout
 - **OAuth2 security** — Keycloak as IAM for client authentication and inter-service communication
 - **Observability** — OpenTelemetry + Grafana LGTM stack (traces, metrics, logs)
 
@@ -40,7 +40,7 @@ Spring Boot microservice-based e-commerce platform implementing:
 | `reviews-service` | 8083 | MongoDB | Product reviews and ratings — validated against order history |
 | `notification-service` | 8084 | stateless | Order event notifications — Kafka consumer |
 | `user-service` | 8085 | PostgreSQL | User profile management; delegates identity to Keycloak |
-| `cart-service` | 8086 | Valkey | Shopping cart management; consumed by order-service at checkout |
+| `cart-service` | 8086 | Valkey | Shopping cart management; initiates checkout to order-service; clears cart on order confirmation via Kafka |
 
 > **Entry point:** External traffic enters through **Envoy Gateway** (Kubernetes Gateway API). There is no Spring Cloud Gateway service — Envoy handles JWT validation via a `SecurityPolicy` referencing the Keycloak JWKS endpoint, then routes directly to Kubernetes services. Service-to-service calls use plain Kubernetes Service DNS (`http://service-name:port`), resolved by kube-proxy — no service discovery library required.
 
@@ -70,7 +70,7 @@ flowchart TD
         end
 
         subgraph MESSAGING["Async Messaging"]
-            KAFKA[["Apache Kafka\norder.created.v1"]]
+            KAFKA[["Apache Kafka\norder.confirmed.v1"]]
         end
 
         subgraph STORAGE["Storage"]
@@ -92,12 +92,14 @@ flowchart TD
     EG -- "HTTPRoute" --> US
     EG -- "HTTPRoute" --> CS
 
-    OS -- "publish\norder.created.v1" --> KAFKA
-    KAFKA -- "consume" --> NS
+    CS -. "POST /cart/checkout\n(Client Credentials)" .-> OS
+    OS -. "POST /products/stock/reserve\n(Client Credentials)" .-> PS
+    OS -- "publish\norder.confirmed.v1" --> KAFKA
+    KAFKA -- "consume\norder.confirmed.v1" --> NS
+    KAFKA -. "consume\norder.confirmed.v1\n(clear cart)" .-> CS
 
     RS -. "Client Credentials\nhttp://order-service:8082" .-> OS
     RS -. "Client Credentials\nhttp://product-service:8081" .-> PS
-    OS -. "checkout\nhttp://cart-service:8086" .-> CS
 
     PS --- MDB
     RS --- MDB
@@ -229,23 +231,27 @@ Manages the product catalog.
 | `POST` | `/api/v1/products` | Create product | `ADMIN` |
 | `PUT` | `/api/v1/products/{id}` | Update product | `ADMIN` |
 | `DELETE` | `/api/v1/products/{id}` | Delete product | `ADMIN` |
+| `POST` | `/api/v1/products/stock/reserve` | Reserve stock for a confirmed order (M2M only) | `SCOPE_products:write` |
 
 ---
 
 ### order-service · port 8082 · PostgreSQL
 
-Manages the full order lifecycle. Publishes a Kafka event on every new order.
+Manages the full order lifecycle. Orders are created as `PENDING` previews and transition to `CONFIRMED` once the user explicitly confirms and stock is reserved. Publishes a Kafka event on order confirmation.
 
 **REST API**
 
 | Method | Path | Description | Required Role |
 |--------|------|-------------|---------------|
-| `POST` | `/api/v1/orders` | Place a new order | Any authenticated user |
+| `POST` | `/api/v1/orders` | Create a new order preview (`PENDING`) | Any authenticated user |
+| `POST` | `/api/v1/orders/{id}/confirm` | Confirm order: reserve stock → `CONFIRMED` → publish Kafka event | Owner (`SCOPE_orders:write`) |
 | `GET` | `/api/v1/orders/{id}` | Get order by ID | Owner or `ADMIN` |
 | `GET` | `/api/v1/orders/user/{userId}` | List user's orders | Owner or `ADMIN` |
 | `PUT` | `/api/v1/orders/{id}/status` | Update order status | `ADMIN` |
 
-**Kafka event published:** `order.created.v1` — see [Kafka Events](#kafka-events).
+**Order status lifecycle:** `PENDING` → `CONFIRMED` → `SHIPPED` → `DELIVERED` | `CANCELLED`
+
+**Kafka event published:** `order.confirmed.v1` (on `/confirm`) — see [Kafka Events](#kafka-events).
 
 ---
 
@@ -329,11 +335,13 @@ The profile also holds a **shipping address** and a **billing account** (card di
 
 ## Kafka Events
 
-| Topic | Producer | Consumer | Description |
-|-------|----------|----------|-------------|
-| `order.created.v1` | `order-service` | `notification-service` | Fired when a new order is placed |
+| Topic | Producer | Consumer(s) | Description |
+|-------|----------|-------------|-------------|
+| `order.confirmed.v1` | `order-service` | `notification-service`, `cart-service` | Fired when an order is confirmed and stock reserved |
 
-### `OrderCreatedEvent` payload
+> `order.created.v1` (formerly used for `PENDING` order creation) has been superseded. `order.confirmed.v1` is the authoritative event: notification-service uses it to dispatch confirmation emails and cart-service uses it to clear the cart.
+
+### `OrderConfirmedEvent` payload
 
 ```json
 {
@@ -341,7 +349,7 @@ The profile also holds a **shipping address** and a **billing account** (card di
   "userId":      "550e8400-e29b-41d4-a716-446655440001",
   "totalAmount": 149.98,
   "itemCount":   2,
-  "createdAt":   "2026-04-23T10:00:00Z"
+  "confirmedAt": "2026-04-23T10:15:00Z"
 }
 ```
 
@@ -410,16 +418,24 @@ erDiagram
 
 ### cart-service · port 8086 · Valkey
 
-Manages the per-user shopping cart. Cart data is stored in **Valkey** (Redis-compatible in-memory cache) with a 7-day TTL keyed by `cart:{userId}`. `order-service` reads the cart at checkout and calls `DELETE /api/v1/cart` to clear it after a successful order placement.
+Manages the per-user shopping cart. Cart data is stored in **Valkey** (Redis-compatible in-memory cache) with a 7-day TTL keyed by `cart:{userId}`.
+
+**Checkout flow (two phases):**
+1. `POST /cart/checkout` — cart-service reads the cart and calls `POST /api/v1/orders` on order-service to create a `PENDING` order preview. Cart is **not cleared** at this point. The order ID is returned so the user can review before confirming.
+2. `POST /orders/{id}/confirm` (on order-service) — reserves stock on product-service, transitions the order to `CONFIRMED`, publishes `order.confirmed.v1` to Kafka.
+3. cart-service **consumes `order.confirmed.v1`** and calls its own `clearCart(userId)` internally — no direct HTTP callback from order-service required (avoids circular dependency).
+
+> **Circular dependency avoided:** cart-service already calls order-service (for checkout), so order-service must never call cart-service directly. Cart clearing is decoupled via Kafka. See [design/adr-013-two-phase-checkout-flow.md](design/adr-013-two-phase-checkout-flow.md).
 
 **REST API**
 
 | Method | Path | Description | Required Role |
 |--------|------|-------------|---------------|
 | `GET` | `/api/v1/cart` | Get own cart (resolved from JWT `sub`) | Any authenticated user |
+| `POST` | `/api/v1/cart/checkout` | Initiate checkout — creates a `PENDING` order preview via order-service | Any authenticated user |
 | `PUT` | `/api/v1/cart/items/{productId}` | Add / update item (qty=0 removes the item) | Any authenticated user |
 | `DELETE` | `/api/v1/cart/items/{productId}` | Remove a single item from the cart | Any authenticated user |
-| `DELETE` | `/api/v1/cart` | Clear entire cart (called by order-service after checkout) | Any authenticated user |
+| `DELETE` | `/api/v1/cart` | Clear entire cart | Any authenticated user |
 
 **Cart data model (Valkey)**
 
@@ -668,13 +684,17 @@ flowchart TD
     FE -. "Bearer JWT\n(server-side)" .-> GW
 
     %% ── Service-to-service (plain K8s DNS) ────────────────────────────────
+    CS -. "http://order-service:8082
+(checkout)" .-> OS
+    OS -. "http://product-service:8081
+(stock reserve)" .-> PS
     RS -. "http://order-service:8082" .-> OS
     RS -. "http://product-service:8081" .-> PS
-    OS -. "http://cart-service:8086" .-> CS
 
     %% ── Async messaging ─────────────────────────────────────────────────────
-    OS -- "publish order-events" --> KF
-    KF -- "consume" --> NS_SVC
+    OS -- "publish order.confirmed.v1" --> KF
+    KF -- "consume order.confirmed.v1" --> NS_SVC
+    KF -. "consume order.confirmed.v1\n(clear cart)" .-> CS
 
     %% ── Persistence ─────────────────────────────────────────────────────────
     US --- PG

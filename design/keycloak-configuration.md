@@ -67,6 +67,8 @@ flowchart TD
         S3 -->|optionalClientScopes| C1
         S4 -->|optionalClientScopes| C1
         S5 -->|defaultClientScopes| C2
+        S2 -->|defaultClientScopes| C2
+        S1 -->|defaultClientScopes| C2
         S6 -->|optionalClientScopes| C1
         S7 -->|optionalClientScopes| C1
         C2 -->|owns service account| U3
@@ -141,6 +143,8 @@ See [ADR-006 — Scope-Based Authorization](adr-006-scope-based-authorization.md
 | `reviews:write` | Submit and edit reviews | `e-commerce-web` (optional) |
 | `users:read` | Read own user profile | `e-commerce-web` (optional) |
 | `users:resolve` | Resolve IDP subject → internal user ID (M2M only) | `e-commerce-service` (default) |
+| `orders:write` | Place and confirm orders (M2M: cart-service → order-service) | `e-commerce-web` (optional), `e-commerce-service` (default) |
+| `products:write` | Create/update products; reserve stock (M2M: order-service → product-service) | `e-commerce-web` (optional), `e-commerce-service` (default) |
 | `notifications:receive` | Receive notification events | `e-commerce-web` (optional) |
 | `cart:read` | Read own shopping cart | `e-commerce-web` (optional) |
 | `cart:write` | Add, update, and remove items in own shopping cart | `e-commerce-web` (optional) |

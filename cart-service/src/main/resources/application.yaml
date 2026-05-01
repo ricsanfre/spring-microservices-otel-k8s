@@ -13,7 +13,7 @@ spring:
         jwt:
           jwk-set-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/certs
           issuer-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce
-      # Client Credentials — used to obtain a service account token when calling user-service
+      # Client Credentials — used to obtain a service account token when calling user-service / order-service
       client:
         registration:
           user-service:
@@ -21,14 +21,33 @@ spring:
             client-secret: ${E_COMMERCE_SERVICE_CLIENT_SECRET:e-commerce-service-secret}
             authorization-grant-type: client_credentials
             scope: users:resolve
+          order-service:
+            client-id: e-commerce-service
+            client-secret: ${E_COMMERCE_SERVICE_CLIENT_SECRET:e-commerce-service-secret}
+            authorization-grant-type: client_credentials
+            scope: orders:write
         provider:
           user-service:
             token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
+          order-service:
+            token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: cart-service-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.ricsanfre.cart.kafka
 
 # Downstream service URLs
 services:
   user-service:
     url: ${USER_SERVICE_URL:http://localhost:8085}
+  order-service:
+    url: ${ORDER_SERVICE_URL:http://localhost:8082}
 
 # Resilience4j — circuit breaker for user-service calls
 resilience4j:
