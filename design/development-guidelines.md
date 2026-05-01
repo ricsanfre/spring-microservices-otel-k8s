@@ -16,13 +16,13 @@
 7. [Error Handling — RFC 7807 Problem Details](#7-error-handling--rfc-7807-problem-details)
 8. [Data Access](#8-data-access)
 9. [Security — OAuth2 Resource Server](#9-security--oauth2-resource-server)
-10. [OpenTelemetry Observability](#10-opentelemetry-observability)
-11. [Docker Images — Jib](#11-docker-images--jib)
-12. [Code Style — Lombok](#12-code-style--lombok)
-13. [Testing Strategy](#13-testing-strategy)
-14. [Virtual Threads](#14-virtual-threads)
-15. [Caching — Valkey / Spring Data Redis](#15-caching--valkey--spring-data-redis)
-16. [Quick Reference Checklist](#16-quick-reference-checklist)
+10. [Kafka Messaging](#10-kafka-messaging)
+11. [OpenTelemetry Observability](#11-opentelemetry-observability)
+12. [Docker Images — Jib](#12-docker-images--jib)
+13. [Code Style — Lombok](#13-code-style--lombok)
+14. [Testing Strategy](#14-testing-strategy)
+15. [Virtual Threads](#15-virtual-threads)
+16. [Caching — Valkey / Spring Data Redis](#16-caching--valkey--spring-data-redis)
 17. [Local Development Workflow (Docker Compose + Makefile)](#17-local-development-workflow-docker-compose--makefile)
 18. [Kubernetes Deployment](#18-kubernetes-deployment)
 19. [CI/CD — GitHub Actions](#19-cicd--github-actions)
@@ -919,7 +919,159 @@ public class OrderController implements OrderApi {
 
 ---
 
-## 10. OpenTelemetry Observability
+## 10. Kafka Messaging
+
+Kafka is used for asynchronous, event-driven communication between services. The canonical example is `order-service`, which publishes an `OrderCreatedEvent` after successfully persisting a new order.
+
+### When to use Kafka
+
+Publish a Kafka event when a state change in one service must trigger downstream workflows in other services (e.g., `notification-service` sending a confirmation email after an order is created). Use synchronous HTTP (`@HttpExchange`) for request-response calls where the caller needs an immediate result.
+
+### Dependencies
+
+For **producers** (services that publish events):
+
+```xml
+<dependency>
+    <groupId>org.springframework.kafka</groupId>
+    <artifactId>spring-kafka</artifactId>
+</dependency>
+```
+
+For **consumers** (services that subscribe to events), add the same `spring-kafka` dependency. Add `spring-kafka-test` and `testcontainers-kafka` as `test`-scope dependencies (see [Testing Strategy](#14-testing-strategy)).
+
+### Topic naming convention
+
+`<domain>.<event>.<version>` — all lowercase, dots as separators, versioned from `v1`.
+
+Examples: `order.created.v1`, `notification.sent.v1`.
+
+### Event Record
+
+Define events as Java `record` types in a `kafka/` sub-package. Use only serializable types (`UUID`, `String`, primitives, `Instant`). Never include JPA entities.
+
+```java
+// order-service: kafka/OrderCreatedEvent.java
+public record OrderCreatedEvent(
+        UUID orderId,
+        UUID userId,
+        double totalAmount,
+        int itemCount,
+        Instant createdAt) {}
+```
+
+**Important:** Use the internal service UUID for `userId` (ADR-004). Never expose the Keycloak `sub` in Kafka events.
+
+### Producer Configuration (`application.yaml`)
+
+```yaml
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+```
+
+Use `StringSerializer` for keys and `JsonSerializer` for values. The `JsonSerializer` serializes the event record to JSON automatically — no extra configuration needed.
+
+### Producer Component
+
+Wrap `KafkaTemplate` in a dedicated `@Component` in the `kafka/` package. Use the entity UUID as the message key to guarantee all events for a given entity land on the same partition.
+
+```java
+// order-service: kafka/OrderEventPublisher.java
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class OrderEventPublisher {
+
+    static final String TOPIC_ORDER_CREATED = "order.created.v1";
+
+    private final KafkaTemplate<String, Object> kafkaTemplate;
+
+    public void publishOrderCreated(OrderCreatedEvent event) {
+        log.info("Publishing OrderCreatedEvent orderId={} userId={}",
+                event.orderId(), event.userId());
+        kafkaTemplate.send(TOPIC_ORDER_CREATED, event.orderId().toString(), event);
+    }
+}
+```
+
+Declare `KafkaTemplate<String, Object>` (not a specific event type) so the same template can publish multiple event types from one service.
+
+### Consumer Configuration (`application.yaml`)
+
+```yaml
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ${spring.application.name}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.ricsanfre.*"
+        spring.json.value.default.type: com.ricsanfre.<service>.kafka.<EventClass>
+```
+
+Set `spring.json.trusted.packages` to allow deserialization of event types from other services. Set `spring.json.value.default.type` to the consumer's local copy of the event record (a record with matching field names).
+
+### Consumer Component
+
+```java
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class OrderCreatedEventConsumer {
+
+    @KafkaListener(topics = "order.created.v1", groupId = "${spring.application.name}")
+    public void onOrderCreated(OrderCreatedEvent event) {
+        log.info("Received OrderCreatedEvent orderId={}", event.orderId());
+        // handle event ...
+    }
+}
+```
+
+### Testing
+
+For `@WebMvcTest` or `@SpringBootTest` slices that do **not** test Kafka, mock the publisher bean so no broker connection is attempted at startup:
+
+```java
+@MockitoBean
+OrderEventPublisher orderEventPublisher;
+```
+
+For full integration tests with a real broker, use the Testcontainers Kafka module (see [Testing Strategy](#14-testing-strategy)):
+
+```java
+@Container
+@ServiceConnection
+static final KafkaContainer kafka =
+        new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.8.0"));
+```
+
+`@ServiceConnection` auto-configures `spring.kafka.bootstrap-servers` — no manual property override needed.
+
+Add `spring-kafka-test` and `testcontainers-kafka` to the service `pom.xml` under `<scope>test</scope>`:
+
+```xml
+<dependency>
+    <groupId>org.testcontainers</groupId>
+    <artifactId>kafka</artifactId>
+    <scope>test</scope>
+</dependency>
+<dependency>
+    <groupId>org.springframework.kafka</groupId>
+    <artifactId>spring-kafka-test</artifactId>
+    <scope>test</scope>
+</dependency>
+```
+
+---
+
+## 11. OpenTelemetry Observability
 
 ### Dependencies (all services)
 
@@ -1011,7 +1163,7 @@ Use the existing [otel-demo](../otel-demo) module as the reference implementatio
 
 ---
 
-## 11. Docker Images — Jib
+## 12. Docker Images — Jib
 
 Use **Google Jib** to build container images without a Dockerfile. Jib produces layered, reproducible images without requiring a Docker daemon at build time.
 
@@ -1077,7 +1229,7 @@ This maximises layer cache reuse in CI and container registries.
 
 ---
 
-## 12. Code Style — Lombok
+## 13. Code Style — Lombok
 
 ### Approved annotations
 
@@ -1117,7 +1269,7 @@ This maximises layer cache reuse in CI and container registries.
 
 ---
 
-## 13. Testing Strategy
+## 14. Testing Strategy
 
 ### Pyramid
 
@@ -1385,7 +1537,7 @@ mvn verify
 
 ---
 
-## 14. Virtual Threads
+## 15. Virtual Threads
 
 Enable Project Loom virtual threads in every service to maximise throughput with standard MVC blocking I/O:
 
