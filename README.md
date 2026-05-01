@@ -1159,6 +1159,138 @@ make k8s-up   # k3d-create + k8s-operators + k8s-infra
 
 ---
 
+## CI/CD — GitHub Actions
+
+### Pipeline overview
+
+| Workflow | File | Trigger | Purpose |
+|---|---|---|---|
+| CI | [`.github/workflows/ci.yaml`](.github/workflows/ci.yaml) | Push to `main`, Pull Requests | Change detection → unit tests → integration tests → Jib image publish to `ghcr.io` |
+| CD | [`.github/workflows/cd.yaml`](.github/workflows/cd.yaml) | CI completes on `main` | Deploy to ephemeral k3d cluster; actuator/health smoke tests |
+
+**No extra secrets required.** Jib authenticates to `ghcr.io` using the auto-provided `GITHUB_TOKEN`. The CD workflow uses the same token to pull images.
+
+---
+
+### CI workflow
+
+#### Change detection
+
+`dorny/paths-filter` detects which service directories changed. The matrix build runs only for changed services — a single-service PR compiles and tests only that service. Changes to `common/` or the root `pom.xml` trigger a rebuild of **all** Java services (conservative).
+
+```
+ Push / PR to main
+      │
+      ▼
+ detect-changes (dorny/paths-filter)
+      │
+      ├─► java-services = ["product-service", "cart-service"]   ──► build-java (matrix)
+      │    │
+      │    │  Per changed service (fail-fast: false):
+      │    │  1. mvn test    — unit + @WebMvcTest slice tests (no Docker, fast)
+      │    │  2. mvn verify  — + Testcontainers integration tests (Docker available)
+      │    │  3. jib:build   — push ghcr.io/{owner}/{svc}:{sha} + latest
+      │    │                   (main push only — skipped on PRs)
+      │
+      └─► frontend = true   ──► build-frontend
+               1. npm ci
+               2. npm run build (TypeScript type-check + Next.js compile)
+               3. docker build-push → ghcr.io/{owner}/frontend-service:{sha} + latest
+                  (main push only — skipped on PRs)
+```
+
+#### Test gates (ADR-012 — Surefire / Failsafe split)
+
+| Step | Maven command | Plugin | Runs |
+|---|---|---|---|
+| Unit tests | `mvn -pl {service} -am test` | Surefire (`*Test.java`) — no Docker | Always (PR + main) |
+| Integration tests | `mvn -pl {service} -am verify` | Failsafe (`*IT.java`) + Testcontainers | Always (PR + main) |
+| Image push | `mvn compile jib:build` | Jib — no Docker daemon (ADR-010) | **main only** |
+
+#### Image naming
+
+Images are published to `ghcr.io/<owner>/<service>` with two tags:
+
+| Tag | Value | Purpose |
+|---|---|---|
+| `<commit-sha>` | 40-character hex | Immutable — pinned by CD workflow |
+| `latest` | floating | Convenience — always tracks the most recent `main` build |
+
+#### Services covered
+
+| Service | Toolchain | Registry target |
+|---|---|---|
+| `product-service` | Java 25 + Maven + Jib | `ghcr.io/<owner>/product-service` |
+| `user-service` | Java 25 + Maven + Jib | `ghcr.io/<owner>/user-service` |
+| `cart-service` | Java 25 + Maven + Jib | `ghcr.io/<owner>/cart-service` |
+| `frontend-service` | Node.js 22 + Docker multi-stage | `ghcr.io/<owner>/frontend-service` |
+
+> `order-service`, `reviews-service`, and `notification-service` are added to the CI matrix once their OpenAPI specs and `src/` directories are implemented.
+
+---
+
+### CD workflow
+
+Triggered automatically when CI succeeds on `main`. Creates an ephemeral **k3d** cluster inside the GitHub Actions runner, deploys the freshly published images using Kustomize, and validates with actuator health checks.
+
+```
+CI succeeds on main
+      │
+      ▼
+ deploy-staging (ephemeral k3d cluster in runner)
+      │
+      ├─ Install k3d + Helm + kustomize
+      ├─ k3d cluster create e-commerce (ports 80 + 443)
+      ├─ Helm install Envoy Gateway
+      │
+      ├─ Deploy minimal backing services in production-matching namespaces:
+      │    postgres-rw  → namespace: postgres  → DNS: postgres-rw.postgres.svc.cluster.local
+      │    valkey       → namespace: valkey    → DNS: valkey.valkey.svc.cluster.local
+      │
+      ├─ Create ghcr-pull-secret for image pulls from ghcr.io
+      │
+      ├─ user-service:
+      │    kustomize edit set image → ghcr.io/<owner>/user-service:<sha>
+      │    kubectl apply -k k8s/apps/user-service/overlays/staging
+      │    kubectl rollout status (120 s timeout)
+      │
+      ├─ cart-service:
+      │    kustomize edit set image → ghcr.io/<owner>/cart-service:<sha>
+      │    kubectl apply -k k8s/apps/cart-service/overlays/staging
+      │    kubectl rollout status (120 s timeout)
+      │
+      ├─ Smoke tests:
+      │    GET /actuator/health → {"status":"UP"}  (user-service :8085)
+      │    GET /actuator/health → {"status":"UP"}  (cart-service :8086)
+      │
+      └─ k3d cluster delete (always — even on failure)
+```
+
+**Why k3d?** The cluster is created fresh for every `main` push — a clean environment with no state leakage between runs.
+
+**Infrastructure simplification:** The full operator stack (CloudNativePG, Strimzi, Keycloak Operator, MongoDB Community) is omitted to keep the staging spin-up fast. Backing services use plain Deployments in the same Kubernetes DNS namespaces as production (`postgres-rw.postgres` and `valkey.valkey`) so the service ConfigMaps require no modification.
+
+**JWT / Keycloak:** Actuator health endpoints do not require JWT authentication. Spring Boot fetches the Keycloak JWKS lazily on the first JWT validation request — services start and pass health checks without a running Keycloak.
+
+#### Permissions and secrets
+
+| Secret / Permission | Source | Required for |
+|---|---|---|
+| `secrets.GITHUB_TOKEN` | Auto-provided by GitHub Actions | Jib push to `ghcr.io` (CI) + image pull (CD) |
+| `permissions.packages: write` | CI `build-java` / `build-frontend` jobs | Authorise token to publish packages |
+| `permissions.packages: read` | CD `deploy-staging` job | Pull images from `ghcr.io` |
+
+#### Branch protection (recommended)
+
+In **Settings → Branches → Branch protection rules** for `main`:
+
+- ✅ Require status checks: `product-service`, `user-service`, `cart-service`, `frontend-service`
+- ✅ Require branches to be up to date before merging
+- ✅ Require at least 1 pull request review
+- ✅ Do not allow bypassing the above settings
+
+---
+
 *Built with Java 25 · Spring Boot 4 · Next.js 15 · Auth.js v5 · Apache Kafka · MongoDB · PostgreSQL · Valkey · Keycloak · Envoy Gateway · OpenTelemetry · k3d*
 
 

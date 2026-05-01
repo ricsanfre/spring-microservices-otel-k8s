@@ -1,0 +1,295 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# CD — Staging deployment (ephemeral k3d cluster)
+#
+# Triggered by:  CI workflow completing successfully on the main branch
+# Purpose:       Deploy freshly published images using the same Helm + operator +
+#                Kustomize approach as the local staging environment (make k8s-up).
+#
+# Operators installed (matching make k8s-operators, scoped to current services):
+#   cert-manager      → jetstack/cert-manager Helm chart
+#   Envoy Gateway     → envoyproxy/gateway-helm OCI Helm chart
+#   CloudNativePG     → cnpg/cloudnative-pg Helm chart
+#   Keycloak Operator → upstream k8s-resources manifests via Kustomize
+#
+# Infrastructure deployed (matching make k8s-infra, current services only):
+#   cert-manager CAs  → kubectl apply -k k8s/infra/cert-manager
+#   PostgreSQL (CNPG) → kubectl apply -k k8s/infra/postgres
+#   Valkey            → kubectl apply -k k8s/infra/valkey
+#   Keycloak          → kubectl apply -k k8s/infra/keycloak
+#   Envoy Gateway     → kubectl apply -k k8s/envoy-gateway
+#
+# Applications deployed (matching make k8s-apps-deploy):
+#   user-service, cart-service — kubectl apply -k k8s/apps/<svc>/overlays/staging
+#   (image tag patched from localhost:5000 to ghcr.io/<owner>/<svc>:<sha>)
+#
+# Secrets:
+#   All infra secrets are created with ephemeral CI-only values before kustomize
+#   applies, ensuring CNPG managed.roles and Keycloak use consistent passwords.
+#   GITHUB_TOKEN is the only secret required — no manual configuration needed.
+#
+# Smoke tests:
+#   GET /actuator/health — no JWT required (Spring Boot JWKS fetch is lazy)
+# ──────────────────────────────────────────────────────────────────────────────
+name: CD — Staging
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: read   # pull images from ghcr.io
+
+jobs:
+  deploy-staging:
+    name: Deploy to ephemeral k3d cluster
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    env:
+      REGISTRY: ghcr.io/${{ github.event.workflow_run.repository.owner.login }}
+      IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+      KEYCLOAK_OPERATOR_VERSION: "26.6.1"
+      # CI-only credentials — ephemeral cluster, no production data ever stored
+      CI_POSTGRES_ADMIN_PASS: ci-postgres-admin
+      CI_USERS_DB_PASS:       ci-users-pass
+      CI_KEYCLOAK_DB_PASS:    ci-keycloak-db-pass
+      CI_KEYCLOAK_ADMIN_PASS: ci-keycloak-admin
+
+    steps:
+      - name: Checkout at the triggering commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # Allow keycloak.local.test to resolve on the runner so Keycloak can
+      # bind its external hostname and future smoke tests can reach the OIDC endpoint
+      - name: Add .local.test DNS entries to /etc/hosts
+        run: echo "127.0.0.1 keycloak.local.test api.local.test" | sudo tee -a /etc/hosts
+
+      # ── Tool installation ────────────────────────────────────────────────
+      - name: Install k3d
+        run: |
+          curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+          k3d version
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+          kustomize version
+
+      # ── Cluster creation ─────────────────────────────────────────────────
+      - name: Create k3d cluster
+        run: |
+          k3d cluster create e-commerce \
+            --port "80:80@loadbalancer" \
+            --port "443:443@loadbalancer" \
+            --k3s-arg "--disable=traefik@server:*" \
+            --wait
+          kubectl cluster-info
+          kubectl get nodes
+
+      # ── Namespaces ───────────────────────────────────────────────────────
+      - name: Create all namespaces
+        run: kubectl apply -f k8s/namespaces.yaml
+
+      # ── Operators (matching make k8s-operators, scoped to needed operators) ─
+      - name: Install cert-manager
+        run: |
+          helm repo add jetstack https://charts.jetstack.io --force-update
+          helm upgrade --install cert-manager jetstack/cert-manager \
+            --namespace cert-manager --create-namespace \
+            --version v1.16.2 \
+            --values k8s/helm/cert-manager-values.yaml \
+            --wait
+
+      - name: Install Envoy Gateway
+        run: |
+          helm upgrade --install envoy-gateway \
+            oci://docker.io/envoyproxy/gateway-helm \
+            --version v1.4.1 \
+            --namespace envoy-gateway-system --create-namespace \
+            --values k8s/helm/envoy-gateway-values.yaml \
+            --wait --timeout 3m
+
+      - name: Install CloudNativePG operator
+        run: |
+          helm repo add cnpg https://cloudnative-pg.github.io/charts --force-update
+          helm upgrade --install cnpg cnpg/cloudnative-pg \
+            --namespace cnpg-system --create-namespace \
+            --values k8s/helm/cnpg-operator-values.yaml \
+            --wait
+
+      - name: Install Keycloak Operator
+        run: |
+          kustomize build k8s/infra/keycloak/operator \
+            | sed "s|/26\.6\.1/|/${KEYCLOAK_OPERATOR_VERSION}/|g" \
+            | kubectl apply -f -
+          kubectl rollout status deployment/keycloak-operator -n keycloak --timeout=2m
+
+      # ── Infrastructure secrets (CI-only values) ──────────────────────────
+      # Created before kustomize applies so CNPG managed.roles and Keycloak
+      # can use consistent credentials from first reconciliation.
+      - name: Create infrastructure secrets
+        run: |
+          # ── postgres namespace ────────────────────────────────────────────
+          # CNPG cluster bootstrap superuser
+          kubectl create secret generic postgres-superuser-secret \
+            --from-literal=username=postgres \
+            --from-literal=password="${CI_POSTGRES_ADMIN_PASS}" \
+            --namespace postgres \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # users_owner credentials — CNPG managed.roles + user-service app
+          kubectl create secret generic users-db-secret \
+            --from-literal=username=users_owner \
+            --from-literal=password="${CI_USERS_DB_PASS}" \
+            --namespace postgres \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # keycloak_owner credentials — CNPG managed.roles
+          kubectl create secret generic keycloak-db-secret \
+            --from-literal=username=keycloak_owner \
+            --from-literal=password="${CI_KEYCLOAK_DB_PASS}" \
+            --namespace postgres \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # ── keycloak namespace ────────────────────────────────────────────
+          # Keycloak admin credentials (for admin CLI access)
+          kubectl create secret generic keycloak-admin-secret \
+            --from-literal=username=admin \
+            --from-literal=password="${CI_KEYCLOAK_ADMIN_PASS}" \
+            --namespace keycloak \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # Keycloak DB credentials (mirrors keycloak_owner secret in postgres ns)
+          kubectl create secret generic keycloak-db-secret \
+            --from-literal=username=keycloak_owner \
+            --from-literal=password="${CI_KEYCLOAK_DB_PASS}" \
+            --namespace keycloak \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # ── Infrastructure via Kustomize (matching make k8s-infra) ───────────
+      - name: Deploy cert-manager issuers + wildcard TLS certificate
+        run: |
+          kubectl apply -k k8s/infra/cert-manager
+          kubectl wait --for=condition=ready clusterissuer/local-test-ca-issuer --timeout=120s
+
+      - name: Deploy PostgreSQL cluster (CNPG)
+        run: |
+          kubectl apply -k k8s/infra/postgres
+          # Wait for the primary to be Ready before proceeding
+          kubectl wait --for=condition=Ready cluster/postgres -n postgres --timeout=5m
+          # Wait for per-service databases to be provisioned
+          kubectl wait --for=condition=Ready database/users-db    -n postgres --timeout=3m
+          kubectl wait --for=condition=Ready database/keycloak-db -n postgres --timeout=3m
+
+      - name: Deploy Valkey
+        run: |
+          kubectl apply -k k8s/infra/valkey
+          kubectl rollout status deployment/valkey -n valkey --timeout=60s
+
+      - name: Deploy Keycloak
+        run: |
+          kubectl apply -k k8s/infra/keycloak
+          kubectl wait --for=condition=Ready keycloak/keycloak -n keycloak --timeout=5m
+
+      - name: Deploy Envoy Gateway resources
+        run: kubectl apply -k k8s/envoy-gateway
+
+      # ── Application secrets + ghcr.io pull secret ────────────────────────
+      - name: Create application secrets
+        run: |
+          # user-service DB credentials — must match users_owner password in postgres
+          kubectl create secret generic user-service-db-secret \
+            --from-literal=username=users_owner \
+            --from-literal=password="${CI_USERS_DB_PASS}" \
+            --namespace e-commerce \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # ghcr.io pull secret so k3d nodes can pull from the private registry
+          kubectl create secret docker-registry ghcr-pull-secret \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GITHUB_TOKEN }} \
+            --namespace e-commerce \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # ── user-service ─────────────────────────────────────────────────────
+      - name: Patch user-service image and deploy
+        run: |
+          cd k8s/apps/user-service/overlays/staging
+          kustomize edit set image \
+            localhost:5000/user-service=ghcr.io/${{ github.repository_owner }}/user-service:${IMAGE_TAG}
+
+          # Inject imagePullSecrets so k3d can pull from ghcr.io
+          cat > ci-pull-secret-patch.yaml <<'PATCH'
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: user-service
+          spec:
+            template:
+              spec:
+                imagePullSecrets:
+                  - name: ghcr-pull-secret
+          PATCH
+          kustomize edit add patch --path ci-pull-secret-patch.yaml --kind Deployment --name user-service
+          cd $GITHUB_WORKSPACE
+
+          kubectl apply -k k8s/apps/user-service/overlays/staging
+          kubectl rollout status deployment/user-service -n e-commerce --timeout=120s
+
+      # ── cart-service ─────────────────────────────────────────────────────
+      - name: Patch cart-service image and deploy
+        run: |
+          cd k8s/apps/cart-service/overlays/staging
+          kustomize edit set image \
+            localhost:5000/cart-service=ghcr.io/${{ github.repository_owner }}/cart-service:${IMAGE_TAG}
+
+          cat > ci-pull-secret-patch.yaml <<'PATCH'
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: cart-service
+          spec:
+            template:
+              spec:
+                imagePullSecrets:
+                  - name: ghcr-pull-secret
+          PATCH
+          kustomize edit add patch --path ci-pull-secret-patch.yaml --kind Deployment --name cart-service
+          cd $GITHUB_WORKSPACE
+
+          kubectl apply -k k8s/apps/cart-service/overlays/staging
+          kubectl rollout status deployment/cart-service -n e-commerce --timeout=120s
+
+      # ── Smoke tests ──────────────────────────────────────────────────────
+      # GET /actuator/health — no JWT required (Spring Boot JWKS fetch is lazy)
+      - name: Smoke tests — actuator health endpoints
+        run: |
+          kubectl port-forward svc/user-service  8085:8085 -n e-commerce &
+          kubectl port-forward svc/cart-service  8086:8086 -n e-commerce &
+          sleep 15
+
+          echo "── user-service ──────────────────────────────────────────"
+          curl -sf http://localhost:8085/actuator/health \
+            -w "\nHTTP %{http_code}\n" | tee /tmp/user-health.json
+          grep -q '"status":"UP"' /tmp/user-health.json
+
+          echo "── cart-service ──────────────────────────────────────────"
+          curl -sf http://localhost:8086/actuator/health \
+            -w "\nHTTP %{http_code}\n" | tee /tmp/cart-health.json
+          grep -q '"status":"UP"' /tmp/cart-health.json
+
+      # ── Cleanup ──────────────────────────────────────────────────────────
+      - name: Destroy k3d cluster
+        if: always()
+        run: k3d cluster delete e-commerce || true

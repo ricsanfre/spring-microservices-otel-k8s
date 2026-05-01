@@ -1,0 +1,169 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# CI — Build, test, and publish container images to ghcr.io
+#
+# Triggers:
+#   push to main    → unit tests + integration tests + Jib image push to ghcr.io
+#   pull_request    → unit tests + integration tests (image push skipped)
+#
+# Strategy (per design/development-guidelines.md § 19):
+#   - dorny/paths-filter detects which service directories changed
+#   - Matrix job runs only for changed services — fast feedback for single-service PRs
+#   - Changes to common/ or root pom.xml mark ALL Java services as changed (conservative)
+#   - Jib pushes OCI images directly to ghcr.io without a Docker daemon (ADR-010)
+#   - Only GITHUB_TOKEN is required — no manually configured secrets
+#
+# Services covered (implemented — have full src/ + tests):
+#   Java:     product-service, user-service, cart-service
+#   Frontend: frontend-service (Next.js 15, separate job)
+#
+# Test naming convention (ADR-012):
+#   *Test.java  → Surefire  (mvn test)   — unit + @WebMvcTest, no Docker
+#   *IT.java    → Failsafe  (mvn verify) — @SpringBootTest + Testcontainers, needs Docker
+# ──────────────────────────────────────────────────────────────────────────────
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Change detection ──────────────────────────────────────────────────────
+  detect-changes:
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    outputs:
+      java-services: ${{ steps.java-filter.outputs.changes }}
+      frontend: ${{ steps.frontend-filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Java services: also rebuilds if common/ or root pom.xml changed
+      - uses: dorny/paths-filter@v3
+        id: java-filter
+        with:
+          filters: |
+            product-service:
+              - 'product-service/**'
+              - 'common/**'
+              - 'pom.xml'
+            user-service:
+              - 'user-service/**'
+              - 'common/**'
+              - 'pom.xml'
+            cart-service:
+              - 'cart-service/**'
+              - 'common/**'
+              - 'pom.xml'
+
+      # Frontend has a different toolchain — detected separately
+      - uses: dorny/paths-filter@v3
+        id: frontend-filter
+        with:
+          filters: |
+            frontend:
+              - 'frontend-service/**'
+
+  # ── Java services — build, test, publish ─────────────────────────────────
+  build-java:
+    name: "${{ matrix.service }}"
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.java-services != '[]' && needs.detect-changes.outputs.java-services != '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changes.outputs.java-services) }}
+      fail-fast: false
+    permissions:
+      contents: read
+      packages: write   # required to push to ghcr.io
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 25 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # ── Fast gate: unit tests + @WebMvcTest slice tests (no Docker) ────────
+      - name: Unit tests
+        run: mvn -pl ${{ matrix.service }} -am test --no-transfer-progress
+
+      # ── Full gate: unit + integration tests (Testcontainers, Docker available) ─
+      - name: Integration tests
+        run: mvn -pl ${{ matrix.service }} -am verify --no-transfer-progress
+
+      # ── Publish: Jib pushes OCI image directly, no Docker daemon needed ────
+      # Image tags: <commit-sha> (pinned) + latest (floating)
+      - name: Build and push image to ghcr.io (Jib)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          mvn -pl ${{ matrix.service }} compile jib:build \
+            --no-transfer-progress \
+            -Ddocker.registry=ghcr.io/${{ github.repository_owner }} \
+            -Djib.to.tags=${{ github.sha }},latest \
+            -Djib.to.auth.username=${{ github.actor }} \
+            -Djib.to.auth.password=${{ secrets.GITHUB_TOKEN }}
+
+  # ── Frontend service — lint, build, publish ───────────────────────────────
+  build-frontend:
+    name: frontend-service
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.frontend == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # required to push to ghcr.io
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend-service/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend-service
+        run: npm ci
+
+      # Next.js build validates TypeScript types + produces standalone output
+      - name: Build (type-check + Next.js compile)
+        working-directory: frontend-service
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          # Stub runtime secrets so the build succeeds without real Keycloak
+          AUTH_SECRET: ci-build-stub-not-real
+          AUTH_KEYCLOAK_ID: e-commerce-web
+          AUTH_KEYCLOAK_SECRET: ci-build-stub-not-real
+          AUTH_KEYCLOAK_ISSUER: http://localhost:8180/realms/e-commerce
+          NEXTAUTH_URL: http://localhost:3001
+
+      # ── Publish: Docker multi-stage build (Dockerfile) ────────────────────
+      - name: Log in to ghcr.io
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push frontend-service image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend-service
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/frontend-service:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/frontend-service:latest

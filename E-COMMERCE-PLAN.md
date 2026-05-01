@@ -504,10 +504,10 @@ Services call each other using plain Kubernetes Service DNS (`http://service-nam
 - [ ] k3d cluster creation command includes port mappings for Envoy Gateway and Keycloak
 - [ ] Envoy Gateway `SecurityPolicy` references Keycloak JWKS endpoint
 - [ ] Service-to-service calls use plain Kubernetes Service DNS (`http://service-name:port`) — no DiscoveryClient, no RBAC
-- [ ] CI workflow uses `dorny/paths-filter` change detection with matrix build
-- [ ] `jib:build` step authenticates to `ghcr.io` via `GITHUB_TOKEN` (no extra secrets)
-- [ ] CD workflow creates k3d cluster + installs Envoy Gateway + deploys via `envsubst`
-- [ ] `k8s/{service}/deployment.yaml` uses `${IMAGE}` placeholder for tag substitution
+- [x] CI workflow uses `dorny/paths-filter` change detection with matrix build (`.github/workflows/ci.yaml`)
+- [x] `jib:build` step authenticates to `ghcr.io` via `GITHUB_TOKEN` (no extra secrets)
+- [x] CD workflow creates k3d cluster + installs Envoy Gateway + deploys via Kustomize image patch (`.github/workflows/cd.yaml`)
+- [x] Kustomize staging overlays use `kustomize edit set image` to pin `ghcr.io/{owner}/{svc}:{sha}` per deploy
 
 ---
 
