@@ -47,19 +47,72 @@ spec:
           - roles
           - email
 
-      - clientId: e-commerce-service
-        name: "E-Commerce Service"
+      - clientId: product-service
+        name: "Product Service"
         enabled: true
         publicClient: false
         serviceAccountsEnabled: true
         standardFlowEnabled: false
         directAccessGrantsEnabled: false
-        secret: "change-me-service-secret"
+        secret: "product-service-secret"
+        defaultClientScopes: []
+
+      - clientId: order-service
+        name: "Order Service"
+        enabled: true
+        publicClient: false
+        serviceAccountsEnabled: true
+        standardFlowEnabled: false
+        directAccessGrantsEnabled: false
+        secret: "order-service-secret"
         defaultClientScopes:
-          - web-origins
-          - profile
-          - roles
-          - email
+          - users:resolve
+          - products:write
+
+      - clientId: reviews-service
+        name: "Reviews Service"
+        enabled: true
+        publicClient: false
+        serviceAccountsEnabled: true
+        standardFlowEnabled: false
+        directAccessGrantsEnabled: false
+        secret: "reviews-service-secret"
+        defaultClientScopes:
+          - users:resolve
+          - products:read
+          - orders:read
+
+      - clientId: user-service
+        name: "User Service"
+        enabled: true
+        publicClient: false
+        serviceAccountsEnabled: true
+        standardFlowEnabled: false
+        directAccessGrantsEnabled: false
+        secret: "user-service-secret"
+        defaultClientScopes: []
+
+      - clientId: notification-service
+        name: "Notification Service"
+        enabled: true
+        publicClient: false
+        serviceAccountsEnabled: false
+        standardFlowEnabled: false
+        directAccessGrantsEnabled: false
+        secret: "notification-service-secret"
+        defaultClientScopes: []
+
+      - clientId: cart-service
+        name: "Cart Service"
+        enabled: true
+        publicClient: false
+        serviceAccountsEnabled: true
+        standardFlowEnabled: false
+        directAccessGrantsEnabled: false
+        secret: "cart-service-secret"
+        defaultClientScopes:
+          - users:resolve
+          - orders:write
 
     users:
       - username: testuser

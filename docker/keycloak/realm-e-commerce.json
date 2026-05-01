@@ -446,17 +446,102 @@
       ]
     },
     {
-      "clientId": "e-commerce-service",
-      "name": "E-Commerce Service Client (M2M)",
-      "description": "Confidential client for service-to-service client credentials flow",
+      "clientId": "product-service",
+      "name": "Product Service",
+      "description": "Confidential client for product-service — resource server + service account",
       "enabled": true,
       "publicClient": false,
-      "secret": "e-commerce-service-secret",
+      "secret": "product-service-secret",
       "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "order-service",
+      "name": "Order Service",
+      "description": "Confidential client for order-service — resource server + service account (calls product-service, user-service)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "order-service-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
       "defaultClientScopes": [
-        "users:resolve"
+        "users:resolve",
+        "products:write"
+      ],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "reviews-service",
+      "name": "Reviews Service",
+      "description": "Confidential client for reviews-service — resource server + service account (calls user-service, product-service, order-service)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "reviews-service-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "users:resolve",
+        "products:read",
+        "orders:read"
+      ],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "user-service",
+      "name": "User Service",
+      "description": "Confidential client for user-service — resource server + service account",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "user-service-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "notification-service",
+      "name": "Notification Service",
+      "description": "Confidential client for notification-service — Kafka consumer resource server (no outbound HTTP calls)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "notification-service-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "cart-service",
+      "name": "Cart Service",
+      "description": "Confidential client for cart-service — resource server + service account (calls user-service, order-service)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "cart-service-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "users:resolve",
+        "orders:write"
       ],
       "optionalClientScopes": []
     }
@@ -499,12 +584,6 @@
           "customer"
         ]
       }
-    },
-    {
-      "username": "service-account-e-commerce-service",
-      "enabled": true,
-      "email": "service-account-e-commerce-service@placeholder.org",
-      "serviceAccountClientId": "e-commerce-service"
     }
   ]
 }

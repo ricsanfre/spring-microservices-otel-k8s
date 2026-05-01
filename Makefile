@@ -197,11 +197,11 @@ us-token: ## Fetch user access token via Authorization Code flow (opens browser 
 	    --redirect-url http://localhost:9876/callback \
 	    | jq -r .access_token
 
-us-token-sa: ## Fetch service account token for e-commerce-service (requires jq)
+us-token-sa: ## Fetch cart-service service account token (users:resolve + orders:write, requires jq)
 	@curl -sf -X POST \
 	    "http://localhost:8180/realms/e-commerce/protocol/openid-connect/token" \
 	    -H "Content-Type: application/x-www-form-urlencoded" \
-	    -d "grant_type=client_credentials&client_id=e-commerce-service&client_secret=e-commerce-service-secret" \
+	    -d "grant_type=client_credentials&client_id=cart-service&client_secret=cart-service-secret" \
 	    | jq -r .access_token
 
 # ──────────────────────────────────────────────────────────────────────────────

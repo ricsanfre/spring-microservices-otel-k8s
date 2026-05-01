@@ -37,13 +37,19 @@ flowchart TD
 
         subgraph CLIENTS["Clients"]
             C1["e-commerce-web\n(Confidential — BFF)"]
-            C2["e-commerce-service\n(Confidential — M2M)"]
+            C2["product-service\n(Confidential — M2M)"]
+            C3["order-service\n(Confidential — M2M)"]
+            C4["reviews-service\n(Confidential — M2M)"]
+            C5["user-service\n(Confidential — M2M)"]
+            C6["notification-service\n(Confidential)"]
+            C7["cart-service\n(Confidential — M2M)"]
         end
 
         subgraph USERS["Users"]
             U1["testuser\nclientRole: customer"]
             U2["otheruser\nclientRole: customer"]
-            U3["service-account-e-commerce-service\n(Keycloak service account)"]
+            U3["service-account-cart-service\n(Keycloak service account)"]
+            U4["service-account-order-service\n(Keycloak service account)"]
         end
 
         CR_C -->|composites| CR_P
@@ -66,12 +72,15 @@ flowchart TD
         S2 -->|optionalClientScopes| C1
         S3 -->|optionalClientScopes| C1
         S4 -->|optionalClientScopes| C1
-        S5 -->|defaultClientScopes| C2
-        S2 -->|defaultClientScopes| C2
-        S1 -->|defaultClientScopes| C2
-        S6 -->|optionalClientScopes| C1
-        S7 -->|optionalClientScopes| C1
+        S5 -->|defaultClientScopes| C3
+        S5 -->|defaultClientScopes| C4
+        S5 -->|defaultClientScopes| C7
+        S2 -->|defaultClientScopes| C7
+        S2 -->|defaultClientScopes| C4
+        S1 -->|defaultClientScopes| C3
+        S1 -->|defaultClientScopes| C4
         C2 -->|owns service account| U3
+        C3 -->|owns service account| U4
         U1 -->|assigned role| CR_C
         U2 -->|assigned role| CR_C
     end
@@ -142,9 +151,11 @@ See [ADR-006 — Scope-Based Authorization](adr-006-scope-based-authorization.md
 | `reviews:read` | Read product reviews | `e-commerce-web` (optional) |
 | `reviews:write` | Submit and edit reviews | `e-commerce-web` (optional) |
 | `users:read` | Read own user profile | `e-commerce-web` (optional) |
-| `users:resolve` | Resolve IDP subject → internal user ID (M2M only) | `e-commerce-service` (default) |
-| `orders:write` | Place and confirm orders (M2M: cart-service → order-service) | `e-commerce-web` (optional), `e-commerce-service` (default) |
-| `products:write` | Create/update products; reserve stock (M2M: order-service → product-service) | `e-commerce-web` (optional), `e-commerce-service` (default) |
+| `users:resolve` | Resolve IDP subject → internal user ID (M2M only) | `order-service`, `reviews-service`, `cart-service` (default) |
+| `orders:write` | Place and confirm orders (M2M: cart-service → order-service) | `e-commerce-web` (optional), `cart-service` (default) |
+| `products:write` | Create/update products; reserve stock (M2M: order-service → product-service) | `e-commerce-web` (optional), `order-service` (default) |
+| `orders:read` | Read orders (M2M: reviews-service → order-service) | `e-commerce-web` (optional), `reviews-service` (default) |
+| `products:read` | Read product catalog (M2M: reviews-service → product-service) | `e-commerce-web` (optional), `reviews-service` (default) |
 | `notifications:receive` | Receive notification events | `e-commerce-web` (optional) |
 | `cart:read` | Read own shopping cart | `e-commerce-web` (optional) |
 | `cart:write` | Add, update, and remove items in own shopping cart | `e-commerce-web` (optional) |
@@ -269,7 +280,7 @@ The **Next.js BFF** (`frontend-service`) uses this client to authenticate users 
 
 All the scopes it needs must be included in the `scope` parameter of the authorization request — Keycloak only includes optional scopes that are explicitly requested. Keycloak will only grant scopes that are listed in `optionalClientScopes` (or `defaultClientScopes`) on the client.
 
-> **No password grant**: `directAccessGrantsEnabled` is `false` on this client. For local API testing use the `e-commerce-service` client credentials token (which grants `users:resolve`) or start the frontend dev server and obtain a token from the browser session.
+> **No password grant**: `directAccessGrantsEnabled` is `false` on this client. For local API testing use a per-service client credentials token (e.g., `cart-service` grants `users:resolve`) or start the frontend dev server and obtain a token from the browser session.
 
 #### JWT payload (user token from this client)
 
@@ -290,50 +301,70 @@ All the scopes it needs must be included in the `scope` parameter of the authori
 
 ---
 
-### `e-commerce-service` — Confidential M2M Client
+### Per-Service Clients — Confidential M2M Clients
+
+Each service has its own Keycloak client for the Client Credentials grant. The `defaultClientScopes`
+on each client determine which scopes are automatically included in the service account token —
+limited to exactly what that service needs to call downstream services.
+
+| Client ID | `serviceAccountsEnabled` | `defaultClientScopes` | Calls |
+|-----------|--------------------------|----------------------|-------|
+| `product-service` | `true` | *(none — no outbound HTTP calls)* | — |
+| `order-service` | `true` | `users:resolve`, `products:write` | user-service, product-service |
+| `reviews-service` | `true` | `users:resolve`, `products:read`, `orders:read` | user-service, product-service, order-service |
+| `user-service` | `true` | *(none — no outbound HTTP calls)* | — |
+| `notification-service` | `false` | *(none — Kafka consumer only)* | — |
+| `cart-service` | `true` | `users:resolve`, `orders:write` | user-service, order-service |
+
+Each client follows this pattern (example: `cart-service`):
 
 ```
-clientId:               e-commerce-service
+clientId:               cart-service
 type:                   Confidential
-secret:                 e-commerce-service-secret
+secret:                 cart-service-secret          ← override via CART_SERVICE_CLIENT_SECRET env var
 standardFlowEnabled:    false   ← no browser login
 directAccessGrantsEnabled: false
 serviceAccountsEnabled: true    ← Client Credentials grant
-defaultClientScopes:    users:resolve
+defaultClientScopes:    users:resolve, orders:write
 ```
 
-#### When is this used?
+#### When are these used?
 
-Any microservice that needs to call another microservice (e.g., `reviews-service` calling
-`user-service` to resolve a user ID) authenticates using this client's credentials:
+Services that need to call another service authenticate using their own client credentials:
 
 ```bash
-# Obtain a service account token (Client Credentials grant)
+# cart-service obtaining a token to call order-service
 curl -s -X POST http://localhost:8180/realms/e-commerce/protocol/openid-connect/token \
   -d "grant_type=client_credentials" \
-  -d "client_id=e-commerce-service" \
-  -d "client_secret=e-commerce-service-secret" | jq .access_token
+  -d "client_id=cart-service" \
+  -d "client_secret=cart-service-secret" | jq .access_token
+
+# order-service obtaining a token to call product-service
+curl -s -X POST http://localhost:8180/realms/e-commerce/protocol/openid-connect/token \
+  -d "grant_type=client_credentials" \
+  -d "client_id=order-service" \
+  -d "client_secret=order-service-secret" | jq .access_token
 ```
 
 In Spring Boot, `OAuth2ClientHttpRequestInterceptor` handles this automatically (see
 [development-guidelines.md](development-guidelines.md) Section 5 and Section 9).
 
-#### JWT payload (service account token from this client)
+#### JWT payload (service account token — example from cart-service)
 
 ```json
 {
-  "sub":                "service-account-uuid",
+  "sub":                "service-account-cart-service-uuid",
   "iss":                "http://localhost:8180/realms/e-commerce",
-  "preferred_username": "service-account-e-commerce-service",
-  "scope":              "users:resolve",
+  "preferred_username": "service-account-cart-service",
+  "scope":              "users:resolve orders:write",
   "exp":                1745600000,
   "iat":                1745596400
 }
 ```
 
-> **Future expansion**: As additional microservices are implemented (`order-service`, `product-service`,
-> etc.), each should get its own Keycloak client (`client_id: order-service`, etc.) with its own
-> `client_secret` and the scopes it needs to call downstream services. See [ADR-003](adr-003-keycloak-as-iam.md).
+Each service's token carries only the scopes it actually needs — `cart-service` gets
+`users:resolve orders:write`, `order-service` gets `users:resolve products:write`, etc.
+Services receiving these requests use `hasAuthority('SCOPE_users:resolve')` etc. to verify.
 
 ---
 
@@ -368,20 +399,22 @@ explicitly requested by the client: `products:read orders:read orders:write revi
 A second test customer account. Assigned the `customer` client role on `e-commerce-web`.
 Useful for testing cross-user isolation (e.g., verifying that `otheruser` cannot read `testuser`'s orders).
 
-### `service-account-e-commerce-service` *(Keycloak internal)*
+### Per-service service accounts *(Keycloak internal)*
 
-| Attribute | Value |
-|-----------|-------|
-| Username | `service-account-e-commerce-service` |
-| Email | `service-account-e-commerce-service@placeholder.org` |
-| Type | Keycloak service account (auto-created when `serviceAccountsEnabled: true`) |
+Keycloak automatically creates a service account user for each client with `serviceAccountsEnabled: true`.
+These are internal users, not real humans. They are **not** listed in the realm JSON —
+Keycloak creates them on first startup.
 
-This user is not a real human. Keycloak automatically creates it when `serviceAccountsEnabled: true` is
-set on the `e-commerce-service` client. The JWT issued via Client Credentials grant has `sub` equal to
-this user's internal UUID, `preferred_username: service-account-e-commerce-service`, and
-`scope: users:resolve`.
+| Service account username | Created for |
+|--------------------------|-------------|
+| `service-account-product-service` | `product-service` client |
+| `service-account-order-service` | `order-service` client |
+| `service-account-reviews-service` | `reviews-service` client |
+| `service-account-user-service` | `user-service` client |
+| `service-account-cart-service` | `cart-service` client |
 
-Services receiving a request from this account detect it via `hasAuthority('SCOPE_users:resolve')`.
+The JWT issued via Client Credentials grant has `preferred_username: service-account-<client-id>`
+and carries only the `defaultClientScopes` defined on that client.
 
 ---
 
@@ -413,9 +446,9 @@ sequenceDiagram
     SVC-->>GW: 201 Created
     GW-->>SPA: 201 Created
 
-    Note over SVC,KC: Service-to-Service Call (Client Credentials)
-    SVC->>KC: POST /token  client_credentials  e-commerce-service / secret
-    KC-->>SVC: access_token (scope: users:resolve)
+    Note over SVC,KC: Service-to-Service Call (Client Credentials — per-service client)
+    SVC->>KC: POST /token  client_credentials  <service>-service / <secret>
+    KC-->>SVC: access_token (scope: users:resolve orders:write …)
     SVC->>SVC: GET /api/v1/users/resolve?idp_subject=...  Bearer <service JWT>
     Note right of SVC: user-service validates\nSCOPE_users:resolve authority
 ```
@@ -538,19 +571,25 @@ chmod +x oidc-client.sh
 
 ### Service account token (Client Credentials — no browser needed)
 
-`e-commerce-service` still supports Client Credentials. The token grants only
-`scope: users:resolve` — suitable for calling `/users/resolve`, not user-facing endpoints
-like `/users/me` (which requires `users:read`).
+Each service has its own Keycloak client for Client Credentials. Use the appropriate client
+depending on what scope you need to test:
 
 ```bash
-# Via Makefile shortcut (requires jq):
+# Via Makefile shortcut (cart-service token — grants users:resolve + orders:write):
 TOKEN=$(make -s us-token-sa)
 
-# Or directly:
+# Or directly — cart-service service account token:
 TOKEN=$(curl -sf -X POST \
   http://localhost:8180/realms/e-commerce/protocol/openid-connect/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=client_credentials&client_id=e-commerce-service&client_secret=e-commerce-service-secret" \
+  -d "grant_type=client_credentials&client_id=cart-service&client_secret=cart-service-secret" \
+  | jq -r .access_token)
+
+# order-service service account token (grants users:resolve + products:write):
+TOKEN=$(curl -sf -X POST \
+  http://localhost:8180/realms/e-commerce/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=order-service&client_secret=order-service-secret" \
   | jq -r .access_token)
 ```
 

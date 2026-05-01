@@ -52,10 +52,12 @@ jobs:
       IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
       KEYCLOAK_OPERATOR_VERSION: "26.6.1"
       # CI-only credentials — ephemeral cluster, no production data ever stored
-      CI_POSTGRES_ADMIN_PASS: ci-postgres-admin
-      CI_USERS_DB_PASS:       ci-users-pass
-      CI_KEYCLOAK_DB_PASS:    ci-keycloak-db-pass
-      CI_KEYCLOAK_ADMIN_PASS: ci-keycloak-admin
+      CI_POSTGRES_ADMIN_PASS:        ci-postgres-admin
+      CI_USERS_DB_PASS:              ci-users-pass
+      CI_KEYCLOAK_DB_PASS:           ci-keycloak-db-pass
+      CI_KEYCLOAK_ADMIN_PASS:        ci-keycloak-admin
+      CI_CART_SERVICE_CLIENT_SECRET: ci-cart-service-secret
+      CI_ORDER_SERVICE_CLIENT_SECRET: ci-order-service-secret
 
     steps:
       - name: Checkout at the triggering commit
@@ -211,6 +213,18 @@ jobs:
           kubectl create secret generic user-service-db-secret \
             --from-literal=username=users_owner \
             --from-literal=password="${CI_USERS_DB_PASS}" \
+            --namespace e-commerce \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # cart-service OAuth2 client credentials (Keycloak cart-service client)
+          kubectl create secret generic cart-service-oauth-secret \
+            --from-literal=CART_SERVICE_CLIENT_SECRET="${CI_CART_SERVICE_CLIENT_SECRET}" \
+            --namespace e-commerce \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # order-service OAuth2 client credentials (Keycloak order-service client)
+          kubectl create secret generic order-service-oauth-secret \
+            --from-literal=ORDER_SERVICE_CLIENT_SECRET="${CI_ORDER_SERVICE_CLIENT_SECRET}" \
             --namespace e-commerce \
             --dry-run=client -o yaml | kubectl apply -f -
 

@@ -915,7 +915,14 @@ curl -H "Authorization: Bearer $SA_TOKEN" \
 |----------|----------|-------------|----------------|
 | `testuser` | `password` | `customer` on `e-commerce-web` | `openid profile email products:read orders:read orders:write reviews:read reviews:write users:read cart:read cart:write` |
 | `otheruser` | `password` | `customer` on `e-commerce-web` | `openid profile email products:read orders:read orders:write reviews:read reviews:write users:read cart:read cart:write` |
-| `e-commerce-service` (client) | `e-commerce-service-secret` | — (M2M client credentials) | `users:resolve` |
+
+**Service account clients (M2M — Client Credentials):**
+
+| Client ID | Secret | Scopes |
+|-----------|--------|--------|
+| `cart-service` | `cart-service-secret` | `users:resolve orders:write` |
+| `order-service` | `order-service-secret` | `users:resolve products:write` |
+| `reviews-service` | `reviews-service-secret` | `users:resolve products:read orders:read` |
 
 **Stopping infrastructure:**
 

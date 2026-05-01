@@ -17,13 +17,13 @@ spring:
       client:
         registration:
           user-service:
-            client-id: e-commerce-service
-            client-secret: ${E_COMMERCE_SERVICE_CLIENT_SECRET:e-commerce-service-secret}
+            client-id: cart-service
+            client-secret: ${CART_SERVICE_CLIENT_SECRET:cart-service-secret}
             authorization-grant-type: client_credentials
             scope: users:resolve
           order-service:
-            client-id: e-commerce-service
-            client-secret: ${E_COMMERCE_SERVICE_CLIENT_SECRET:e-commerce-service-secret}
+            client-id: cart-service
+            client-secret: ${CART_SERVICE_CLIENT_SECRET:cart-service-secret}
             authorization-grant-type: client_credentials
             scope: orders:write
         provider:

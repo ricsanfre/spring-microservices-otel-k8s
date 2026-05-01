@@ -33,7 +33,7 @@ Implement checkout as **two explicit phases** separated by a user confirmation s
 - **Caller:** browser → Envoy Gateway → `cart-service`
 - **Actor:** `cart-service`
 - Reads the current cart for the authenticated user (resolved from JWT `sub` via user-service).
-- Calls `POST /api/v1/orders` on `order-service` using a Client Credentials token (`e-commerce-service` Keycloak client, scope `orders:write`).
+- Calls `POST /api/v1/orders` on `order-service` using a Client Credentials token (`cart-service` Keycloak client, scope `orders:write`).
 - `order-service` creates the order with status **`PENDING`** (no stock reservation yet).
 - Returns the `OrderResponse` (with `id`, `status: PENDING`, `totalAmount`, `items`) to the browser.
 - **Cart is NOT cleared** at this point.
@@ -43,7 +43,7 @@ Implement checkout as **two explicit phases** separated by a user confirmation s
 - **Caller:** browser → Envoy Gateway → `order-service` (user JWT, scope `orders:write`)
 - **Actor:** `order-service`
 - Verifies the order is in `PENDING` status and is owned by the calling user.
-- Calls `POST /api/v1/products/stock/reserve` on `product-service` using a Client Credentials token (`e-commerce-service` Keycloak client, scope `products:write`) with the list of `{productId, quantity}` pairs.
+- Calls `POST /api/v1/products/stock/reserve` on `product-service` using a Client Credentials token (`order-service` Keycloak client, scope `products:write`) with the list of `{productId, quantity}` pairs.
   - If any product has insufficient stock → product-service returns `409 Conflict` → order stays `PENDING`, cart stays intact → user sees a 409 error with the offending product.
   - If product-service is unreachable → Resilience4j circuit breaker trips → `503 Service Unavailable` → order stays `PENDING`.
 - On successful stock reservation: transitions order to **`CONFIRMED`**, saves to PostgreSQL.
@@ -133,16 +133,16 @@ sequenceDiagram
 
 ---
 
-## Keycloak Scope Changes Required
+## Keycloak Scope Configuration
 
-The `e-commerce-service` Keycloak client (used for all M2M calls) must have these scopes added as **default client scopes**:
+Each service uses its own Keycloak client for M2M calls. The required `defaultClientScopes` per client are:
 
-| Scope | Required by | Calls |
-|-------|-------------|-------|
-| `orders:write` | `cart-service` | `POST /api/v1/orders` (create PENDING order) |
-| `products:write` | `order-service` | `POST /api/v1/products/stock/reserve` |
+| Keycloak Client | `defaultClientScopes` | Calls |
+|---|---|---|
+| `cart-service` | `users:resolve`, `orders:write` | user-service (resolve), order-service (create PENDING order) |
+| `order-service` | `users:resolve`, `products:write` | user-service (resolve), product-service (stock reserve) |
 
-These are in addition to the existing `users:resolve` scope already assigned to `e-commerce-service`. See [design/keycloak-configuration.md](keycloak-configuration.md) for the full scope catalogue.
+See [design/keycloak-configuration.md](keycloak-configuration.md) for the full scope catalogue.
 
 ---
 

@@ -32,13 +32,13 @@ spring:
             token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
         registration:
           user-service:
-            client-id: e-commerce-service
-            client-secret: ${E_COMMERCE_SERVICE_CLIENT_SECRET:e-commerce-service-secret}
+            client-id: order-service
+            client-secret: ${ORDER_SERVICE_CLIENT_SECRET:order-service-secret}
             authorization-grant-type: client_credentials
             scope: users:resolve
           product-service:
-            client-id: e-commerce-service
-            client-secret: ${E_COMMERCE_SERVICE_CLIENT_SECRET:e-commerce-service-secret}
+            client-id: order-service
+            client-secret: ${ORDER_SERVICE_CLIENT_SECRET:order-service-secret}
             authorization-grant-type: client_credentials
             scope: products:write
 

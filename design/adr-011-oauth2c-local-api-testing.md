@@ -108,8 +108,8 @@ can be captured directly: `TOKEN=$(make -s us-token)`.
 
 ### Service account tokens (unchanged)
 
-The `us-token-sa` Makefile target still uses plain `curl` with the `client_credentials` grant on
-`e-commerce-service`, which has `serviceAccountsEnabled: true`. No browser is required for this
+The `us-token-sa` Makefile target uses plain `curl` with the `client_credentials` grant on
+the `cart-service` Keycloak client (which has `serviceAccountsEnabled: true`). No browser is required for this
 flow and the target is unaffected by this ADR.
 
 ### oidc-client.sh as a fallback

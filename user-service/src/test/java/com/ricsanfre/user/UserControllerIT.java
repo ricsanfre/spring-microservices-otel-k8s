@@ -113,7 +113,7 @@ class UserControllerIT {
                 .jwt(j -> j
                         .subject("service-account-sub")
                         .claim("email", "service@internal.local")
-                        .claim("preferred_username", "e-commerce-service")
+                        .claim("preferred_username", "service-account-cart-service")
                         .claim("scope", "users:resolve"))
                 .authorities(new SimpleGrantedAuthority("SCOPE_users:resolve"));
     }

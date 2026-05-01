@@ -30,6 +30,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: cart-service-config
+            - secretRef:
+                name: cart-service-oauth-secret
 
           livenessProbe:
             httpGet:

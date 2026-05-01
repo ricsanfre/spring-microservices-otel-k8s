@@ -829,8 +829,8 @@ spring:
       client:
         registration:
           user-service:
-            client-id: e-commerce-service
-            client-secret: ${E_COMMERCE_SERVICE_CLIENT_SECRET:e-commerce-service-secret}
+            client-id: <service-name>          # e.g. cart-service, order-service
+            client-secret: ${<SERVICE>_CLIENT_SECRET:<service-name>-secret}
             authorization-grant-type: client_credentials
             scope: users:resolve
         provider:
