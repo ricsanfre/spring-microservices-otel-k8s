@@ -3,7 +3,7 @@ import { auth, signIn } from "@/auth";
 
 export default async function LoginPage() {
   const session = await auth();
-  if (session) redirect("/");
+  if (session) redirect("/home");
 
   return (
     <div className="login-card">
@@ -14,7 +14,7 @@ export default async function LoginPage() {
       <form
         action={async () => {
           "use server";
-          await signIn("keycloak");
+          await signIn("keycloak", { redirectTo: "/home" });
         }}
       >
         <button type="submit" className="btn-primary btn-full">

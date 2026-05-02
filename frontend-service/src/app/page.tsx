@@ -1,18 +1,35 @@
-import { auth } from "@/auth";
 import Link from "next/link";
 
-export default async function HomePage() {
-  const session = await auth();
-
+export default function LandingPage() {
   return (
-    <div>
-      <h1>Welcome, {session?.user?.name ?? session?.user?.email}</h1>
-      <p style={{ color: "#475569", marginTop: "0.5rem" }}>
-        You are signed in. Explore the store below.
-      </p>
-      <div className="links">
-        <Link href="/products">Browse Products</Link>
-        <Link href="/orders">My Orders</Link>
+    <div className="landing">
+      <div className="landing-hero">
+        <h1>Welcome to E-Commerce</h1>
+        <p className="landing-subtitle">
+          Discover thousands of products at great prices. Fast shipping, easy
+          returns, and secure checkout.
+        </p>
+        <Link href="/products" className="btn-primary">
+          Browse Products
+        </Link>
+      </div>
+
+      <div className="landing-features">
+        <div className="feature-card">
+          <span className="feature-icon">🛍️</span>
+          <h2>Wide Selection</h2>
+          <p>Explore a curated catalogue of products across all categories.</p>
+        </div>
+        <div className="feature-card">
+          <span className="feature-icon">🔒</span>
+          <h2>Secure Payments</h2>
+          <p>Your transactions are protected end-to-end with industry-standard encryption.</p>
+        </div>
+        <div className="feature-card">
+          <span className="feature-icon">🚚</span>
+          <h2>Fast Delivery</h2>
+          <p>Get your orders delivered quickly with real-time tracking.</p>
+        </div>
       </div>
     </div>
   );

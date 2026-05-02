@@ -33,7 +33,7 @@ export async function Nav() {
         <form
           action={async () => {
             "use server";
-            await signIn("keycloak");
+            await signIn("keycloak", { redirectTo: "/home" });
           }}
         >
           <button type="submit">Sign in</button>

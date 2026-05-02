@@ -551,4 +551,4 @@ Services call each other using plain Kubernetes Service DNS (`http://service-nam
 | Keycloak event listener | Replace lazy registration (Option A) with a Keycloak SPI EventListenerProvider (Option C) to guarantee profile existence before first API call |
 | Kafka security | Add SASL/SCRAM authentication for Kafka in production |
 | Container orchestration | Kubernetes with Helm charts for each service |
-| Kafka security | Add SASL/SCRAM authentication for Kafka in production |
+
