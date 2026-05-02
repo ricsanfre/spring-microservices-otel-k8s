@@ -11,7 +11,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       authorization: {
         params: {
           scope:
-            "openid profile email users:read orders:read products:read reviews:read",
+            "openid profile email users:read orders:read products:read reviews:read cart:read cart:write",
         },
       },
     }),

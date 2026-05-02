@@ -1,8 +1,21 @@
 import { auth, signIn, signOut } from "@/auth";
 import Link from "next/link";
+import { apiFetch } from "@/lib/api";
+
+async function getCartItemCount(): Promise<number> {
+  try {
+    const res = await apiFetch("cart", "/api/v1/cart");
+    if (!res.ok) return 0;
+    const cart: { totalItems: number } = await res.json();
+    return cart.totalItems ?? 0;
+  } catch {
+    return 0;
+  }
+}
 
 export async function Nav() {
   const session = await auth();
+  const cartCount = session ? await getCartItemCount() : 0;
 
   return (
     <nav>
@@ -17,6 +30,12 @@ export async function Nav() {
       <span className="spacer" />
       {session?.user ? (
         <>
+          <Link href="/cart" className="cart-icon" aria-label="Shopping cart">
+            🛒
+            {cartCount > 0 && (
+              <span className="cart-badge">{cartCount}</span>
+            )}
+          </Link>
           <span style={{ fontSize: "0.875rem", color: "#94a3b8" }}>
             {session.user.email}
           </span>

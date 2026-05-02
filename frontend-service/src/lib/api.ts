@@ -5,6 +5,7 @@ const SERVICE_URLS: Record<string, string> = {
   orders:   process.env.ORDERS_SERVICE_URL   ?? "http://localhost:8082",
   reviews:  process.env.REVIEWS_SERVICE_URL  ?? "http://localhost:8083",
   users:    process.env.USERS_SERVICE_URL    ?? "http://localhost:8085",
+  cart:     process.env.CART_SERVICE_URL     ?? "http://localhost:8086",
 };
 
 /**
