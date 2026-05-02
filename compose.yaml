@@ -92,7 +92,7 @@ services:
   # KRaft mode — no Zookeeper. Single-node dev broker.
   # Advertised on localhost:9092 so JARs running on the host can connect directly.
   kafka:
-    image: apache/kafka:3.9
+    image: apache/kafka:4.1.2
     profiles: [infra]
     ports:
       - "9092:9092"
