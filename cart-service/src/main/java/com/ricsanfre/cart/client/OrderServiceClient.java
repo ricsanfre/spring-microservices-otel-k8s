@@ -1,5 +1,6 @@
 package com.ricsanfre.cart.client;
 
+import org.springframework.security.oauth2.client.annotation.ClientRegistrationId;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.service.annotation.HttpExchange;
 import org.springframework.web.service.annotation.PostExchange;
@@ -14,6 +15,7 @@ import java.util.UUID;
  *
  * <p>Uses Client Credentials with scope {@code orders:write}.
  */
+@ClientRegistrationId("order-service")
 @HttpExchange("/api/v1")
 public interface OrderServiceClient {
 

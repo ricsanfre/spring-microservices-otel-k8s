@@ -309,7 +309,10 @@ Use Spring 6 **HTTP Interfaces** (`@HttpExchange`) for all synchronous service-t
 
 ### Interface definition
 
+Annotate the interface with `@ClientRegistrationId` (matching the OAuth2 registration ID from `application.yaml`) so the framework knows which token to fetch:
+
 ```java
+@ClientRegistrationId("order-service")   // matches spring.security.oauth2.client.registration.order-service
 @HttpExchange("/api/v1")
 public interface OrderServiceClient {
 
@@ -321,36 +324,30 @@ public interface OrderServiceClient {
 }
 ```
 
-### Bean configuration (with plain K8s DNS + OAuth2 token)
+### Bean configuration — fully declarative with @ImportHttpServices
+
+Spring Boot 4 eliminates the `HttpServiceProxyFactory` boilerplate. Declare each client interface as a service group and register a single `OAuth2RestClientHttpServiceGroupConfigurer` bean:
 
 ```java
 @Configuration
+@ImportHttpServices(group = "order-service", types = OrderServiceClient.class)
 public class HttpClientConfig {
 
     @Bean
-    public OrderServiceClient orderServiceClient(
-            RestClient.Builder builder,
+    OAuth2RestClientHttpServiceGroupConfigurer oauth2Configurer(
             OAuth2AuthorizedClientManager authorizedClientManager) {
-
-        RestClient restClient = builder
-            .baseUrl("http://order-service:8082")
-            .requestInterceptor(new OAuth2ClientHttpRequestInterceptor(authorizedClientManager))
-            .build();
-
-        HttpServiceProxyFactory factory = HttpServiceProxyFactory
-            .builderFor(RestClientAdapter.create(restClient))
-            .build();
-
-        return factory.createClient(OrderServiceClient.class);
+        return OAuth2RestClientHttpServiceGroupConfigurer.from(authorizedClientManager);
     }
 }
 ```
 
+The base URL is configured in `application.yaml` under `spring.http.serviceclient.<group>.base-url` (see Step 4 below).
+
 Key rules:
 - Use **plain Kubernetes Service DNS** `http://service-name:port` — kube-proxy handles server-side load balancing. No `spring-cloud-starter-kubernetes-client-loadbalancer`, no Eureka, no RBAC permissions to the Kubernetes API. See [adr-002-plain-kubernetes-dns-service-calls.md](adr-002-plain-kubernetes-dns-service-calls.md).
-- Inject an `OAuth2ClientHttpRequestInterceptor` to attach a Client Credentials token on every request
+- `@ClientRegistrationId` on the interface selects the OAuth2 Client Credentials registration; `OAuth2RestClientHttpServiceGroupConfigurer` processes it and injects the bearer token automatically.
 - Use `RestClient` (not `RestTemplate` or `WebClient`) — it is the preferred synchronous client in Spring Boot 4
-- For local development, set the base URL via an environment-specific property (e.g., `services.order-service.url: http://localhost:8082`)
+- Base URLs are set via `spring.http.serviceclient.<group>.base-url` and populated from env vars (`USER_SERVICE_URL`, etc.) with a localhost default for local development
 
 ---
 
@@ -781,35 +778,27 @@ public class UserIdResolverService {
 }
 ```
 
-#### Step 3 — Wire the RestClient + OAuth2 token + Caffeine cache
+#### Step 3 — Wire @ImportHttpServices + OAuth2 + Caffeine cache
 
-Create a `config/HttpClientConfig.java` (annotated `@EnableCaching` here so each service only needs it in one place):
+Add `@ClientRegistrationId` to the interface (see Section 5), then create a `config/HttpClientConfig.java`
+(annotated `@EnableCaching` here so each service only needs it in one place):
 
 ```java
 @Configuration
 @EnableCaching
+@ImportHttpServices(group = "user-service", types = UserServiceClient.class)
 public class HttpClientConfig {
 
+    // Processes @ClientRegistrationId and injects Client Credentials tokens
     @Bean
-    public UserServiceClient userServiceClient(
-            RestClient.Builder builder,
-            OAuth2AuthorizedClientManager authorizedClientManager,
-            @Value("${services.user-service.url:http://localhost:8085}") String userServiceUrl) {
-
-        RestClient restClient = builder
-                .baseUrl(userServiceUrl)
-                .requestInterceptor(new OAuth2ClientHttpRequestInterceptor(authorizedClientManager))
-                .build();
-
-        return HttpServiceProxyFactory
-                .builderFor(RestClientAdapter.create(restClient))
-                .build()
-                .createClient(UserServiceClient.class);
+    OAuth2RestClientHttpServiceGroupConfigurer oauth2Configurer(
+            OAuth2AuthorizedClientManager authorizedClientManager) {
+        return OAuth2RestClientHttpServiceGroupConfigurer.from(authorizedClientManager);
     }
 
     @Bean
-    public CacheManager cacheManager(
-            @Value("${cart.user-resolver.cache-ttl-minutes:10}") long ttlMinutes) {
+    CacheManager cacheManager(
+            @Value("${<service>.user-resolver.cache-ttl-minutes:10}") long ttlMinutes) {
         CaffeineCacheManager manager = new CaffeineCacheManager("userIdBySubject");
         manager.setCaffeine(
                 Caffeine.newBuilder().expireAfterWrite(ttlMinutes, TimeUnit.MINUTES));
@@ -818,7 +807,7 @@ public class HttpClientConfig {
 }
 ```
 
-> **Rename the `@Value` key** to match the service name (e.g. `orders.user-resolver.cache-ttl-minutes`).
+> **Rename the `@Value` key** prefix to match the service name (e.g. `cart.user-resolver.cache-ttl-minutes`).
 
 #### Step 4 — `application.yaml` additions
 
@@ -837,10 +826,11 @@ spring:
           user-service:
             token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
 
-# Downstream service URLs (override per env)
-services:
-  user-service:
-    url: ${USER_SERVICE_URL:http://localhost:8085}
+  # HTTP service client groups — base URL for @ImportHttpServices proxy
+  http:
+    serviceclient:
+      user-service:
+        base-url: ${USER_SERVICE_URL:http://localhost:8085}
 
 # Resilience4j — circuit breaker / retry / timeout for user-service
 resilience4j:
@@ -1839,9 +1829,9 @@ When adding a new microservice, ensure all of the following are in place before 
 - [ ] `spring-boot-starter-oauth2-client`, `spring-cloud-starter-circuitbreaker-resilience4j`, `spring-boot-starter-cache`, `caffeine` in `pom.xml`
 - [ ] `UserServiceClient` HTTP Interface in `client/` package
 - [ ] `UserIdResolverService` with `@Cacheable("userIdBySubject")` + `@CircuitBreaker(name = "user-service")` in `service/` package
-- [ ] `HttpClientConfig` with `@EnableCaching`, `UserServiceClient` bean (RestClient + `OAuth2ClientHttpRequestInterceptor`), `CaffeineCacheManager` for `userIdBySubject`
+- [ ] `HttpClientConfig` with `@EnableCaching`, `@ImportHttpServices(group="user-service", types=UserServiceClient.class)`, `OAuth2RestClientHttpServiceGroupConfigurer` bean, `CaffeineCacheManager` for `userIdBySubject`
 - [ ] `spring.security.oauth2.client.registration.user-service` with `grant-type: client_credentials`, `scope: users:resolve`
-- [ ] `services.user-service.url` property (default `http://localhost:8085`)
+- [ ] `spring.http.serviceclient.user-service.base-url` property referencing `${USER_SERVICE_URL:http://localhost:8085}`
 - [ ] Resilience4j `user-service` circuit breaker / retry / timelimiter in `application.yaml`
 - [ ] Controller calls `userIdResolverService.resolveInternalId(JwtUtils.getSubject(auth))` — never uses JWT `sub` as a storage key directly
 

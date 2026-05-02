@@ -10,65 +10,38 @@ import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
-import org.springframework.security.oauth2.client.web.client.OAuth2ClientHttpRequestInterceptor;
-import org.springframework.web.client.RestClient;
-import org.springframework.web.client.support.RestClientAdapter;
-import org.springframework.web.service.invoker.HttpServiceProxyFactory;
+import org.springframework.security.oauth2.client.web.client.support.OAuth2RestClientHttpServiceGroupConfigurer;
+import org.springframework.web.service.registry.ImportHttpServices;
 
 import java.util.concurrent.TimeUnit;
 
 /**
  * HTTP client configuration for service-to-service calls.
  *
- * <p>Configures a {@link UserServiceClient} RestClient bean that attaches a Client Credentials
- * OAuth2 token (via {@link OAuth2ClientHttpRequestInterceptor}) on every outbound request to
- * {@code user-service}.
+ * <p>Registers {@link UserServiceClient} and {@link ProductServiceClient} as Spring beans via
+ * {@link ImportHttpServices}. Base URLs are configured via
+ * {@code spring.http.serviceclient.<group>.base-url} in {@code application.yaml}.
+ * OAuth2 Client Credentials tokens are attached automatically by
+ * {@link OAuth2RestClientHttpServiceGroupConfigurer}, which processes the
+ * {@code @ClientRegistrationId} annotation on each interface.
  *
  * <p>Also enables and configures the Caffeine-backed {@link CacheManager} used by
  * {@link com.ricsanfre.order.service.UserIdResolverService} to cache sub → userId mappings.
  */
 @Configuration
 @EnableCaching
+@ImportHttpServices(group = "user-service", types = UserServiceClient.class)
+@ImportHttpServices(group = "product-service", types = ProductServiceClient.class)
 public class HttpClientConfig {
 
     @Bean
-    public UserServiceClient userServiceClient(
-            RestClient.Builder builder,
-            OAuth2AuthorizedClientManager authorizedClientManager,
-            @Value("${services.user-service.url:http://localhost:8085}") String userServiceUrl) {
-
-        RestClient restClient = builder
-                .baseUrl(userServiceUrl)
-                .requestInterceptor(new OAuth2ClientHttpRequestInterceptor(authorizedClientManager))
-                .build();
-
-        HttpServiceProxyFactory factory = HttpServiceProxyFactory
-                .builderFor(RestClientAdapter.create(restClient))
-                .build();
-
-        return factory.createClient(UserServiceClient.class);
+    OAuth2RestClientHttpServiceGroupConfigurer oauth2Configurer(
+            OAuth2AuthorizedClientManager authorizedClientManager) {
+        return OAuth2RestClientHttpServiceGroupConfigurer.from(authorizedClientManager);
     }
 
     @Bean
-    public ProductServiceClient productServiceClient(
-            RestClient.Builder builder,
-            OAuth2AuthorizedClientManager authorizedClientManager,
-            @Value("${services.product-service.url:http://localhost:8083}") String productServiceUrl) {
-
-        RestClient restClient = builder
-                .baseUrl(productServiceUrl)
-                .requestInterceptor(new OAuth2ClientHttpRequestInterceptor(authorizedClientManager))
-                .build();
-
-        HttpServiceProxyFactory factory = HttpServiceProxyFactory
-                .builderFor(RestClientAdapter.create(restClient))
-                .build();
-
-        return factory.createClient(ProductServiceClient.class);
-    }
-
-    @Bean
-    public CacheManager cacheManager(
+    CacheManager cacheManager(
             @Value("${order.user-resolver.cache-ttl-minutes:10}") long ttlMinutes) {
         CaffeineCacheManager manager = new CaffeineCacheManager("userIdBySubject");
         manager.setCaffeine(Caffeine.newBuilder().expireAfterWrite(ttlMinutes, TimeUnit.MINUTES));

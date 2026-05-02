@@ -56,15 +56,16 @@ spring:
     virtual:
       enabled: true
 
+  # HTTP service client groups — base URLs for @ImportHttpServices proxies
+  http:
+    serviceclient:
+      user-service:
+        base-url: ${USER_SERVICE_URL:http://localhost:8085}
+      product-service:
+        base-url: ${PRODUCT_SERVICE_URL:http://localhost:8083}
+
 server:
   port: 8082
-
-# Downstream service URLs
-services:
-  user-service:
-    url: ${USER_SERVICE_URL:http://localhost:8085}
-  product-service:
-    url: ${PRODUCT_SERVICE_URL:http://localhost:8083}
 
 # Resilience4j — circuit breaker for user-service calls
 resilience4j:
