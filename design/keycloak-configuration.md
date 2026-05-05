@@ -83,6 +83,8 @@ flowchart TD
         C3 -->|owns service account| U4
         U1 -->|assigned role| CR_C
         U2 -->|assigned role| CR_C
+        U3 -->|assigned role: orders:write| CR_O
+        U4 -->|assigned role: products:write| CR_P
     end
 
     Browser["Browser"]
@@ -152,10 +154,6 @@ See [ADR-006 — Scope-Based Authorization](adr-006-scope-based-authorization.md
 | `reviews:write` | Submit and edit reviews | `e-commerce-web` (optional) |
 | `users:read` | Read own user profile | `e-commerce-web` (optional) |
 | `users:resolve` | Resolve IDP subject → internal user ID (M2M only) | `order-service`, `reviews-service`, `cart-service` (default) |
-| `orders:write` | Place and confirm orders (M2M: cart-service → order-service) | `e-commerce-web` (optional), `cart-service` (default) |
-| `products:write` | Create/update products; reserve stock (M2M: order-service → product-service) | `e-commerce-web` (optional), `order-service` (default) |
-| `orders:read` | Read orders (M2M: reviews-service → order-service) | `e-commerce-web` (optional), `reviews-service` (default) |
-| `products:read` | Read product catalog (M2M: reviews-service → product-service) | `e-commerce-web` (optional), `reviews-service` (default) |
 | `notifications:receive` | Receive notification events | `e-commerce-web` (optional) |
 | `cart:read` | Read own shopping cart | `e-commerce-web` (optional) |
 | `cart:write` | Add, update, and remove items in own shopping cart | `e-commerce-web` (optional) |
@@ -303,18 +301,28 @@ All the scopes it needs must be included in the `scope` parameter of the authori
 
 ### Per-Service Clients — Confidential M2M Clients
 
-Each service has its own Keycloak client for the Client Credentials grant. The `defaultClientScopes`
-on each client determine which scopes are automatically included in the service account token —
-limited to exactly what that service needs to call downstream services.
+Each service has its own Keycloak client for the Client Credentials grant.
 
-| Client ID | `serviceAccountsEnabled` | `defaultClientScopes` | Calls |
-|-----------|--------------------------|----------------------|-------|
-| `product-service` | `true` | *(none — no outbound HTTP calls)* | — |
-| `order-service` | `true` | `users:resolve`, `products:write` | user-service, product-service |
-| `reviews-service` | `true` | `users:resolve`, `products:read`, `orders:read` | user-service, product-service, order-service |
-| `user-service` | `true` | *(none — no outbound HTTP calls)* | — |
-| `notification-service` | `false` | *(none — Kafka consumer only)* | — |
-| `cart-service` | `true` | `users:resolve`, `orders:write` | user-service, order-service |
+> **How scopes appear in service-account tokens:** A scope is included in a Client Credentials token
+> only when **both** conditions are met:
+> 1. The scope is listed in `defaultClientScopes` (or explicitly requested in the `scope` parameter).
+> 2. The service-account user for that client has the matching **client role** on `e-commerce-web`
+>    (enforced via `clientScopeMappings`). Without the role assignment the scope is stripped from the
+>    token even if it is in `defaultClientScopes`.
+>
+> `users:resolve` is granted unconditionally to the listed clients via `defaultClientScopes` (no
+> `clientScopeMappings` guard). The write scopes (`orders:write`, `products:write`) require an
+> explicit role assignment on the service-account user — these are persisted in the realm JSON
+> (see [Service account role assignments](#service-account-role-assignments) below).
+
+| Client ID | `serviceAccountsEnabled` | `defaultClientScopes` | Service-account role on `e-commerce-web` | Calls |
+|-----------|--------------------------|----------------------|------------------------------------------|-------|
+| `product-service` | `true` | *(none)* | *(none)* | — |
+| `order-service` | `true` | `users:resolve`, `products:write` | `products:write` | user-service, product-service |
+| `reviews-service` | `true` | `users:resolve`, `products:read`, `orders:read` | *(none — read scopes have no guard)* | user-service, product-service, order-service |
+| `user-service` | `true` | *(none)* | *(none)* | — |
+| `notification-service` | `false` | *(none — Kafka consumer only)* | *(none)* | — |
+| `cart-service` | `true` | `users:resolve`, `orders:write` | `orders:write` | user-service, order-service |
 
 Each client follows this pattern (example: `cart-service`):
 
@@ -399,22 +407,45 @@ explicitly requested by the client: `products:read orders:read orders:write revi
 A second test customer account. Assigned the `customer` client role on `e-commerce-web`.
 Useful for testing cross-user isolation (e.g., verifying that `otheruser` cannot read `testuser`'s orders).
 
-### Per-service service accounts *(Keycloak internal)*
+### Per-service service accounts
 
 Keycloak automatically creates a service account user for each client with `serviceAccountsEnabled: true`.
-These are internal users, not real humans. They are **not** listed in the realm JSON —
-Keycloak creates them on first startup.
+These are internal Keycloak users, not real humans.
 
-| Service account username | Created for |
-|--------------------------|-------------|
-| `service-account-product-service` | `product-service` client |
-| `service-account-order-service` | `order-service` client |
-| `service-account-reviews-service` | `reviews-service` client |
-| `service-account-user-service` | `user-service` client |
-| `service-account-cart-service` | `cart-service` client |
+| Service account username | Created for | In realm JSON? |
+|--------------------------|-------------|----------------|
+| `service-account-product-service` | `product-service` client | No — auto-created, no role assignment needed |
+| `service-account-order-service` | `order-service` client | **Yes** — explicit entry to assign `products:write` role |
+| `service-account-reviews-service` | `reviews-service` client | No — auto-created, read scopes need no role assignment |
+| `service-account-user-service` | `user-service` client | No — auto-created, no role assignment needed |
+| `service-account-cart-service` | `cart-service` client | **Yes** — explicit entry to assign `orders:write` role |
 
 The JWT issued via Client Credentials grant has `preferred_username: service-account-<client-id>`
-and carries only the `defaultClientScopes` defined on that client.
+and carries only the scopes in `defaultClientScopes` that pass the `clientScopeMappings` role check.
+
+#### Service account role assignments
+
+Because `clientScopeMappings` requires the service-account user to have the matching client role,
+`cart-service` and `order-service` service accounts are listed **explicitly** in the realm JSON
+(`docker/keycloak/realm-e-commerce.json`) so their roles are assigned on import:
+
+```json
+{
+  "username": "service-account-cart-service",
+  "enabled": true,
+  "serviceAccountClientId": "cart-service",
+  "clientRoles": { "e-commerce-web": ["orders:write"] }
+},
+{
+  "username": "service-account-order-service",
+  "enabled": true,
+  "serviceAccountClientId": "order-service",
+  "clientRoles": { "e-commerce-web": ["products:write"] }
+}
+```
+
+> **Re-import required:** changes to these entries only take effect after `make infra-clean && make infra-min-up`.
+> While the Keycloak data volume exists the realm JSON is not re-read.
 
 ---
 

@@ -22,7 +22,7 @@ public interface OrderServiceClient {
     @PostExchange("/orders")
     OrderResponse createOrder(@RequestBody CreateOrderRequest request);
 
-    record CreateOrderRequest(List<OrderItemRequest> items) {}
+    record CreateOrderRequest(UUID userId, List<OrderItemRequest> items) {}
 
     record OrderItemRequest(String productId, int quantity, double unitPrice) {}
 

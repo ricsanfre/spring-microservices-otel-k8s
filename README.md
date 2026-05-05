@@ -253,6 +253,8 @@ Manages the full order lifecycle. Orders are created as `PENDING` previews and t
 
 **Kafka event published:** `order.confirmed.v1` (on `/confirm`) — see [Kafka Events](#kafka-events).
 
+**M2M `userId` passthrough:** `POST /api/v1/orders` is called both by end-users (browser → frontend) and by `cart-service` (Client Credentials). End-user tokens are resolved via `user-service`; service-account tokens have no corresponding user row. When called with a service-account token, the caller **must** supply a `userId` UUID in the request body — `cart-service` pre-resolves the real user's UUID and passes it through.
+
 ---
 
 ### reviews-service · port 8083 · MongoDB
@@ -591,7 +593,7 @@ For local development without Kubernetes, all infrastructure runs via Docker Com
 
 > **Profiles:** `infra` starts the shared databases (PostgreSQL + MongoDB + Valkey); `auth` starts Keycloak; `observability` starts the Grafana LGTM stack. All three are started together via `make infra-up`.
 
-> **Keycloak realm auto-import:** `docker/keycloak/realm-e-commerce.json` is volume-mounted into Keycloak's import directory. On first start Keycloak creates realm `e-commerce` with client scopes, clients, and test users automatically — no manual Admin Console steps required.
+> **Keycloak realm auto-import:** `docker/keycloak/realm-e-commerce.json` is volume-mounted into Keycloak's import directory. On first start Keycloak creates realm `e-commerce` with client scopes, clients, test users, and service-account role assignments automatically — no manual Admin Console steps required. **Important:** changes to the realm JSON only take effect after `make infra-clean && make infra-min-up` — the import is skipped when the data volume already exists.
 
 > **Database-per-service isolation:** Each service connects to its own named database within the shared PostgreSQL (or MongoDB) instance using dedicated credentials. The `docker/postgres/init-databases.sh` init script creates all databases and users on first container start. This preserves the database-per-service isolation principle while avoiding the overhead of multiple container instances.
 

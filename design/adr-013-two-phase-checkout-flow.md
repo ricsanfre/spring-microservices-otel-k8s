@@ -32,8 +32,9 @@ Implement checkout as **two explicit phases** separated by a user confirmation s
 
 - **Caller:** browser → Envoy Gateway → `cart-service`
 - **Actor:** `cart-service`
-- Reads the current cart for the authenticated user (resolved from JWT `sub` via user-service).
+- Reads the current cart for the authenticated user (resolved from JWT `sub` via user-service → internal `userId`).
 - Calls `POST /api/v1/orders` on `order-service` using a Client Credentials token (`cart-service` Keycloak client, scope `orders:write`).
+  - The request body includes the `userId` UUID already resolved by `cart-service`. This is required because the token is a service-account (machine identity) token — its `sub` is the Keycloak client UUID, not a real user. `order-service` detects the 404 from user-service when trying to resolve the `sub` and falls back to `userId` from the request body.
 - `order-service` creates the order with status **`PENDING`** (no stock reservation yet).
 - Returns the `OrderResponse` (with `id`, `status: PENDING`, `totalAmount`, `items`) to the browser.
 - **Cart is NOT cleared** at this point.
@@ -76,7 +77,8 @@ sequenceDiagram
     EG->>CS: POST /cart/checkout
     CS->>KC: POST /token (client_credentials, scope: orders:write)
     KC-->>CS: service account JWT
-    CS->>OS: POST /api/v1/orders (service JWT + cart items)
+    CS->>OS: POST /api/v1/orders (service JWT + cart items + userId)
+    OS-->>OS: resolve userId from body (service-account sub has no user row)
     OS-->>OS: create Order{status=PENDING}
     OS-->>CS: 201 OrderResponse{id, status:PENDING, totalAmount, items}
     CS-->>EG: 201 OrderResponse
@@ -135,12 +137,17 @@ sequenceDiagram
 
 ## Keycloak Scope Configuration
 
-Each service uses its own Keycloak client for M2M calls. The required `defaultClientScopes` per client are:
+Each service uses its own Keycloak client for M2M calls. A scope appears in a Client Credentials token only when **two conditions** are both satisfied:
+1. The scope is in the `defaultClientScopes` for that client (or explicitly requested in the `scope` parameter).
+2. The service-account user for that client has the matching **client role** on `e-commerce-web` (enforced via `clientScopeMappings`).
 
-| Keycloak Client | `defaultClientScopes` | Calls |
-|---|---|---|
-| `cart-service` | `users:resolve`, `orders:write` | user-service (resolve), order-service (create PENDING order) |
-| `order-service` | `users:resolve`, `products:write` | user-service (resolve), product-service (stock reserve) |
+| Keycloak Client | Required client role on `e-commerce-web` | Scope it enables | Calls |
+|---|---|---|---|
+| `cart-service` | `orders:write` | `orders:write` | order-service (create PENDING order) |
+| `order-service` | `products:write` | `products:write` | product-service (stock reserve) |
+| `cart-service`, `order-service` | _(via `defaultClientScopes`)_ | `users:resolve` | user-service (resolve) |
+
+The service-account role assignments are persisted in `docker/keycloak/realm-e-commerce.json` under the `users` array as entries with `serviceAccountClientId` and `clientRoles`. They are applied on the **first** Keycloak container start. Run `make infra-clean && make infra-min-up` to re-apply after changing the JSON.
 
 See [design/keycloak-configuration.md](keycloak-configuration.md) for the full scope catalogue.
 

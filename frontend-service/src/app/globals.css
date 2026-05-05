@@ -471,3 +471,73 @@ th {
   color: #16a34a;
   margin-top: 0.5rem;
 }
+
+/* ── Cart / checkout actions ─────────────────── */
+.cart-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.btn-continue-shopping {
+  display: inline-block;
+  padding: 0.55rem 1.25rem;
+  background: #f1f5f9;
+  color: #1e293b;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.375rem;
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.btn-continue-shopping:hover {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.btn-checkout {
+  padding: 0.55rem 1.5rem;
+  background: #0ea5e9;
+  color: white;
+  border: none;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-checkout:hover:not(:disabled) {
+  background: #0284c7;
+}
+
+.btn-checkout:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-confirm-order {
+  padding: 0.55rem 1.5rem;
+  background: #16a34a;
+  color: white;
+  border: none;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-confirm-order:hover:not(:disabled) {
+  background: #15803d;
+}
+
+.btn-confirm-order:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

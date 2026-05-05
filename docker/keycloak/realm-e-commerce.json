@@ -584,6 +584,26 @@
           "customer"
         ]
       }
+    },
+    {
+      "username": "service-account-cart-service",
+      "enabled": true,
+      "serviceAccountClientId": "cart-service",
+      "clientRoles": {
+        "e-commerce-web": [
+          "orders:write"
+        ]
+      }
+    },
+    {
+      "username": "service-account-order-service",
+      "enabled": true,
+      "serviceAccountClientId": "order-service",
+      "clientRoles": {
+        "e-commerce-web": [
+          "products:write"
+        ]
+      }
     }
   ]
 }

@@ -62,7 +62,7 @@ spring:
       user-service:
         base-url: ${USER_SERVICE_URL:http://localhost:8085}
       product-service:
-        base-url: ${PRODUCT_SERVICE_URL:http://localhost:8083}
+        base-url: ${PRODUCT_SERVICE_URL:http://localhost:8081}
 
 server:
   port: 8082

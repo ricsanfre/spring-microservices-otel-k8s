@@ -123,8 +123,14 @@ Exclude OAuth2 auto-configs and provide a `@TestConfiguration` with `@EnableWebS
 ### HTTP Clients (service-to-service)
 Use Spring 6 HTTP Interfaces (`@HttpExchange`) + `RestClient` with `OAuth2ClientHttpRequestInterceptor`. Plain Kubernetes DNS `http://service-name:port`. Never Feign, never Spring Cloud LoadBalancer, never Eureka.
 
+**MANDATORY:** Always declare an explicit `AuthorizedClientServiceOAuth2AuthorizedClientManager` bean in `HttpClientConfig`. The auto-configured `DefaultOAuth2AuthorizedClientManager` requires an `HttpServletRequest` in the calling thread — Resilience4j circuit breakers run on a background thread pool and will throw `servletRequest cannot be null` (surfaced as `NoFallbackAvailableException`). Required imports: `AuthorizedClientServiceOAuth2AuthorizedClientManager`, `OAuth2AuthorizedClientService`, `ClientRegistrationRepository`.
+
 ### User Identity (ADR-004)
 Never use the Keycloak `sub` as a data key. Extract `sub` from JWT → call `GET /api/v1/users/resolve?idp_subject={sub}` on `user-service` → cache result with Caffeine (10-min TTL). Field name is `idp_subject` (not `keycloak_id`).
+
+**M2M exception:** Service-account `sub` values are machine identities — `user-service` returns 404 for them. For endpoints callable by both users and services, accept an optional `userId` field in the request body. Catch `ResourceNotFoundException` from the resolver and fall back to `request.getUserId()`; throw `BusinessRuleException` if it's null.
+
+**Keycloak `clientScopeMappings`:** A scope only appears in a token if (1) it was requested in the authorization request AND (2) the user/service-account has the matching client role on `e-commerce-web`. Service account role assignments live in `docker/keycloak/realm-e-commerce.json` under `users[].clientRoles`. Re-import requires `make infra-clean && make infra-min-up`.
 
 ### Lombok Rules
 - `@RequiredArgsConstructor` for constructor injection everywhere.
@@ -138,6 +144,8 @@ Never use the Keycloak `sub` as a data key. Extract `sub` from JWT → call `GET
 
 ### Security Pattern (every service)
 JWT RS256 from Keycloak. JWKS: `http://keycloak:8180/realms/e-commerce/protocol/openid-connect/certs`. Scopes: `products:read`, `orders:read/write`, `reviews:read/write`, `users:read`, `users:resolve`, `cart:read/write`. Default Spring Security converter maps `scope` claim → `SCOPE_` prefix authorities. No custom converter needed.
+
+**`requestMatchers` ordering:** `anyRequest()` must be last. Any endpoint that requires a scope different from the catch-all (e.g. an M2M-only write endpoint when the catch-all is `products:read`) needs an explicit `requestMatchers(HttpMethod.POST, "/path").hasAuthority("SCOPE_...:write")` before `anyRequest()`. Without it the filter chain returns 403 and `@PreAuthorize` is never reached.
 
 ### Observability (every service)
 `spring-boot-starter-opentelemetry` + `opentelemetry-logback-appender-1.0:2.21.0-alpha`. Add `InstallOpenTelemetryAppender implements InitializingBean` + `logback-spring.xml` with `CONSOLE` + `OTEL` appenders. OTLP HTTP endpoint: `${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}`.

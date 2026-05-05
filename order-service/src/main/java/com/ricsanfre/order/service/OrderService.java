@@ -42,8 +42,7 @@ public class OrderService {
     // ── Create ────────────────────────────────────────────────────────────────
 
     public OrderResponse createOrder(CreateOrderRequest request, Authentication auth) {
-        String idpSubject = JwtUtils.getSubject(auth);
-        UUID userId = userIdResolverService.resolveInternalId(idpSubject);
+        UUID userId = resolveUserId(request, auth);
 
         List<OrderItem> items = request.getItems().stream()
                 .map(i -> OrderItem.builder()
@@ -143,6 +142,30 @@ public class OrderService {
     private Order findOrderById(UUID id) {
         return orderRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Order", id));
+    }
+
+    /**
+     * Resolves the internal user UUID for the order being created.
+     *
+     * <p>For end-user JWT requests: extracts the {@code sub} claim and resolves via user-service
+     * (per ADR-004). For M2M service-account requests (e.g. cart-service using Client Credentials),
+     * the sub does not map to a real user, so the caller must supply {@code userId} in the request body.
+     */
+    private UUID resolveUserId(CreateOrderRequest request, Authentication auth) {
+        String idpSubject = JwtUtils.getSubject(auth);
+        try {
+            return userIdResolverService.resolveInternalId(idpSubject);
+        } catch (ResourceNotFoundException e) {
+            // Service account token — sub is a machine identity, not a real user.
+            // The caller (e.g. cart-service) must provide the userId in the request body.
+            UUID userId = request.getUserId();
+            if (userId == null) {
+                throw new BusinessRuleException(
+                        "M2M caller must supply userId in the request body (sub " + idpSubject + " is not a user)");
+            }
+            log.debug("M2M caller sub={} resolved userId from request body: {}", idpSubject, userId);
+            return userId;
+        }
     }
 
     /**

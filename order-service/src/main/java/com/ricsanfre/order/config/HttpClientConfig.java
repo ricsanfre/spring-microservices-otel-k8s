@@ -9,7 +9,10 @@ import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.oauth2.client.AuthorizedClientServiceOAuth2AuthorizedClientManager;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.web.client.support.OAuth2RestClientHttpServiceGroupConfigurer;
 import org.springframework.web.service.registry.ImportHttpServices;
 
@@ -33,6 +36,22 @@ import java.util.concurrent.TimeUnit;
 @ImportHttpServices(group = "user-service", types = UserServiceClient.class)
 @ImportHttpServices(group = "product-service", types = ProductServiceClient.class)
 public class HttpClientConfig {
+
+    /**
+     * Use AuthorizedClientServiceOAuth2AuthorizedClientManager instead of the default
+     * DefaultOAuth2AuthorizedClientManager. The default implementation requires an
+     * HttpServletRequest in the current thread, which is not available when Resilience4J
+     * executes the HTTP call inside a FutureTask on its own thread pool.
+     * AuthorizedClientServiceOAuth2AuthorizedClientManager works without a servlet request
+     * and is the correct choice for client_credentials flows in background threads.
+     */
+    @Bean
+    OAuth2AuthorizedClientManager authorizedClientManager(
+            ClientRegistrationRepository clientRegistrationRepository,
+            OAuth2AuthorizedClientService authorizedClientService) {
+        return new AuthorizedClientServiceOAuth2AuthorizedClientManager(
+                clientRegistrationRepository, authorizedClientService);
+    }
 
     @Bean
     OAuth2RestClientHttpServiceGroupConfigurer oauth2Configurer(

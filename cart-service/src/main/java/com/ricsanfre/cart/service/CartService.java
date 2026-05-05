@@ -95,7 +95,7 @@ public class CartService {
                 .toList();
 
         log.info("Initiating checkout for userId={} with {} items", userId, items.size());
-        return orderServiceClient.createOrder(new OrderServiceClient.CreateOrderRequest(items));
+        return orderServiceClient.createOrder(new OrderServiceClient.CreateOrderRequest(userId, items));
     }
 
     // ── Mapping ──────────────────────────────────────────────────────────────

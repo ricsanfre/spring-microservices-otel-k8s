@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { CartActions } from "./CartActions";
+import { CheckoutButton } from "./CheckoutButton";
 
 interface CartItem {
   productId: string;
@@ -87,6 +89,13 @@ export default async function CartPage() {
             <span className="cart-grand-total">
               Grand total: <strong>${cart!.grandTotal.toFixed(2)}</strong>
             </span>
+          </div>
+
+          <div className="cart-actions">
+            <Link href="/products" className="btn-continue-shopping">
+              ← Continue Shopping
+            </Link>
+            <CheckoutButton />
           </div>
         </>
       )}

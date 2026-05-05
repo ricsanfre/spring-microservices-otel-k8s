@@ -26,6 +26,8 @@ public class SecurityConfig {
                 .requestMatchers("/api-docs/**", "/swagger-ui/**").permitAll()
                 // Product browsing is public — no token required for read-only catalog access
                 .requestMatchers(HttpMethod.GET, "/api/v1/products", "/api/v1/products/**").permitAll()
+                // Stock reservation is an internal M2M call — requires products:write, not products:read
+                .requestMatchers(HttpMethod.POST, "/api/v1/products/stock/reserve").hasAuthority("SCOPE_products:write")
                 .anyRequest().hasAuthority("SCOPE_products:read")
             )
             // Spring Security default: reads 'scope'/'scp' claim → SCOPE_ prefix authorities.

@@ -343,6 +343,30 @@ public class HttpClientConfig {
 
 The base URL is configured in `application.yaml` under `spring.http.serviceclient.<group>.base-url` (see Step 4 below).
 
+> ⚠️ **Critical: always declare an explicit `AuthorizedClientServiceOAuth2AuthorizedClientManager` bean**
+>
+> Spring Boot's auto-configured `DefaultOAuth2AuthorizedClientManager` requires an `HttpServletRequest`
+> in the calling thread at the time the access token is fetched. Resilience4j executes circuit-breaker
+> calls on its own `FutureTask` thread pool — there is no servlet context on that thread.
+> **Symptoms:** `servletRequest cannot be null` wrapped inside a `NoFallbackAvailableException` with
+> the circuit breaker OPEN after the first attempt.
+>
+> **Fix:** Declare this bean explicitly in every `HttpClientConfig` that performs Client Credentials
+> token fetches — it stores/retrieves tokens in `OAuth2AuthorizedClientService` (in-memory), not in
+> the HTTP session:
+>
+> ```java
+> @Bean
+> OAuth2AuthorizedClientManager authorizedClientManager(
+>         ClientRegistrationRepository clientRegistrationRepository,
+>         OAuth2AuthorizedClientService authorizedClientService) {
+>     return new AuthorizedClientServiceOAuth2AuthorizedClientManager(
+>             clientRegistrationRepository, authorizedClientService);
+> }
+> ```
+>
+> Required import: `org.springframework.security.oauth2.client.AuthorizedClientServiceOAuth2AuthorizedClientManager`.
+
 Key rules:
 - Use **plain Kubernetes Service DNS** `http://service-name:port` — kube-proxy handles server-side load balancing. No `spring-cloud-starter-kubernetes-client-loadbalancer`, no Eureka, no RBAC permissions to the Kubernetes API. See [adr-002-plain-kubernetes-dns-service-calls.md](adr-002-plain-kubernetes-dns-service-calls.md).
 - `@ClientRegistrationId` on the interface selects the OAuth2 Client Credentials registration; `OAuth2RestClientHttpServiceGroupConfigurer` processes it and injects the bearer token automatically.
@@ -382,6 +406,18 @@ resilience4j:
 ```
 
 Define one named instance per downstream service the caller depends on.
+
+> ⚠️ **`NoFallbackAvailableException` wraps underlying HTTP errors**
+>
+> When a circuit breaker has no fallback (or the fallback itself throws), Resilience4j wraps the root
+> cause in `NoFallbackAvailableException`. Check `getCause()` / `getCause().getCause()` to find the
+> real exception. Common pattern:
+>
+> - `NoFallbackAvailableException` → `IllegalStateException: servletRequest cannot be null`
+>   → you used `DefaultOAuth2AuthorizedClientManager` instead of
+>   `AuthorizedClientServiceOAuth2AuthorizedClientManager` (see Section 5).
+> - `NoFallbackAvailableException` → `ConnectException` → wrong base URL or downstream service not
+>   started.
 
 ### Usage in service layer
 
@@ -681,6 +717,25 @@ public class SecurityConfig {
 
 Replace `<service-scope>:read` with the primary read scope for the service (e.g. `products:read`, `orders:read`, `users:read`).
 
+> ⚠️ **`anyRequest()` ordering — explicit matchers must come before the catch-all**
+>
+> `anyRequest()` is evaluated last and **wins over `@PreAuthorize`** on the controller method when
+> the HTTP security filter chain denies access first. If an endpoint requires a **different scope**
+> than the catch-all `anyRequest().hasAuthority("SCOPE_<service>:read")`, you must add an explicit
+> `requestMatchers(...)` line **before** `anyRequest()`:
+>
+> ```java
+> .authorizeHttpRequests(auth -> auth
+>     .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+>     // M2M-only endpoint — requires products:write, not products:read
+>     .requestMatchers(HttpMethod.POST, "/api/v1/products/stock/reserve").hasAuthority("SCOPE_products:write")
+>     .anyRequest().hasAuthority("SCOPE_products:read")   // ← catch-all last
+> )
+> ```
+>
+> Without the explicit matcher, a token that has `products:write` but NOT `products:read` receives a
+> 403 and `@PreAuthorize` on the controller is never reached.
+
 ### Scope-based method-level authorization
 
 Use `@PreAuthorize` with `hasAuthority('SCOPE_<scope>')` on endpoints that require specific scopes beyond the baseline:
@@ -722,6 +777,61 @@ spring:
 Never accept `userId` from the request body for user-scoped operations. Always resolve from the JWT.
 Never store the IAM `sub` as a data key — always resolve to the internal `users.id` UUID first
 (see [ADR-004](adr-004-iam-portability-user-service-isolation.md) and [iam-portability.md](iam-portability.md)).
+
+> ⚠️ **Exception: M2M (service-account) callers cannot be resolved via user-service**
+>
+> The JWT `sub` for a Client Credentials token is the Keycloak service-account UUID — a machine
+> identity with no corresponding row in `users`. Calling `user-service` resolve on a service-account
+> `sub` returns 404 (`ResourceNotFoundException`).
+>
+> For endpoints that must be called **both by end-users and by services** (e.g. `POST /api/v1/orders`),
+> the API should accept an **optional `userId` field** in the request body. The server logic falls back
+> to `request.getUserId()` when user-service resolution throws `ResourceNotFoundException`:
+>
+> ```java
+> private UUID resolveUserId(CreateOrderRequest request, Authentication auth) {
+>     String idpSubject = JwtUtils.getSubject(auth);
+>     try {
+>         return userIdResolverService.resolveInternalId(idpSubject);
+>     } catch (ResourceNotFoundException e) {
+>         // Service account token — sub is a machine identity, not a real user
+>         UUID userId = request.getUserId();
+>         if (userId == null) {
+>             throw new BusinessRuleException("M2M caller must supply userId in the request body");
+>         }
+>         return userId;
+>     }
+> }
+> ```
+>
+> The OpenAPI spec field description: `"Required when the request is made by a service account
+> (M2M Client Credentials token). Ignored when called by an end-user JWT."`
+
+### Keycloak `clientScopeMappings` — service accounts need explicit role assignments
+
+Keycloak only includes an optional scope in a token if:
+1. The scope was **explicitly requested** in the authorization request (`scope` parameter), AND
+2. The user / service account **has a client role** that `clientScopeMappings` maps to that scope.
+
+In this realm, `clientScopeMappings` ties each scope (e.g. `orders:write`) to the matching role
+on the `e-commerce-web` client. Service account tokens are produced by Keycloak on behalf of the
+service account user — that user must have the role assigned:
+
+| Service account | Required client role on `e-commerce-web` | Scope it enables |
+|-----------------|------------------------------------------|-----------------|
+| `service-account-cart-service` | `orders:write` | `orders:write` in M2M token |
+| `service-account-order-service` | `products:write` | `products:write` in M2M token |
+| `service-account-reviews-service` | `products:read`, `orders:read` | respective read scopes |
+
+These assignments are persisted in `docker/keycloak/realm-e-commerce.json` under the `users` array
+as entries with `serviceAccountClientId` and `clientRoles`. They are applied on the **first** Keycloak
+container start (or after `make infra-clean`). Changing the JSON has no effect while the Keycloak
+data volume exists — run `make infra-clean && make infra-min-up` to re-import.
+
+**Frontend scope requests (`auth.ts`):** A user's token also only includes a scope when the frontend
+explicitly requests it. If a scope is missing from the `scope` parameter in `auth.ts`, the user cannot
+call the corresponding endpoint even if their role grants it. Keep the scope list in `auth.ts` in sync
+with the scopes referenced by `@PreAuthorize` on endpoints the frontend calls.
 
 Resolution is a two-step process:
 1. Extract the `sub` from the JWT
