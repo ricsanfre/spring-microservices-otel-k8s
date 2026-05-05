@@ -1,5 +1,7 @@
 import Image from "next/image";
+import { auth } from "@/auth";
 import { publicFetch } from "@/lib/api";
+import { AddToCartButton } from "./AddToCartButton";
 
 interface Product {
   id: string;
@@ -17,6 +19,9 @@ interface PagedResponse {
 }
 
 export default async function ProductsPage() {
+  const session = await auth();
+  const isSignedIn = !!session?.accessToken;
+
   let products: Product[] = [];
   let error: string | null = null;
 
@@ -59,6 +64,13 @@ export default async function ProductsPage() {
             <p className="stock">
               {p.stockQty > 0 ? `${p.stockQty} in stock` : "Out of stock"}
             </p>
+            {isSignedIn && (
+              <AddToCartButton
+                productId={p.id}
+                productName={p.name}
+                price={p.price}
+              />
+            )}
           </div>
         ))}
       </div>

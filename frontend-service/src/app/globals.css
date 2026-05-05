@@ -287,6 +287,31 @@ th {
   margin-top: 0.25rem;
 }
 
+.add-to-cart-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.75rem;
+  padding: 0.4rem;
+  width: 2rem;
+  height: 2rem;
+  background: #1e293b;
+  color: #f8fafc;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.add-to-cart-btn:hover:not(:disabled) {
+  background: #0f172a;
+}
+
+.add-to-cart-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .status {
   display: inline-block;
   padding: 0.15rem 0.5rem;
