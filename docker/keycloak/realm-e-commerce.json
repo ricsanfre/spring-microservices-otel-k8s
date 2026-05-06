@@ -9,7 +9,7 @@
   "defaultSignatureAlgorithm": "RS256",
   "roles": {
     "client": {
-      "e-commerce-web": [
+      "product-service": [
         {
           "name": "products:read",
           "description": "Read product catalog"
@@ -17,7 +17,9 @@
         {
           "name": "products:write",
           "description": "Create and update products"
-        },
+        }
+      ],
+      "order-service": [
         {
           "name": "orders:read",
           "description": "Read own orders"
@@ -25,7 +27,9 @@
         {
           "name": "orders:write",
           "description": "Place and update orders"
-        },
+        }
+      ],
+      "reviews-service": [
         {
           "name": "reviews:read",
           "description": "Read product reviews"
@@ -33,15 +37,25 @@
         {
           "name": "reviews:write",
           "description": "Submit and edit reviews"
-        },
+        }
+      ],
+      "user-service": [
         {
           "name": "users:read",
           "description": "Read own user profile"
         },
         {
+          "name": "users:resolve",
+          "description": "Resolve an IDP subject to an internal user ID (service-to-service only)"
+        }
+      ],
+      "notification-service": [
+        {
           "name": "notifications:receive",
           "description": "Receive notification events"
-        },
+        }
+      ],
+      "cart-service": [
         {
           "name": "cart:read",
           "description": "Read own shopping cart"
@@ -49,23 +63,20 @@
         {
           "name": "cart:write",
           "description": "Add, update, and remove items in own shopping cart"
-        },
+        }
+      ],
+      "e-commerce-web": [
         {
           "name": "customer",
           "description": "Standard customer — read access to catalog + full order and review lifecycle",
           "composite": true,
           "composites": {
             "client": {
-              "e-commerce-web": [
-                "products:read",
-                "orders:read",
-                "orders:write",
-                "reviews:read",
-                "reviews:write",
-                "users:read",
-                "cart:read",
-                "cart:write"
-              ]
+              "product-service": ["products:read"],
+              "order-service": ["orders:read", "orders:write"],
+              "reviews-service": ["reviews:read", "reviews:write"],
+              "user-service": ["users:read"],
+              "cart-service": ["cart:read", "cart:write"]
             }
           }
         },
@@ -75,18 +86,12 @@
           "composite": true,
           "composites": {
             "client": {
-              "e-commerce-web": [
-                "products:read",
-                "products:write",
-                "orders:read",
-                "orders:write",
-                "reviews:read",
-                "reviews:write",
-                "users:read",
-                "notifications:receive",
-                "cart:read",
-                "cart:write"
-              ]
+              "product-service": ["products:read", "products:write"],
+              "order-service": ["orders:read", "orders:write"],
+              "reviews-service": ["reviews:read", "reviews:write"],
+              "user-service": ["users:read"],
+              "notification-service": ["notifications:receive"],
+              "cart-service": ["cart:read", "cart:write"]
             }
           }
         }
@@ -94,66 +99,60 @@
     }
   },
   "clientScopeMappings": {
-    "e-commerce-web": [
+    "product-service": [
       {
         "clientScope": "products:read",
-        "roles": [
-          "products:read"
-        ]
+        "roles": ["products:read"]
       },
       {
         "clientScope": "products:write",
-        "roles": [
-          "products:write"
-        ]
-      },
+        "roles": ["products:write"]
+      }
+    ],
+    "order-service": [
       {
         "clientScope": "orders:read",
-        "roles": [
-          "orders:read"
-        ]
+        "roles": ["orders:read"]
       },
       {
         "clientScope": "orders:write",
-        "roles": [
-          "orders:write"
-        ]
-      },
+        "roles": ["orders:write"]
+      }
+    ],
+    "reviews-service": [
       {
         "clientScope": "reviews:read",
-        "roles": [
-          "reviews:read"
-        ]
+        "roles": ["reviews:read"]
       },
       {
         "clientScope": "reviews:write",
-        "roles": [
-          "reviews:write"
-        ]
-      },
+        "roles": ["reviews:write"]
+      }
+    ],
+    "user-service": [
       {
         "clientScope": "users:read",
-        "roles": [
-          "users:read"
-        ]
+        "roles": ["users:read"]
       },
+      {
+        "clientScope": "users:resolve",
+        "roles": ["users:resolve"]
+      }
+    ],
+    "notification-service": [
       {
         "clientScope": "notifications:receive",
-        "roles": [
-          "notifications:receive"
-        ]
-      },
+        "roles": ["notifications:receive"]
+      }
+    ],
+    "cart-service": [
       {
         "clientScope": "cart:read",
-        "roles": [
-          "cart:read"
-        ]
+        "roles": ["cart:read"]
       },
       {
         "clientScope": "cart:write",
-        "roles": [
-          "cart:write"
-        ]
+        "roles": ["cart:write"]
       }
     ]
   },
@@ -590,8 +589,11 @@
       "enabled": true,
       "serviceAccountClientId": "cart-service",
       "clientRoles": {
-        "e-commerce-web": [
+        "order-service": [
           "orders:write"
+        ],
+        "user-service": [
+          "users:resolve"
         ]
       }
     },
@@ -600,8 +602,27 @@
       "enabled": true,
       "serviceAccountClientId": "order-service",
       "clientRoles": {
-        "e-commerce-web": [
+        "product-service": [
           "products:write"
+        ],
+        "user-service": [
+          "users:resolve"
+        ]
+      }
+    },
+    {
+      "username": "service-account-reviews-service",
+      "enabled": true,
+      "serviceAccountClientId": "reviews-service",
+      "clientRoles": {
+        "product-service": [
+          "products:read"
+        ],
+        "order-service": [
+          "orders:read"
+        ],
+        "user-service": [
+          "users:resolve"
         ]
       }
     }

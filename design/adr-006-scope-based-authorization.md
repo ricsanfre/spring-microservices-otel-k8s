@@ -99,26 +99,34 @@ authenticated user.
 **Role-to-scope promotion mechanism** — instead of adding resource scopes to `defaultClientScopes`
 (which grants them to all users), the realm uses two Keycloak features:
 
-1. **Client roles** on `e-commerce-web` — one atomic role per scope plus composite `customer` and
-   `admin` roles that bundle the appropriate atomic roles.
-2. **`clientScopeMappings`** — maps each atomic client role to its corresponding client scope object.
-   Keycloak automatically promotes matching optional scopes into the token for any user who holds the
-   role (directly or via a composite).
+1. **Client roles on each resource server client** — one atomic role per scope, owned by the
+   Keycloak client that protects the corresponding resource (see
+   [ADR-014](adr-014-per-resource-server-client-roles.md)). Composite `customer` and `admin` roles
+   on `e-commerce-web` aggregate these cross-service roles.
+2. **`clientScopeMappings`** — maps each atomic client role (on its owning service client) to the
+   corresponding client scope object. Keycloak automatically promotes matching optional scopes into
+   the token for any user who holds the role (directly or via a composite).
 
 ```json
-// roles.client.e-commerce-web (excerpt)
-{ "name": "customer", "composite": true,
-  "composites": { "client": { "e-commerce-web": [
-    "products:read", "orders:read", "orders:write",
-    "reviews:read", "reviews:write", "users:read",
-    "cart:read", "cart:write"
-  ] } } }
+// roles.client (excerpt)
+"product-service": [{ "name": "products:read" }, { "name": "products:write" }],
+"order-service":   [{ "name": "orders:read" },   { "name": "orders:write"  }],
+"e-commerce-web": [
+  { "name": "customer", "composite": true,
+    "composites": { "client": {
+      "product-service": ["products:read"],
+      "order-service":   ["orders:read", "orders:write"],
+      ...
+    } } }
+]
 
 // clientScopeMappings (excerpt)
-"e-commerce-web": [
-  { "clientScope": "products:read", "roles": ["products:read"] },
-  { "clientScope": "orders:read",   "roles": ["orders:read"]   },
-  ...
+"product-service": [
+  { "clientScope": "products:read", "roles": ["products:read"] }
+],
+"order-service": [
+  { "clientScope": "orders:read",  "roles": ["orders:read"]  },
+  { "clientScope": "orders:write", "roles": ["orders:write"] }
 ]
 ```
 
@@ -127,8 +135,9 @@ Users are assigned the composite role in `users[].clientRoles`:
 "clientRoles": { "e-commerce-web": ["customer"] }
 ```
 
-The `e-commerce-service` M2M client keeps `defaultClientScopes: ["users:resolve"]` — for the
-Client Credentials grant there is no human user, so role-based promotion is not applicable.
+The M2M service clients keep scopes in `defaultClientScopes` and require matching role assignments
+on the service-account user pointing at the **owning resource server client** (see
+[ADR-014](adr-014-per-resource-server-client-roles.md)).
 
 `fullScopeAllowed: false` is set on `e-commerce-web` to ensure Keycloak does not fall back to
 including all realm roles in the token.
@@ -177,7 +186,7 @@ The following files were updated as part of this ADR:
 
 | File | Change |
 |------|--------|
-| `docker/keycloak/realm-e-commerce.json` | Removed `"roles"` block + protocol mappers; added `"clientScopes"` + `"roles.client.e-commerce-web"` (atomic + composite roles) + `"clientScopeMappings"` (role → scope promotion) + `optionalClientScopes` on `e-commerce-web` |
+| `docker/keycloak/realm-e-commerce.json` | Removed `"roles"` block + protocol mappers; added `"clientScopes"` + per-resource-server `"roles.client"` (atomic roles on owning service clients + composite roles on `e-commerce-web`) + `"clientScopeMappings"` keyed per service client + `optionalClientScopes` on `e-commerce-web` |
 | `user-service/.../SecurityConfig.java` | Removed custom `JwtAuthenticationConverter`; changed to `Customizer.withDefaults()` |
 | `user-service/.../UserController.java` | `@PreAuthorize("hasRole('service-account')")` → `@PreAuthorize("hasAuthority('SCOPE_users:resolve')")` |
 | `user-service/.../UserControllerIntegrationTest.java` | JWT helpers updated to `scope` claim + `SCOPE_` authorities |

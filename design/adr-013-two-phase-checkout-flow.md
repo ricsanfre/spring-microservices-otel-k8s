@@ -139,13 +139,13 @@ sequenceDiagram
 
 Each service uses its own Keycloak client for M2M calls. A scope appears in a Client Credentials token only when **two conditions** are both satisfied:
 1. The scope is in the `defaultClientScopes` for that client (or explicitly requested in the `scope` parameter).
-2. The service-account user for that client has the matching **client role** on `e-commerce-web` (enforced via `clientScopeMappings`).
+2. The service-account user for that client has the matching **client role** on the **owning resource server client** (enforced via `clientScopeMappings`).
 
-| Keycloak Client | Required client role on `e-commerce-web` | Scope it enables | Calls |
+| Keycloak Client | Required client role (on resource server client) | Scope it enables | Calls |
 |---|---|---|---|
-| `cart-service` | `orders:write` | `orders:write` | order-service (create PENDING order) |
-| `order-service` | `products:write` | `products:write` | product-service (stock reserve) |
-| `cart-service`, `order-service` | _(via `defaultClientScopes`)_ | `users:resolve` | user-service (resolve) |
+| `cart-service` | `orders:write` on `order-service` | `orders:write` | order-service (create PENDING order) |
+| `order-service` | `products:write` on `product-service` | `products:write` | product-service (stock reserve) |
+| `cart-service`, `order-service` | `users:resolve` on `user-service` | `users:resolve` | user-service (resolve) |
 
 The service-account role assignments are persisted in `docker/keycloak/realm-e-commerce.json` under the `users` array as entries with `serviceAccountClientId` and `clientRoles`. They are applied on the **first** Keycloak container start. Run `make infra-clean && make infra-min-up` to re-apply after changing the JSON.
 

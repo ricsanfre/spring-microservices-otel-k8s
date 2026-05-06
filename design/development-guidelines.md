@@ -814,14 +814,19 @@ Keycloak only includes an optional scope in a token if:
 2. The user / service account **has a client role** that `clientScopeMappings` maps to that scope.
 
 In this realm, `clientScopeMappings` ties each scope (e.g. `orders:write`) to the matching role
-on the `e-commerce-web` client. Service account tokens are produced by Keycloak on behalf of the
-service account user — that user must have the role assigned:
+on the **owning resource server client** (not on `e-commerce-web`). Service account tokens are
+produced by Keycloak on behalf of the service account user — that user must have the role assigned
+on the correct resource server client:
 
-| Service account | Required client role on `e-commerce-web` | Scope it enables |
-|-----------------|------------------------------------------|-----------------|
-| `service-account-cart-service` | `orders:write` | `orders:write` in M2M token |
-| `service-account-order-service` | `products:write` | `products:write` in M2M token |
-| `service-account-reviews-service` | `products:read`, `orders:read` | respective read scopes |
+| Service account | Client role (on resource server client) | Scope it enables |
+|-----------------|----------------------------------------|------------------|
+| `service-account-cart-service` | `orders:write` on `order-service` | `orders:write` in M2M token |
+| `service-account-cart-service` | `users:resolve` on `user-service` | `users:resolve` in M2M token |
+| `service-account-order-service` | `products:write` on `product-service` | `products:write` in M2M token |
+| `service-account-order-service` | `users:resolve` on `user-service` | `users:resolve` in M2M token |
+| `service-account-reviews-service` | `products:read` on `product-service` | `products:read` in M2M token |
+| `service-account-reviews-service` | `orders:read` on `order-service` | `orders:read` in M2M token |
+| `service-account-reviews-service` | `users:resolve` on `user-service` | `users:resolve` in M2M token |
 
 These assignments are persisted in `docker/keycloak/realm-e-commerce.json` under the `users` array
 as entries with `serviceAccountClientId` and `clientRoles`. They are applied on the **first** Keycloak

@@ -13,15 +13,15 @@ flowchart TD
     subgraph REALM["Keycloak Realm: e-commerce"]
         direction TB
 
-        subgraph ROLES["Client Roles (e-commerce-web)"]
-            CR_C("customer\n(composite)")
-            CR_A("admin\n(composite)")
-            CR_P("products:read / products:write")
-            CR_O("orders:read / orders:write")
-            CR_R("reviews:read / reviews:write")
-            CR_U("users:read")
-            CR_N("notifications:receive")
-            CR_CA("cart:read / cart:write")
+        subgraph ROLES["Client Roles (per resource server)"]
+            CR_C("customer\n(composite, e-commerce-web)")
+            CR_A("admin\n(composite, e-commerce-web)")
+            CR_P("products:read / products:write\n(product-service)")
+            CR_O("orders:read / orders:write\n(order-service)")
+            CR_R("reviews:read / reviews:write\n(reviews-service)")
+            CR_U("users:read / users:resolve\n(user-service)")
+            CR_N("notifications:receive\n(notification-service)")
+            CR_CA("cart:read / cart:write\n(cart-service)")
         end
 
         subgraph SCOPES["Client Scopes"]
@@ -83,8 +83,8 @@ flowchart TD
         C3 -->|owns service account| U4
         U1 -->|assigned role| CR_C
         U2 -->|assigned role| CR_C
-        U3 -->|assigned role: orders:write| CR_O
-        U4 -->|assigned role: products:write| CR_P
+        U3 -->|orders:write on order-service| CR_O
+        U4 -->|products:write on product-service| CR_P
     end
 
     Browser["Browser"]
@@ -176,25 +176,25 @@ when importing a partial realm — it must be explicitly defined in the realm JS
 > needs** in the `scope` parameter of each authorization or token request. This is the standard
 > OAuth2 mechanism for scope negotiation (RFC 6749 §3.3) and keeps scope control on the client side.
 >
-> The client roles (`customer`, `admin`) defined in the realm are kept for informational purposes and
-> future use if Authorization Services are enabled.
+> The composite roles (`customer`, `admin`) on `e-commerce-web` are kept for informational purposes
+> and future use if Authorization Services are enabled.
 
-### Client Roles on `e-commerce-web` *(informational)*
+### Client Roles per Resource Server
 
-| Role | Type | Includes |
-|------|------|----------|
-| `products:read` | atomic | — |
-| `products:write` | atomic | — |
-| `orders:read` | atomic | — |
-| `orders:write` | atomic | — |
-| `reviews:read` | atomic | — |
-| `reviews:write` | atomic | — |
-| `users:read` | atomic | — |
-| `notifications:receive` | atomic | — |
-| `cart:read` | atomic | — |
-| `cart:write` | atomic | — |
-| `customer` | composite | `products:read`, `orders:read`, `orders:write`, `reviews:read`, `reviews:write`, `users:read`, `cart:read`, `cart:write` |
-| `admin` | composite | all `customer` scopes + `products:write` + `notifications:receive` |
+Atomic roles are owned by the Keycloak client that exposes the corresponding resource (see
+[ADR-014](adr-014-per-resource-server-client-roles.md)). The composite roles `customer` and `admin`
+remain on `e-commerce-web` and aggregate roles across service clients.
+
+| Keycloak client | Role(s) | Type |
+|-----------------|---------|------|
+| `product-service` | `products:read`, `products:write` | atomic |
+| `order-service` | `orders:read`, `orders:write` | atomic |
+| `reviews-service` | `reviews:read`, `reviews:write` | atomic |
+| `user-service` | `users:read`, `users:resolve` | atomic |
+| `notification-service` | `notifications:receive` | atomic |
+| `cart-service` | `cart:read`, `cart:write` | atomic |
+| `e-commerce-web` | `customer` — composite of `products:read`, `orders:read/write`, `reviews:read/write`, `users:read`, `cart:read/write` | composite |
+| `e-commerce-web` | `admin` — composite of all `customer` roles + `products:write` + `notifications:receive` | composite |
 
 ### Usage in services
 
@@ -306,23 +306,21 @@ Each service has its own Keycloak client for the Client Credentials grant.
 > **How scopes appear in service-account tokens:** A scope is included in a Client Credentials token
 > only when **both** conditions are met:
 > 1. The scope is listed in `defaultClientScopes` (or explicitly requested in the `scope` parameter).
-> 2. The service-account user for that client has the matching **client role** on `e-commerce-web`
->    (enforced via `clientScopeMappings`). Without the role assignment the scope is stripped from the
->    token even if it is in `defaultClientScopes`.
+> 2. The service-account user for that client has the matching **client role** on the **owning
+>    resource server client** (enforced via `clientScopeMappings`). Without the role assignment the
+>    scope is stripped from the token even if it is in `defaultClientScopes`.
 >
-> `users:resolve` is granted unconditionally to the listed clients via `defaultClientScopes` (no
-> `clientScopeMappings` guard). The write scopes (`orders:write`, `products:write`) require an
-> explicit role assignment on the service-account user — these are persisted in the realm JSON
-> (see [Service account role assignments](#service-account-role-assignments) below).
+> All scopes — including read scopes and `users:resolve` — now require an explicit role assignment
+> on the service-account user (see [Service account role assignments](#service-account-role-assignments)).
 
-| Client ID | `serviceAccountsEnabled` | `defaultClientScopes` | Service-account role on `e-commerce-web` | Calls |
-|-----------|--------------------------|----------------------|------------------------------------------|-------|
+| Client ID | `serviceAccountsEnabled` | `defaultClientScopes` | Service-account roles (per resource server) | Calls |
+|-----------|--------------------------|----------------------|---------------------------------------------|-------|
 | `product-service` | `true` | *(none)* | *(none)* | — |
-| `order-service` | `true` | `users:resolve`, `products:write` | `products:write` | user-service, product-service |
-| `reviews-service` | `true` | `users:resolve`, `products:read`, `orders:read` | *(none — read scopes have no guard)* | user-service, product-service, order-service |
+| `order-service` | `true` | `users:resolve`, `products:write` | `products:write` on `product-service`; `users:resolve` on `user-service` | user-service, product-service |
+| `reviews-service` | `true` | `users:resolve`, `products:read`, `orders:read` | `products:read` on `product-service`; `orders:read` on `order-service`; `users:resolve` on `user-service` | user-service, product-service, order-service |
 | `user-service` | `true` | *(none)* | *(none)* | — |
 | `notification-service` | `false` | *(none — Kafka consumer only)* | *(none)* | — |
-| `cart-service` | `true` | `users:resolve`, `orders:write` | `orders:write` | user-service, order-service |
+| `cart-service` | `true` | `users:resolve`, `orders:write` | `orders:write` on `order-service`; `users:resolve` on `user-service` | user-service, order-service |
 
 Each client follows this pattern (example: `cart-service`):
 
@@ -415,32 +413,48 @@ These are internal Keycloak users, not real humans.
 | Service account username | Created for | In realm JSON? |
 |--------------------------|-------------|----------------|
 | `service-account-product-service` | `product-service` client | No — auto-created, no role assignment needed |
-| `service-account-order-service` | `order-service` client | **Yes** — explicit entry to assign `products:write` role |
-| `service-account-reviews-service` | `reviews-service` client | No — auto-created, read scopes need no role assignment |
+| `service-account-order-service` | `order-service` client | **Yes** — `products:write` on `product-service`; `users:resolve` on `user-service` |
+| `service-account-reviews-service` | `reviews-service` client | **Yes** — `products:read` on `product-service`; `orders:read` on `order-service`; `users:resolve` on `user-service` |
 | `service-account-user-service` | `user-service` client | No — auto-created, no role assignment needed |
-| `service-account-cart-service` | `cart-service` client | **Yes** — explicit entry to assign `orders:write` role |
+| `service-account-cart-service` | `cart-service` client | **Yes** — `orders:write` on `order-service`; `users:resolve` on `user-service` |
 
 The JWT issued via Client Credentials grant has `preferred_username: service-account-<client-id>`
 and carries only the scopes in `defaultClientScopes` that pass the `clientScopeMappings` role check.
 
 #### Service account role assignments
 
-Because `clientScopeMappings` requires the service-account user to have the matching client role,
-`cart-service` and `order-service` service accounts are listed **explicitly** in the realm JSON
-(`docker/keycloak/realm-e-commerce.json`) so their roles are assigned on import:
+Because `clientScopeMappings` requires the service-account user to have the matching client role on
+the **owning resource server client**, all service accounts that need write or resolve scopes are
+listed **explicitly** in the realm JSON so their roles are assigned on import:
 
 ```json
 {
   "username": "service-account-cart-service",
   "enabled": true,
   "serviceAccountClientId": "cart-service",
-  "clientRoles": { "e-commerce-web": ["orders:write"] }
+  "clientRoles": {
+    "order-service": ["orders:write"],
+    "user-service":  ["users:resolve"]
+  }
 },
 {
   "username": "service-account-order-service",
   "enabled": true,
   "serviceAccountClientId": "order-service",
-  "clientRoles": { "e-commerce-web": ["products:write"] }
+  "clientRoles": {
+    "product-service": ["products:write"],
+    "user-service":    ["users:resolve"]
+  }
+},
+{
+  "username": "service-account-reviews-service",
+  "enabled": true,
+  "serviceAccountClientId": "reviews-service",
+  "clientRoles": {
+    "product-service": ["products:read"],
+    "order-service":   ["orders:read"],
+    "user-service":    ["users:resolve"]
+  }
 }
 ```
 
@@ -641,20 +655,21 @@ When a new microservice is implemented, follow this pattern to add its Keycloak 
 }
 ```
 
-**Step 2 — Add an atomic client role on `e-commerce-web`** (for SPA users) or on the calling
-service's client (for M2M). Example for a new SPA scope:
+**Step 2 — Add an atomic client role on the owning resource server client** (not on `e-commerce-web`).
+Example for a new scope on `notification-service`:
 
 ```json
-// In roles.client.e-commerce-web
+// In roles.client.notification-service
 { "name": "notifications:receive", "description": "Receive notification events" }
 ```
 
-Then add it to the relevant composite role(s) (e.g., add to `admin`'s `composites.client.e-commerce-web`).
+Then add it to the relevant composite role(s) on `e-commerce-web` (e.g., add to `admin`'s
+`composites.client.notification-service`).
 
-**Step 3 — Add a `clientScopeMappings` entry** so the new role auto-promotes its optional scope:
+**Step 3 — Add a `clientScopeMappings` entry** under the owning service client:
 
 ```json
-// In clientScopeMappings.e-commerce-web
+// In clientScopeMappings.notification-service
 { "clientScope": "notifications:receive", "roles": ["notifications:receive"] }
 ```
 
