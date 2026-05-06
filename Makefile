@@ -25,13 +25,16 @@ KEYCLOAK_OPERATOR_VERSION ?= 26.6.1  # https://github.com/keycloak/keycloak-k8s-
         ps-run ps-dev ps-seed \
         cs-build cs-test cs-verify cs-image \
         cs-run cs-dev \
+        os-build os-test os-verify os-image \
+        os-run os-dev \
         k3d-create k3d-delete k3d-info \
         k8s-namespaces k8s-operators k8s-keycloak-operator \
         k8s-infra k8s-infra-cert-manager k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey \
         k8s-infra-kafka k8s-infra-keycloak k8s-infra-envoy-gateway k8s-infra-monitoring k8s-infra-otel-collector k8s-up \
         k8s-apps-deploy k8s-apps-delete \
         k8s-us-deploy k8s-us-delete k8s-us-image \
-        k8s-cs-deploy k8s-cs-delete k8s-cs-image
+        k8s-cs-deploy k8s-cs-delete k8s-cs-image \
+        k8s-os-deploy k8s-os-delete k8s-os-image
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Help
@@ -169,6 +172,33 @@ cs-run: cs-build ## Build then run cart-service JAR
 	java -jar cart-service/target/cart-service-*.jar
 
 cs-dev: cs-infra-up cs-run ## Full local dev loop: start infra, then run cart-service
+
+# ──────────────────────────────────────────────────────────────────────────────
+# order-service — build & test
+# ──────────────────────────────────────────────────────────────────────────────
+
+os-build: ## Compile + package order-service JAR (tests skipped)
+	$(MAVEN) -pl common,order-service -am package -DskipTests --no-transfer-progress
+
+os-test: ## Run order-service unit tests only (fast, no containers)
+	$(MAVEN) -pl common,order-service -am test --no-transfer-progress
+
+os-verify: ## Run order-service unit + integration tests (Testcontainers — needs Docker)
+	$(MAVEN) -pl common,order-service -am verify --no-transfer-progress
+
+os-image: os-build ## Build order-service container image to local Docker daemon (Jib)
+	$(MAVEN) -pl order-service jib:dockerBuild \
+	    -Ddocker.registry=local \
+	    --no-transfer-progress
+
+# ──────────────────────────────────────────────────────────────────────────────
+# order-service — run locally (JAR)
+# ──────────────────────────────────────────────────────────────────────────────
+
+os-run: os-build ## Build then run order-service JAR
+	java -jar order-service/target/order-service-*.jar
+
+os-dev: infra-min-up os-run ## Full local dev loop: start infra, then run order-service
 
 # ──────────────────────────────────────────────────────────────────────────────
 # user-service — Keycloak tokens  (manual API testing with curl)
@@ -347,10 +377,23 @@ k8s-cs-deploy: ## Deploy cart-service to staging (Kustomize staging overlay)
 k8s-cs-delete: ## Remove cart-service from staging
 	kubectl delete -k k8s/apps/cart-service/overlays/staging --ignore-not-found
 
+k8s-os-image: os-build ## Build + push order-service image to k3d local registry
+	$(MAVEN) -pl order-service jib:build \
+	    -Ddocker.registry=localhost:5000 \
+	    --no-transfer-progress
+
+k8s-os-deploy: ## Deploy order-service to staging (Kustomize staging overlay)
+	kubectl apply -k k8s/apps/order-service/overlays/staging
+
+k8s-os-delete: ## Remove order-service from staging
+	kubectl delete -k k8s/apps/order-service/overlays/staging --ignore-not-found
+
 k8s-apps-deploy: ## Deploy all services to staging
 	kubectl apply -k k8s/apps/user-service/overlays/staging
 	kubectl apply -k k8s/apps/cart-service/overlays/staging
+	kubectl apply -k k8s/apps/order-service/overlays/staging
 
 k8s-apps-delete: ## Remove all services from staging
 	kubectl delete -k k8s/apps/user-service/overlays/staging --ignore-not-found
 	kubectl delete -k k8s/apps/cart-service/overlays/staging --ignore-not-found
+	kubectl delete -k k8s/apps/order-service/overlays/staging --ignore-not-found
