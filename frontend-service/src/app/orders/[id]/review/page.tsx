@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, publicFetch } from "@/lib/api";
 import { ConfirmOrderButton } from "./ConfirmOrderButton";
 
 interface OrderItemResponse {
@@ -18,6 +18,19 @@ interface OrderResponse {
   createdAt: string;
 }
 
+async function fetchProductName(productId: string): Promise<string> {
+  try {
+    const res = await publicFetch("products", `/api/v1/products/${productId}`);
+    if (res.ok) {
+      const p: { name: string } = await res.json();
+      return p.name;
+    }
+  } catch {
+    // fall through
+  }
+  return productId;
+}
+
 export default async function OrderReviewPage({
   params,
 }: {
@@ -27,6 +40,7 @@ export default async function OrderReviewPage({
 
   let order: OrderResponse | null = null;
   let error: string | null = null;
+  let productNames: Record<string, string> = {};
 
   try {
     const res = await apiFetch("orders", `/api/v1/orders/${id}`);
@@ -37,6 +51,12 @@ export default async function OrderReviewPage({
     }
   } catch (err) {
     error = err instanceof Error ? err.message : "Unexpected error";
+  }
+
+  if (order) {
+    const uniqueIds = [...new Set(order.items.map((i) => i.productId))];
+    const names = await Promise.all(uniqueIds.map((pid) => fetchProductName(pid)));
+    productNames = Object.fromEntries(uniqueIds.map((pid, idx) => [pid, names[idx]]));
   }
 
   if (error || !order) {
@@ -75,7 +95,7 @@ export default async function OrderReviewPage({
       <table>
         <thead>
           <tr>
-            <th>Product ID</th>
+            <th>Product</th>
             <th>Unit Price</th>
             <th>Qty</th>
             <th>Line Total</th>
@@ -84,9 +104,7 @@ export default async function OrderReviewPage({
         <tbody>
           {order.items.map((item) => (
             <tr key={item.id}>
-              <td>
-                <code style={{ fontSize: "0.75rem" }}>{item.productId}</code>
-              </td>
+              <td>{productNames[item.productId] ?? item.productId}</td>
               <td>${item.unitPrice.toFixed(2)}</td>
               <td>{item.quantity}</td>
               <td>${(item.unitPrice * item.quantity).toFixed(2)}</td>

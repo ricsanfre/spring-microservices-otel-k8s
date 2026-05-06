@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { auth } from "@/auth";
 import { apiFetch } from "@/lib/api";
 
@@ -57,6 +58,7 @@ export default async function OrdersPage() {
               <th>Status</th>
               <th>Total</th>
               <th>Placed</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -70,6 +72,14 @@ export default async function OrdersPage() {
                 </td>
                 <td>${o.totalAmount.toFixed(2)}</td>
                 <td>{new Date(o.createdAt).toLocaleDateString()}</td>
+                <td>
+                  <Link
+                    href={`/orders/${o.id}`}
+                    style={{ color: "#0ea5e9", textDecoration: "none", fontSize: "0.85rem" }}
+                  >
+                    View →
+                  </Link>
+                </td>
               </tr>
             ))}
           </tbody>
