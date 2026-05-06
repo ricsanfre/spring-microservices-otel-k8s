@@ -40,7 +40,11 @@ spring:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
-        spring.json.trusted.packages: com.ricsanfre.cart.kafka
+        # Ignore the publisher's type header so order-service's class name
+        # (com.ricsanfre.order.kafka.OrderConfirmedEvent) is not used.
+        # Instead always deserialize to the local mirror record.
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: com.ricsanfre.cart.kafka.OrderConfirmedEvent
 
   # HTTP service client groups — base URLs for @ImportHttpServices proxies
   http:

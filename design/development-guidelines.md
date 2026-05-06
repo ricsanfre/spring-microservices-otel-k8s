@@ -1034,16 +1034,31 @@ Publish a Kafka event when a state change in one service must trigger downstream
 
 ### Dependencies
 
-For **producers** (services that publish events):
+> **Spring Boot 4 note:** Use `spring-boot-starter-kafka` (not bare `spring-kafka`). The bare library does not pull in `spring-boot-kafka` autoconfigure, so `KafkaAutoConfiguration` never fires, `@KafkaListener` infrastructure is never registered, and consumers silently never run.
+
+For **producers** and **consumers** alike:
 
 ```xml
 <dependency>
-    <groupId>org.springframework.kafka</groupId>
-    <artifactId>spring-kafka</artifactId>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-kafka</artifactId>
 </dependency>
 ```
 
-For **consumers** (services that subscribe to events), add the same `spring-kafka` dependency. Add `spring-kafka-test` and `testcontainers-kafka` as `test`-scope dependencies (see [Testing Strategy](#14-testing-strategy)).
+For tests, use the matching starter (brings `spring-boot-starter-test` transitively) plus the Testcontainers module:
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-kafka-test</artifactId>
+    <scope>test</scope>
+</dependency>
+<dependency>
+    <groupId>org.testcontainers</groupId>
+    <artifactId>testcontainers-kafka</artifactId>
+    <scope>test</scope>
+</dependency>
+```
 
 ### Topic naming convention
 
@@ -1117,11 +1132,18 @@ spring:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
-        spring.json.trusted.packages: "com.ricsanfre.*"
+        # Disable type-header resolution for cross-service consumers.
+        # The producer embeds its own class name (e.g. com.ricsanfre.order.kafka.OrderConfirmedEvent)
+        # in the __TypeId__ header; using it in the consumer would require that class on the
+        # consumer's classpath or a trusted-packages wildcard. Instead, ignore the header and
+        # always deserialize to the local mirror record.
+        spring.json.use.type.headers: false
         spring.json.value.default.type: com.ricsanfre.<service>.kafka.<EventClass>
 ```
 
-Set `spring.json.trusted.packages` to allow deserialization of event types from other services. Set `spring.json.value.default.type` to the consumer's local copy of the event record (a record with matching field names).
+Define a **mirror record** in the consumer's `kafka/` package with the same field names as the producer's event. The `JsonDeserializer` maps by field name, so the package and class name do not need to match.
+
+> **Why not `spring.json.trusted.packages`?** The producer's `JsonSerializer` embeds its own fully-qualified class name in the `__TypeId__` header. Using `trusted.packages` requires trusting the *producer's* package — coupling the consumer to producer internals. Disabling type headers entirely (`use.type.headers: false`) and specifying `value.default.type` is the clean cross-service pattern.
 
 ### Consumer Component
 
@@ -1159,17 +1181,17 @@ static final KafkaContainer kafka =
 
 `@ServiceConnection` auto-configures `spring.kafka.bootstrap-servers` — no manual property override needed.
 
-Add `spring-kafka-test` and `testcontainers-kafka` to the service `pom.xml` under `<scope>test</scope>`:
+Add `spring-boot-starter-kafka-test` and `testcontainers-kafka` to the service `pom.xml` under `<scope>test</scope>`:
 
 ```xml
 <dependency>
-    <groupId>org.testcontainers</groupId>
-    <artifactId>kafka</artifactId>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-kafka-test</artifactId>
     <scope>test</scope>
 </dependency>
 <dependency>
-    <groupId>org.springframework.kafka</groupId>
-    <artifactId>spring-kafka-test</artifactId>
+    <groupId>org.testcontainers</groupId>
+    <artifactId>testcontainers-kafka</artifactId>
     <scope>test</scope>
 </dependency>
 ```

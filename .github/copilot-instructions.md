@@ -115,6 +115,8 @@ common/src/main/java/com/ricsanfre/common/
 - **Jackson 3.x:** groupId changed to `tools.jackson.core`. Use `tools.jackson.databind.ObjectMapper`, not `com.fasterxml.jackson.databind.ObjectMapper`.
 - **MockMvc:** `@AutoConfigureMockMvc` moved to `org.springframework.boot.webmvc.test.autoconfigure`. Requires separate `spring-boot-webmvc-test` artifact (already in child poms).
 - **Flyway:** `flyway-core` alone does NOT register `FlywayAutoConfiguration`. Must use `spring-boot-starter-flyway` + `flyway-database-postgresql`.
+- **Kafka:** `org.springframework.kafka:spring-kafka` alone does NOT register `KafkaAutoConfiguration`. Must use `org.springframework.boot:spring-boot-starter-kafka`. Without it `@KafkaListener` infrastructure is never wired — consumers silently never run. Test artifact: `spring-boot-starter-kafka-test` (not `spring-kafka-test`).
+- **Kafka cross-service deserialization:** The producer's `JsonSerializer` embeds its own class name in `__TypeId__` header. Use `spring.json.use.type.headers: false` + `spring.json.value.default.type: <local.mirror.Record>` in consumer properties — not `spring.json.trusted.packages`. This avoids coupling the consumer to the producer's package structure.
 - **MongoDB URI:** Use `spring.mongodb.uri` (NOT `spring.data.mongodb.uri` — silently connects to `test` DB).
 
 ### @WebMvcTest Security Setup
