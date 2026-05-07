@@ -1,0 +1,37 @@
+# Staging overlay for order-service
+#
+# Build & apply:
+#   kubectl apply -k k8s/apps/order-service/overlays/staging
+resources:
+  - ../../base
+
+images:
+  - name: localhost:5000/order-service
+    newTag: "latest"
+
+patches:
+  - patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: order-service
+
+  - patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+    target:
+      kind: Deployment
+      name: order-service
+
+# Secrets are NOT committed to git — create before applying:
+#
+#   kubectl create secret generic order-service-db-secret \
+#     --from-literal=password=<CHANGE_ME> \
+#     --namespace e-commerce
+#
+#   kubectl create secret generic order-service-oauth-secret \
+#     --from-literal=ORDER_SERVICE_CLIENT_SECRET=order-service-secret \
+#     --namespace e-commerce

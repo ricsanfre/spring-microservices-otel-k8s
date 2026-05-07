@@ -1,0 +1,11 @@
+# reviews-service Kustomize base
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+
+commonLabels:
+  app.kubernetes.io/name: reviews-service
+  app.kubernetes.io/part-of: e-commerce

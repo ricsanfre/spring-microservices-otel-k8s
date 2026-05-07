@@ -1,0 +1,24 @@
+---
+# Non-sensitive configuration for frontend-service (Next.js BFF).
+# Sensitive values (AUTH_SECRET, AUTH_KEYCLOAK_SECRET) are injected via the
+# frontend-service-secret Secret — create it before applying:
+#
+#   kubectl create secret generic frontend-service-secret \
+#     --from-literal=AUTH_SECRET=$(openssl rand -base64 32) \
+#     --from-literal=AUTH_KEYCLOAK_SECRET=e-commerce-web-secret \
+#     --namespace e-commerce
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-service-config
+  namespace: e-commerce
+data:
+  NODE_ENV: "production"
+  NEXT_TELEMETRY_DISABLED: "1"
+  PORT: "3000"
+  HOSTNAME: "0.0.0.0"
+  # Auth.js v5 — public base URL (used to construct OIDC callback URLs)
+  AUTH_URL: "https://app.local.test"
+  # Keycloak OIDC provider (Auth.js v5 reads AUTH_KEYCLOAK_ID / AUTH_KEYCLOAK_ISSUER automatically)
+  AUTH_KEYCLOAK_ID: "e-commerce-web"
+  AUTH_KEYCLOAK_ISSUER: "https://keycloak.local.test/realms/e-commerce"

@@ -1,0 +1,33 @@
+# Staging overlay for frontend-service
+#
+# Prerequisites — create the secret before applying:
+#   kubectl create secret generic frontend-service-secret \
+#     --from-literal=AUTH_SECRET=$(openssl rand -base64 32) \
+#     --from-literal=AUTH_KEYCLOAK_SECRET=e-commerce-web-secret \
+#     --namespace e-commerce
+#
+# Build & apply:
+#   kubectl apply -k k8s/apps/frontend-service/overlays/staging
+resources:
+  - ../../base
+
+images:
+  - name: localhost:5000/frontend-service
+    newTag: "latest"
+
+patches:
+  - patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: frontend-service
+
+  - patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+    target:
+      kind: Deployment
+      name: frontend-service

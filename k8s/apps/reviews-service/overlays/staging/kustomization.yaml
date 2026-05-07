@@ -1,0 +1,37 @@
+# Staging overlay for reviews-service
+#
+# Build & apply:
+#   kubectl apply -k k8s/apps/reviews-service/overlays/staging
+resources:
+  - ../../base
+
+images:
+  - name: localhost:5000/reviews-service
+    newTag: "latest"
+
+patches:
+  - patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: reviews-service
+
+  - patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+    target:
+      kind: Deployment
+      name: reviews-service
+
+# Secrets are NOT committed to git — create before applying:
+#
+#   kubectl create secret generic reviews-service-mongodb-secret \
+#     --from-literal=MONGODB_URI='mongodb://reviews_owner:<PASS>@mongodb-svc.mongodb.svc.cluster.local:27017/reviews?authSource=admin&replicaSet=mongodb' \
+#     --namespace e-commerce
+#
+#   kubectl create secret generic reviews-service-oauth-secret \
+#     --from-literal=REVIEWS_SERVICE_CLIENT_SECRET=reviews-service-secret \
+#     --namespace e-commerce

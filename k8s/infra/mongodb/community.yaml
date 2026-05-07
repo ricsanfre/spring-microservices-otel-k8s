@@ -34,6 +34,15 @@ spec:
         - SCRAM
 
   users:
+    # ── product-service ───────────────────────────────────────────────────
+    - name: products_owner
+      db: admin
+      passwordSecretRef:
+        name: mongodb-products-secret
+      roles:
+        - name: readWrite
+          db: products
+      scramCredentialsSecretName: products-scram
     # ── reviews-service ───────────────────────────────────────────────────
     - name: reviews_owner
       db: admin
@@ -58,6 +67,15 @@ spec:
 
 ---
 # Per-service credential secrets — override before applying
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mongodb-products-secret
+  namespace: mongodb
+type: Opaque
+stringData:
+  password: "change-me"
+---
 apiVersion: v1
 kind: Secret
 metadata:

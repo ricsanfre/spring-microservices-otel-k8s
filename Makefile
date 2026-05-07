@@ -27,14 +27,22 @@ KEYCLOAK_OPERATOR_VERSION ?= 26.6.1  # https://github.com/keycloak/keycloak-k8s-
         cs-run cs-dev \
         os-build os-test os-verify os-image \
         os-run os-dev \
+        rvs-build rvs-test rvs-verify rvs-image \
+        rvs-run rvs-dev \
+        ns-build ns-test ns-verify ns-image \
+        ns-run \
         k3d-create k3d-delete k3d-info \
         k8s-namespaces k8s-operators k8s-keycloak-operator \
         k8s-infra k8s-infra-cert-manager k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey \
         k8s-infra-kafka k8s-infra-keycloak k8s-infra-envoy-gateway k8s-infra-monitoring k8s-infra-otel-collector k8s-up \
         k8s-apps-deploy k8s-apps-delete \
         k8s-us-deploy k8s-us-delete k8s-us-image \
+        k8s-ps-deploy k8s-ps-delete k8s-ps-image \
         k8s-cs-deploy k8s-cs-delete k8s-cs-image \
-        k8s-os-deploy k8s-os-delete k8s-os-image
+        k8s-os-deploy k8s-os-delete k8s-os-image \
+        k8s-rvs-deploy k8s-rvs-delete k8s-rvs-image \
+        k8s-ns-deploy k8s-ns-delete k8s-ns-image \
+        k8s-fe-deploy k8s-fe-delete k8s-fe-image
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Help
@@ -199,6 +207,58 @@ os-run: os-build ## Build then run order-service JAR
 	java -jar order-service/target/order-service-*.jar
 
 os-dev: infra-min-up os-run ## Full local dev loop: start infra, then run order-service
+
+# ──────────────────────────────────────────────────────────────────────────────
+# reviews-service — build & test
+# ──────────────────────────────────────────────────────────────────────────────
+
+rvs-build: ## Compile + package reviews-service JAR (tests skipped)
+	$(MAVEN) -pl common,reviews-service -am package -DskipTests --no-transfer-progress
+
+rvs-test: ## Run reviews-service unit tests only (fast, no containers)
+	$(MAVEN) -pl common,reviews-service -am test --no-transfer-progress
+
+rvs-verify: ## Run reviews-service unit + integration tests (Testcontainers — needs Docker)
+	$(MAVEN) -pl common,reviews-service -am verify --no-transfer-progress
+
+rvs-image: rvs-build ## Build reviews-service container image to local Docker daemon (Jib)
+	$(MAVEN) -pl reviews-service jib:dockerBuild \
+	    -Ddocker.registry=local \
+	    --no-transfer-progress
+
+# ──────────────────────────────────────────────────────────────────────────────
+# reviews-service — run locally (JAR)
+# ──────────────────────────────────────────────────────────────────────────────
+
+rvs-run: rvs-build ## Build then run reviews-service JAR
+	java -jar reviews-service/target/reviews-service-*.jar
+
+rvs-dev: infra-min-up rvs-run ## Full local dev loop: start infra, then run reviews-service
+
+# ──────────────────────────────────────────────────────────────────────────────
+# notification-service — build & test
+# ──────────────────────────────────────────────────────────────────────────────
+
+ns-build: ## Compile + package notification-service JAR (tests skipped)
+	$(MAVEN) -pl common,notification-service -am package -DskipTests --no-transfer-progress
+
+ns-test: ## Run notification-service unit tests only (fast, no containers)
+	$(MAVEN) -pl common,notification-service -am test --no-transfer-progress
+
+ns-verify: ## Run notification-service unit + integration tests (Testcontainers — needs Docker)
+	$(MAVEN) -pl common,notification-service -am verify --no-transfer-progress
+
+ns-image: ns-build ## Build notification-service container image to local Docker daemon (Jib)
+	$(MAVEN) -pl notification-service jib:dockerBuild \
+	    -Ddocker.registry=local \
+	    --no-transfer-progress
+
+# ──────────────────────────────────────────────────────────────────────────────
+# notification-service — run locally (JAR)
+# ──────────────────────────────────────────────────────────────────────────────
+
+ns-run: ns-build ## Build then run notification-service JAR
+	java -jar notification-service/target/notification-service-*.jar
 
 # ──────────────────────────────────────────────────────────────────────────────
 # user-service — Keycloak tokens  (manual API testing with curl)
@@ -377,6 +437,17 @@ k8s-cs-deploy: ## Deploy cart-service to staging (Kustomize staging overlay)
 k8s-cs-delete: ## Remove cart-service from staging
 	kubectl delete -k k8s/apps/cart-service/overlays/staging --ignore-not-found
 
+k8s-ps-image: ps-build ## Build + push product-service image to k3d local registry
+	$(MAVEN) -pl product-service jib:build \
+	    -Ddocker.registry=localhost:5000 \
+	    --no-transfer-progress
+
+k8s-ps-deploy: ## Deploy product-service to staging (Kustomize staging overlay)
+	kubectl apply -k k8s/apps/product-service/overlays/staging
+
+k8s-ps-delete: ## Remove product-service from staging
+	kubectl delete -k k8s/apps/product-service/overlays/staging --ignore-not-found
+
 k8s-os-image: os-build ## Build + push order-service image to k3d local registry
 	$(MAVEN) -pl order-service jib:build \
 	    -Ddocker.registry=localhost:5000 \
@@ -388,12 +459,52 @@ k8s-os-deploy: ## Deploy order-service to staging (Kustomize staging overlay)
 k8s-os-delete: ## Remove order-service from staging
 	kubectl delete -k k8s/apps/order-service/overlays/staging --ignore-not-found
 
+k8s-rvs-image: rvs-build ## Build + push reviews-service image to k3d local registry
+	$(MAVEN) -pl reviews-service jib:build \
+	    -Ddocker.registry=localhost:5000 \
+	    --no-transfer-progress
+
+k8s-rvs-deploy: ## Deploy reviews-service to staging (Kustomize staging overlay)
+	kubectl apply -k k8s/apps/reviews-service/overlays/staging
+
+k8s-rvs-delete: ## Remove reviews-service from staging
+	kubectl delete -k k8s/apps/reviews-service/overlays/staging --ignore-not-found
+
+k8s-ns-image: ns-build ## Build + push notification-service image to k3d local registry
+	$(MAVEN) -pl notification-service jib:build \
+	    -Ddocker.registry=localhost:5000 \
+	    --no-transfer-progress
+
+k8s-ns-deploy: ## Deploy notification-service to staging (Kustomize staging overlay)
+	kubectl apply -k k8s/apps/notification-service/overlays/staging
+
+k8s-ns-delete: ## Remove notification-service from staging
+	kubectl delete -k k8s/apps/notification-service/overlays/staging --ignore-not-found
+
+k8s-fe-image: ## Build + push frontend-service image to k3d local registry
+	docker build -t localhost:5000/frontend-service:latest frontend-service/
+	docker push localhost:5000/frontend-service:latest
+
+k8s-fe-deploy: ## Deploy frontend-service to staging (Kustomize staging overlay)
+	kubectl apply -k k8s/apps/frontend-service/overlays/staging
+
+k8s-fe-delete: ## Remove frontend-service from staging
+	kubectl delete -k k8s/apps/frontend-service/overlays/staging --ignore-not-found
+
 k8s-apps-deploy: ## Deploy all services to staging
 	kubectl apply -k k8s/apps/user-service/overlays/staging
+	kubectl apply -k k8s/apps/product-service/overlays/staging
 	kubectl apply -k k8s/apps/cart-service/overlays/staging
 	kubectl apply -k k8s/apps/order-service/overlays/staging
+	kubectl apply -k k8s/apps/reviews-service/overlays/staging
+	kubectl apply -k k8s/apps/notification-service/overlays/staging
+	kubectl apply -k k8s/apps/frontend-service/overlays/staging
 
 k8s-apps-delete: ## Remove all services from staging
 	kubectl delete -k k8s/apps/user-service/overlays/staging --ignore-not-found
+	kubectl delete -k k8s/apps/product-service/overlays/staging --ignore-not-found
 	kubectl delete -k k8s/apps/cart-service/overlays/staging --ignore-not-found
 	kubectl delete -k k8s/apps/order-service/overlays/staging --ignore-not-found
+	kubectl delete -k k8s/apps/reviews-service/overlays/staging --ignore-not-found
+	kubectl delete -k k8s/apps/notification-service/overlays/staging --ignore-not-found
+	kubectl delete -k k8s/apps/frontend-service/overlays/staging --ignore-not-found

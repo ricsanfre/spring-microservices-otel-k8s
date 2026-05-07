@@ -43,49 +43,113 @@ spec:
         - name: user-service
           port: 8085
 ---
-# ── product-service (placeholder — add when service is implemented) ────────
-# apiVersion: gateway.networking.k8s.io/v1
-# kind: HTTPRoute
-# metadata:
-#   name: product-service
-#   namespace: e-commerce
-# spec:
-#   parentRefs:
-#     - name: eg
-#       namespace: envoy-gateway-system
-#       sectionName: https
-#   hostnames:
-#     - "api.local.test"
-#   rules:
-#     - matches:
-#         - path:
-#             type: PathPrefix
-#             value: /api/v1/products
-#       backendRefs:
-#         - name: product-service
-#           port: 8081
+# ── product-service ────────────────────────────────────────────────────────
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: product-service
+  namespace: e-commerce
+spec:
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - "api.local.test"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/products
+      backendRefs:
+        - name: product-service
+          port: 8081
 ---
-# ── cart-service (placeholder — add when service is implemented) ───────────
-# apiVersion: gateway.networking.k8s.io/v1
-# kind: HTTPRoute
-# metadata:
-#   name: cart-service
-#   namespace: e-commerce
-# spec:
-#   parentRefs:
-#     - name: eg
-#       namespace: envoy-gateway-system
-#       sectionName: https
-#   hostnames:
-#     - "api.local.test"
-#   rules:
-#     - matches:
-#         - path:
-#             type: PathPrefix
-#             value: /api/v1/cart
-#       backendRefs:
-#         - name: cart-service
-#           port: 8086
+# ── order-service ──────────────────────────────────────────────────────────
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: order-service
+  namespace: e-commerce
+spec:
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - "api.local.test"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/orders
+      backendRefs:
+        - name: order-service
+          port: 8082
+---
+# ── reviews-service ────────────────────────────────────────────────────────
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: reviews-service
+  namespace: e-commerce
+spec:
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - "api.local.test"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/reviews
+      backendRefs:
+        - name: reviews-service
+          port: 8083
+---
+# ── cart-service ───────────────────────────────────────────────────────────
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: cart-service
+  namespace: e-commerce
+spec:
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - "api.local.test"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/cart
+      backendRefs:
+        - name: cart-service
+          port: 8086
+---
+# ── frontend-service ───────────────────────────────────────────────────────
+# Next.js BFF — serves the web app and handles OIDC callbacks.
+# No JWT SecurityPolicy — authentication is via browser session cookies managed by Auth.js.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: frontend-service
+  namespace: e-commerce
+spec:
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - "app.local.test"
+  rules:
+    - backendRefs:
+        - name: frontend-service
+          port: 3000
 ---
 # ── Keycloak passthrough route ─────────────────────────────────────────────
 # Routes keycloak.local.test to the Keycloak service in the keycloak namespace.
