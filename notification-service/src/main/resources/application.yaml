@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: notification-service
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: notification-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        # Ignore the publisher's type header so order-service's class name
+        # (com.ricsanfre.order.kafka.OrderConfirmedEvent) is not used.
+        # Instead always deserialize to the local mirror record.
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: com.ricsanfre.notification.kafka.OrderConfirmedEvent
+
+  mvc:
+    problemdetails:
+      enabled: true
+
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: 8084
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    metrics:
+      export:
+        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/logs
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+
+logging:
+  level:
+    com.ricsanfre: INFO
