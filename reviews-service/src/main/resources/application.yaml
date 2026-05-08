@@ -4,6 +4,8 @@ spring:
 
   mongodb:
     uri: ${MONGODB_URI:mongodb://localhost:27017/reviews}
+    representation:
+      uuid: standard
 
   security:
     oauth2:
