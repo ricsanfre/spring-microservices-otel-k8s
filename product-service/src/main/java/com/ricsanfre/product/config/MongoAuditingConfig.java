@@ -1,7 +1,9 @@
 package com.ricsanfre.product.config;
 
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.data.mongodb.autoconfigure.DataMongoAutoConfiguration;
 import org.springframework.data.mongodb.config.EnableMongoAuditing;
 import org.springframework.data.mongodb.core.mapping.MongoMappingContext;
 
@@ -14,6 +16,7 @@ import org.springframework.data.mongodb.core.mapping.MongoMappingContext;
  * {@code mongoMappingContext} that is absent in a web-layer slice context.
  */
 @AutoConfiguration
+@AutoConfigureAfter(DataMongoAutoConfiguration.class)
 @ConditionalOnBean(MongoMappingContext.class)
 @EnableMongoAuditing
 public class MongoAuditingConfig {

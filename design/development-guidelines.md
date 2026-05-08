@@ -672,13 +672,31 @@ public class Product {
 }
 ```
 
-Enable MongoDB auditing on the application class:
+Enable MongoDB auditing via a dedicated `@AutoConfiguration` class — **do NOT put `@EnableMongoAuditing` on the main application class**:
 
 ```java
-@SpringBootApplication
+// src/main/java/.../config/MongoAuditingConfig.java
+@AutoConfiguration
+@AutoConfigureAfter(DataMongoAutoConfiguration.class)   // ensures MongoMappingContext exists first
+@ConditionalOnBean(MongoMappingContext.class)            // safety: skip in @WebMvcTest slices
 @EnableMongoAuditing
-public class ProductServiceApplication { ... }
+public class MongoAuditingConfig {}
 ```
+
+Register it so Spring Boot loads it as auto-configuration (NOT via component scan):
+
+```
+# src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
+com.ricsanfre.<service>.config.MongoAuditingConfig
+```
+
+**Why not `@SpringBootApplication` + `@EnableMongoAuditing`?**  
+- `@WebMvcTest` slices component-scan the package, pick up the annotation, and fail because there is no MongoDB context.  
+- `@AutoConfiguration` is excluded from component scanning by design.
+
+**Why `@AutoConfigureAfter(DataMongoAutoConfiguration.class)`?**  
+- Without it, `MongoAuditingConfig` may be evaluated before `DataMongoAutoConfiguration` creates `MongoMappingContext`.  
+- `@ConditionalOnBean(MongoMappingContext.class)` would then silently skip the config, leaving `@CreatedDate`/`@LastModifiedDate` fields unpopulated (`null` → serialised as epoch in JSON → displayed as 1/1/1970 in the UI).
 
 > `@Data` is safe on MongoDB documents — there are no JPA-style bidirectional relationship proxies.
 
