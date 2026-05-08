@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { auth } from "@/auth";
 import { publicFetch } from "@/lib/api";
 import { AddToCartButton } from "./AddToCartButton";
@@ -64,13 +65,21 @@ export default async function ProductsPage() {
             <p className="stock">
               {p.stockQty > 0 ? `${p.stockQty} in stock` : "Out of stock"}
             </p>
-            {isSignedIn && (
-              <AddToCartButton
-                productId={p.id}
-                productName={p.name}
-                price={p.price}
-              />
-            )}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.75rem" }}>
+              {isSignedIn && (
+                <AddToCartButton
+                  productId={p.id}
+                  productName={p.name}
+                  price={p.price}
+                />
+              )}
+              <Link
+                href={`/reviews/${p.id}`}
+                style={{ fontSize: "0.8rem", color: "#0ea5e9", textDecoration: "none" }}
+              >
+                Reviews →
+              </Link>
+            </div>
           </div>
         ))}
       </div>

@@ -331,6 +331,161 @@ th {
   margin-top: 0.5rem;
 }
 
+/* ── Reviews ──────────────────────────────────── */
+.reviews-summary {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 0.75rem 1rem;
+  background: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  margin-top: 0.75rem;
+}
+
+.reviews-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.review-card {
+  background: white;
+  border-radius: 0.5rem;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.review-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.review-date {
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.review-comment {
+  font-size: 0.9rem;
+  color: #374151;
+  line-height: 1.5;
+}
+
+.star-display {
+  font-size: 1.1rem;
+  letter-spacing: 0.05em;
+}
+
+.star-filled-static {
+  color: #f59e0b;
+}
+
+.star-empty-static {
+  color: #d1d5db;
+}
+
+/* Interactive star rating */
+.star-rating {
+  display: flex;
+  gap: 0.1rem;
+}
+
+.star-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.75rem;
+  color: #d1d5db;
+  padding: 0;
+  line-height: 1;
+  transition: color 0.1s;
+}
+
+.star-btn.star-filled {
+  color: #f59e0b;
+}
+
+/* Review submission form */
+.review-form {
+  background: white;
+  border-radius: 0.5rem;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  max-width: 520px;
+}
+
+.review-form h3 {
+  font-size: 1rem;
+  margin-bottom: 1rem;
+  color: #0f172a;
+}
+
+.review-form--success {
+  color: #166534;
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  padding: 0.75rem 1rem;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.form-field label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+}
+
+.form-field input,
+.form-field textarea {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+  background: #f9fafb;
+  color: #111827;
+}
+
+.form-field input:focus,
+.form-field textarea:focus {
+  outline: 2px solid #0ea5e9;
+  outline-offset: 1px;
+}
+
+.form-hint {
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.btn-delete-review {
+  margin-left: auto;
+  background: none;
+  border: 1px solid #fca5a5;
+  color: #ef4444;
+  padding: 0.2rem 0.6rem;
+  border-radius: 0.25rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.btn-delete-review:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
+.btn-delete-review:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .links {
   display: flex;
   gap: 1rem;

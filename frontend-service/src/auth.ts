@@ -2,6 +2,19 @@ import NextAuth from "next-auth";
 import Keycloak from "next-auth/providers/keycloak";
 import type { JWT } from "next-auth/jwt";
 
+const USERS_SERVICE_URL = process.env.USERS_SERVICE_URL ?? "http://localhost:8085";
+
+async function triggerLazyRegistration(accessToken: string): Promise<void> {
+  try {
+    await fetch(`${USERS_SERVICE_URL}/api/v1/users/me`, {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  } catch {
+    // Non-fatal: user will be registered on next profile access
+  }
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     Keycloak({
@@ -11,7 +24,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       authorization: {
         params: {
           scope:
-            "openid profile email users:read orders:read orders:write products:read reviews:read cart:read cart:write",
+            "openid profile email users:read orders:read orders:write products:read reviews:read reviews:write cart:read cart:write",
         },
       },
     }),
@@ -25,13 +38,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // Persist the access_token and refresh_token in the encrypted JWT session cookie
     jwt({ token, account }) {
       if (account) {
-        // First login: store tokens
-        return {
+        // First login: store tokens and trigger lazy user registration
+        const newToken = {
           ...token,
           accessToken: account.access_token,
           refreshToken: account.refresh_token,
           expiresAt: account.expires_at,
         };
+        void triggerLazyRegistration(account.access_token!);
+        return newToken;
       }
 
       // Subsequent requests: return the token as-is if still valid

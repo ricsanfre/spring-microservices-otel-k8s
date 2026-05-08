@@ -19,7 +19,7 @@ export async function apiFetch(
 ): Promise<Response> {
   const session = await auth();
 
-  if (!session?.accessToken) {
+  if (!session?.accessToken || session.error) {
     throw new Error(`apiFetch: no active session (service=${service}, path=${path})`);
   }
 
@@ -54,7 +54,10 @@ export async function publicFetch(
     "Content-Type": "application/json",
     ...(init?.headers as Record<string, string>),
   };
-  if (session?.accessToken) {
+  // Only forward the token if the session is healthy — an expired/invalid token sent
+  // to the backend is worse than no token: Spring Security rejects it with 401 even on
+  // permitAll() endpoints when a bearer token is present but fails validation.
+  if (session?.accessToken && !session.error) {
     headers["Authorization"] = `Bearer ${session.accessToken}`;
   }
 

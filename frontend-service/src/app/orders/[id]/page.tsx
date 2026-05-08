@@ -120,6 +120,7 @@ export default async function OrderDetailPage({
             <th>Unit Price</th>
             <th>Qty</th>
             <th>Line Total</th>
+            {order.status === "DELIVERED" && <th></th>}
           </tr>
         </thead>
         <tbody>
@@ -129,6 +130,16 @@ export default async function OrderDetailPage({
               <td>${item.unitPrice.toFixed(2)}</td>
               <td>{item.quantity}</td>
               <td>${(item.unitPrice * item.quantity).toFixed(2)}</td>
+              {order.status === "DELIVERED" && (
+                <td>
+                  <Link
+                    href={`/reviews/${item.productId}?orderId=${order.id}`}
+                    style={{ color: "#0ea5e9", textDecoration: "none", fontSize: "0.8rem" }}
+                  >
+                    Write Review →
+                  </Link>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
