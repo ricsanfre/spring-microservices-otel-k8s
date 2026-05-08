@@ -34,6 +34,11 @@ spring:
 
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    listener:
+      # Enables Micrometer observation for @KafkaListener → extracts W3C
+      # TraceContext from message headers and creates a child span linked to the
+      # producer's trace, propagating the trace context across the Kafka boundary.
+      observation-enabled: true
     consumer:
       group-id: cart-service-group
       auto-offset-reset: earliest

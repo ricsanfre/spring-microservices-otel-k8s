@@ -1119,6 +1119,8 @@ public record OrderCreatedEvent(
 spring:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    template:
+      observation-enabled: true   # enables trace context propagation — see §11
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -1157,6 +1159,8 @@ Declare `KafkaTemplate<String, Object>` (not a specific event type) so the same 
 spring:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    listener:
+      observation-enabled: true   # enables trace context propagation — see §11
     consumer:
       group-id: ${spring.application.name}
       auto-offset-reset: earliest
@@ -1315,9 +1319,31 @@ Use the existing [otel-demo](../otel-demo) module as the reference implementatio
 
 - All inbound HTTP requests (latency, status codes, trace context propagation)
 - Outbound `RestClient` calls
-- Kafka producer/consumer spans
 - JPA/JDBC query spans
 - Spring `@Scheduled` methods
+
+### Kafka trace context propagation (opt-in)
+
+Spring Kafka's Micrometer Observation support must be **explicitly enabled** — it is off by default to avoid breaking existing setups. Add these two properties:
+
+**Producer service** (e.g. `order-service`):
+```yaml
+spring:
+  kafka:
+    template:
+      observation-enabled: true   # injects W3C TraceContext into message headers
+```
+
+**Consumer services** (e.g. `notification-service`, `cart-service`):
+```yaml
+spring:
+  kafka:
+    listener:
+      observation-enabled: true   # extracts TraceContext from headers → child span
+```
+
+With both set, Tempo will show a linked parent→child trace across the Kafka boundary:  
+`POST /orders/{id}/confirm` → `kafkaTemplate.send` span → `@KafkaListener` span (consumer service).
 
 ---
 

@@ -44,6 +44,11 @@ spring:
 
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    template:
+      # Enables Micrometer observation for KafkaTemplate.send() → injects W3C
+      # TraceContext headers into Kafka message headers so consumers can continue
+      # the trace across the Kafka boundary.
+      observation-enabled: true
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
