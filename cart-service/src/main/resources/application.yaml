@@ -38,11 +38,10 @@ spring:
       group-id: cart-service-group
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # JacksonJsonDeserializer is the Spring Kafka 4 Jackson 3-native class.
+      # Jackson 3 supports java.time.Instant without any extra modules.
+      value-deserializer: org.springframework.kafka.support.serializer.JacksonJsonDeserializer
       properties:
-        # Ignore the publisher's type header so order-service's class name
-        # (com.ricsanfre.order.kafka.OrderConfirmedEvent) is not used.
-        # Instead always deserialize to the local mirror record.
         spring.json.use.type.headers: false
         spring.json.value.default.type: com.ricsanfre.cart.kafka.OrderConfirmedEvent
 
@@ -54,11 +53,17 @@ spring:
       order-service:
         base-url: ${ORDER_SERVICE_URL:http://localhost:8082}
 
-# Resilience4j — circuit breaker for user-service calls
+# Resilience4j — circuit breaker for service-to-service calls
 resilience4j:
   circuitbreaker:
     instances:
       user-service:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        register-health-indicator: true
+      order-service:
         sliding-window-size: 10
         failure-rate-threshold: 50
         wait-duration-in-open-state: 10s
@@ -72,10 +77,15 @@ resilience4j:
         retry-exceptions:
           - java.io.IOException
           - org.springframework.web.client.ResourceAccessException
+      # order-service: no retry — POST /orders is not idempotent
   timelimiter:
     instances:
       user-service:
         timeout-duration: 3s
+      # order-service: generous timeout — call includes an OAuth2 token fetch (Keycloak)
+      # + order-service DB write + stock reservation call to product-service
+      order-service:
+        timeout-duration: 10s
 
 # Per ADR-004: Caffeine TTL for sub → internal userId cache (minutes)
 cart:

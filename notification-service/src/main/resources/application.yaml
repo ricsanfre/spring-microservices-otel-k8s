@@ -8,11 +8,10 @@ spring:
       group-id: notification-group
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # JacksonJsonDeserializer is the Spring Kafka 4 Jackson 3-native class.
+      # Jackson 3 supports java.time.Instant without any extra modules.
+      value-deserializer: org.springframework.kafka.support.serializer.JacksonJsonDeserializer
       properties:
-        # Ignore the publisher's type header so order-service's class name
-        # (com.ricsanfre.order.kafka.OrderConfirmedEvent) is not used.
-        # Instead always deserialize to the local mirror record.
         spring.json.use.type.headers: false
         spring.json.value.default.type: com.ricsanfre.notification.kafka.OrderConfirmedEvent
 

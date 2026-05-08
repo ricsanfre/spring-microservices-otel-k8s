@@ -1036,6 +1036,8 @@ Publish a Kafka event when a state change in one service must trigger downstream
 
 > **Spring Boot 4 note:** Use `spring-boot-starter-kafka` (not bare `spring-kafka`). The bare library does not pull in `spring-boot-kafka` autoconfigure, so `KafkaAutoConfiguration` never fires, `@KafkaListener` infrastructure is never registered, and consumers silently never run.
 
+> **Spring Boot 4 — use `JacksonJsonDeserializer`, not `JsonDeserializer`:** Spring Kafka 4 introduced `JacksonJsonDeserializer` (package `org.springframework.kafka.support.serializer`), which is backed by the **Jackson 3** (`tools.jackson`) stack. Jackson 3 natively supports `java.time.Instant` and all JSR-310 types without any extra modules. The old `JsonDeserializer` is backed by Jackson 2.x and is **deprecated**. Always use `JacksonJsonDeserializer` in consumer yaml — no extra pom dependencies and no explicit `ConsumerFactory` bean are required.
+
 For **producers** and **consumers** alike:
 
 ```xml
@@ -1130,7 +1132,7 @@ spring:
       group-id: ${spring.application.name}
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JacksonJsonDeserializer
       properties:
         # Disable type-header resolution for cross-service consumers.
         # The producer embeds its own class name (e.g. com.ricsanfre.order.kafka.OrderConfirmedEvent)
