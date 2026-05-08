@@ -1,11 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+
+interface EligibleOrder {
+  id: string;
+  createdAt: string;
+}
 
 interface Props {
   productId: string;
-  /** Pre-filled when navigating from an order detail page */
+  /** Pre-selected when navigating from an order detail page */
   orderId?: string;
 }
 
@@ -19,10 +24,40 @@ export function ReviewForm({ productId, orderId: defaultOrderId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
+  const [eligibleOrders, setEligibleOrders] = useState<EligibleOrder[] | null>(null);
+  const [loadingOrders, setLoadingOrders] = useState(true);
+
+  // Fetch DELIVERED orders that contain this product
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingOrders(true);
+    fetch(`/api/orders/delivered?productId=${encodeURIComponent(productId)}`)
+      .then((r) => r.json())
+      .then((data: EligibleOrder[]) => {
+        if (cancelled) return;
+        setEligibleOrders(data);
+        // Pre-select the first order if none was passed via props
+        if (!defaultOrderId && data.length === 1) {
+          setOrderId(data[0].id);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setEligibleOrders([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingOrders(false);
+      });
+    return () => { cancelled = true; };
+  }, [productId, defaultOrderId]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (rating === 0) {
       setError("Please select a rating.");
+      return;
+    }
+    if (!orderId) {
+      setError("Please select an order.");
       return;
     }
     setSubmitting(true);
@@ -60,9 +95,44 @@ export function ReviewForm({ productId, orderId: defaultOrderId }: Props) {
     );
   }
 
+  const noEligibleOrders = !loadingOrders && eligibleOrders?.length === 0;
+  const canSubmit = !loadingOrders && !noEligibleOrders && !!orderId;
+
   return (
     <form onSubmit={handleSubmit} className="review-form">
       <h3>Write a Review</h3>
+
+      <div className="form-field">
+        <label htmlFor="orderSelect">Order</label>
+        {loadingOrders ? (
+          <p className="form-hint">Loading your orders…</p>
+        ) : noEligibleOrders ? (
+          <p className="form-hint">
+            You have no delivered orders containing this product.
+          </p>
+        ) : (
+          <select
+            id="orderSelect"
+            value={orderId}
+            onChange={(e) => setOrderId(e.target.value)}
+            required
+          >
+            {!defaultOrderId && eligibleOrders!.length > 1 && (
+              <option value="">— Select a delivered order —</option>
+            )}
+            {eligibleOrders!.map((o) => (
+              <option key={o.id} value={o.id}>
+                {new Date(o.createdAt).toLocaleDateString(undefined, {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                })}{" "}
+                — {o.id.slice(0, 8)}…
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
 
       <div className="form-field">
         <label>Rating</label>
@@ -83,24 +153,6 @@ export function ReviewForm({ productId, orderId: defaultOrderId }: Props) {
         </div>
       </div>
 
-      {/* Only show orderId input when not pre-filled from order detail */}
-      {!defaultOrderId && (
-        <div className="form-field">
-          <label htmlFor="orderId">Order ID</label>
-          <input
-            id="orderId"
-            type="text"
-            value={orderId}
-            onChange={(e) => setOrderId(e.target.value)}
-            placeholder="UUID of your delivered order"
-            required
-          />
-          <p className="form-hint">
-            Find the Order ID on your <a href="/orders">Orders</a> page.
-          </p>
-        </div>
-      )}
-
       <div className="form-field">
         <label htmlFor="comment">
           Comment <span style={{ color: "#94a3b8" }}>(optional)</span>
@@ -111,6 +163,7 @@ export function ReviewForm({ productId, orderId: defaultOrderId }: Props) {
           onChange={(e) => setComment(e.target.value)}
           rows={3}
           placeholder="Share your thoughts about this product…"
+          disabled={noEligibleOrders}
         />
       </div>
 
@@ -119,7 +172,7 @@ export function ReviewForm({ productId, orderId: defaultOrderId }: Props) {
       <button
         type="submit"
         className="btn-primary"
-        disabled={submitting || rating === 0}
+        disabled={submitting || rating === 0 || !canSubmit}
       >
         {submitting ? "Submitting…" : "Submit Review"}
       </button>

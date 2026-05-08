@@ -445,7 +445,8 @@ th {
 }
 
 .form-field input,
-.form-field textarea {
+.form-field textarea,
+.form-field select {
   padding: 0.5rem 0.75rem;
   border: 1px solid #d1d5db;
   border-radius: 0.375rem;
@@ -456,7 +457,8 @@ th {
 }
 
 .form-field input:focus,
-.form-field textarea:focus {
+.form-field textarea:focus,
+.form-field select:focus {
   outline: 2px solid #0ea5e9;
   outline-offset: 1px;
 }
