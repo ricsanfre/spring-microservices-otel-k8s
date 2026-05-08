@@ -44,6 +44,7 @@ export default async function ReviewsPage({
   const { orderId } = await searchParams;
 
   const session = await auth();
+  const isAdmin = session?.scope?.split(" ").includes("products:write") ?? false;
 
   // Fetch product info and reviews in parallel
   const [productRes, reviewsRes] = await Promise.all([
@@ -153,7 +154,7 @@ export default async function ReviewsPage({
                 <span className="review-date">
                   {new Date(review.createdAt).toLocaleDateString()}
                 </span>
-                {currentUserId && review.userId === currentUserId && (
+                {currentUserId && (review.userId === currentUserId || isAdmin) && (
                   <DeleteReviewButton reviewId={review.id} />
                 )}
               </div>

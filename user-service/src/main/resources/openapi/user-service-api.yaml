@@ -13,6 +13,23 @@ tags:
 
 paths:
 
+  /users:
+    get:
+      tags: [Users]
+      operationId: getAllUsers
+      summary: List all user profiles (admin only — requires products:write scope)
+      responses:
+        "200":
+          description: All registered user profiles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserResponse'
+        "403":
+          description: Access denied — caller does not have admin scope
+
   /users/me:
     get:
       tags: [Users]

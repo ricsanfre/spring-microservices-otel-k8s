@@ -90,8 +90,7 @@
               "order-service": ["orders:read", "orders:write"],
               "reviews-service": ["reviews:read", "reviews:write"],
               "user-service": ["users:read"],
-              "notification-service": ["notifications:receive"],
-              "cart-service": ["cart:read", "cart:write"]
+              "notification-service": ["notifications:receive"]
             }
           }
         }
@@ -421,6 +420,9 @@
         "https://app.local.test/api/auth/callback/keycloak",
         "http://localhost:9876/callback"
       ],
+      "attributes": {
+        "post.logout.redirect.uris": "http://localhost:3001/*##https://app.local.test/*"
+      },
       "webOrigins": [
         "http://localhost:3001",
         "https://app.local.test"
@@ -623,6 +625,25 @@
         ],
         "user-service": [
           "users:resolve"
+        ]
+      }
+    },
+    {
+      "username": "adminuser",
+      "enabled": true,
+      "email": "admin@example.com",
+      "firstName": "Admin",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password",
+          "temporary": false
+        }
+      ],
+      "clientRoles": {
+        "e-commerce-web": [
+          "admin"
         ]
       }
     }

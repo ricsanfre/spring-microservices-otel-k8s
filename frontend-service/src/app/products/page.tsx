@@ -22,6 +22,7 @@ interface PagedResponse {
 export default async function ProductsPage() {
   const session = await auth();
   const isSignedIn = !!session?.accessToken;
+  const isAdmin = session?.scope?.split(" ").includes("products:write") ?? false;
 
   let products: Product[] = [];
   let error: string | null = null;
@@ -40,7 +41,18 @@ export default async function ProductsPage() {
 
   return (
     <div>
-      <h1>Products</h1>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+        <h1 style={{ margin: 0 }}>Products</h1>
+        {isAdmin && (
+          <Link
+            href="/admin/products/new"
+            className="btn-primary"
+            style={{ textDecoration: "none", fontSize: "0.875rem", padding: "0.4rem 1rem" }}
+          >
+            + Add Product
+          </Link>
+        )}
+      </div>
 
       {error && <p className="error">{error}</p>}
 
@@ -66,7 +78,7 @@ export default async function ProductsPage() {
               {p.stockQty > 0 ? `${p.stockQty} in stock` : "Out of stock"}
             </p>
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.75rem" }}>
-              {isSignedIn && (
+              {isSignedIn && !isAdmin && (
                 <AddToCartButton
                   productId={p.id}
                   productName={p.name}
@@ -79,6 +91,14 @@ export default async function ProductsPage() {
               >
                 Reviews →
               </Link>
+              {isAdmin && (
+                <Link
+                  href={`/admin/products/${p.id}/edit`}
+                  style={{ fontSize: "0.8rem", color: "#f59e0b", textDecoration: "none" }}
+                >
+                  Edit ✎
+                </Link>
+              )}
             </div>
           </div>
         ))}

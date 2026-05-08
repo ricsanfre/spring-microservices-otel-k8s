@@ -11,6 +11,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -19,6 +20,12 @@ import java.util.UUID;
 public class UserController implements UsersApi {
 
     private final UserService userService;
+
+    @Override
+    @PreAuthorize("hasAuthority('SCOPE_products:write')")
+    public ResponseEntity<List<UserResponse>> getAllUsers() {
+        return ResponseEntity.ok(userService.findAll());
+    }
 
     @Override
     public ResponseEntity<UserResponse> getCurrentUser() {

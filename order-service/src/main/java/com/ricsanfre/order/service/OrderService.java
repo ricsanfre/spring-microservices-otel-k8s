@@ -127,6 +127,13 @@ public class OrderService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<OrderResponse> findAll() {
+        return orderRepository.findAll().stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
     // ── Update ────────────────────────────────────────────────────────────────
 
     public OrderResponse updateStatus(UUID id, UpdateOrderStatusRequest request) {

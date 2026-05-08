@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { auth } from "@/auth";
 import { apiFetch } from "@/lib/api";
+import { redirect } from "next/navigation";
 
 interface OrderItem {
   id: string;
@@ -20,6 +21,11 @@ interface Order {
 
 export default async function OrdersPage() {
   const session = await auth();
+  const isAdmin = session?.scope?.split(" ").includes("products:write") ?? false;
+  if (isAdmin) {
+    redirect("/admin/orders");
+  }
+
   let orders: Order[] = [];
   let error: string | null = null;
 

@@ -24,6 +24,12 @@ public class OrderController implements OrdersApi {
     private final OrderService orderService;
 
     @Override
+    @PreAuthorize("hasAuthority('SCOPE_products:write')")
+    public ResponseEntity<List<OrderResponse>> getAllOrders() {
+        return ResponseEntity.ok(orderService.findAll());
+    }
+
+    @Override
     @PreAuthorize("hasAuthority('SCOPE_orders:write')")
     public ResponseEntity<OrderResponse> createOrder(CreateOrderRequest createOrderRequest) {
         var auth = SecurityContextHolder.getContext().getAuthentication();

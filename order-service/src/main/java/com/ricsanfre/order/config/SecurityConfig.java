@@ -24,9 +24,10 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                 .requestMatchers("/api-docs/**", "/swagger-ui/**").permitAll()
                 // POST /orders — place new order (orders:write)
+                // GET  /orders — list all orders (products:write, admin only)
                 // GET  /orders/** — read orders (orders:read)
                 // PUT  /orders/*/status — update status (orders:write, admin-only via gateway policy)
-                .anyRequest().hasAnyAuthority("SCOPE_orders:read", "SCOPE_orders:write")
+                .anyRequest().hasAnyAuthority("SCOPE_orders:read", "SCOPE_orders:write", "SCOPE_products:write")
             )
             // Spring Security default: reads 'scope'/'scp' claim → SCOPE_ prefix authorities.
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()));

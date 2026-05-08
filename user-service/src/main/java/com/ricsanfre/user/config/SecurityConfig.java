@@ -26,7 +26,7 @@ public class SecurityConfig {
                 // Service accounts with users:resolve scope can access the resolve endpoint;
                 // users with users:read scope are also permitted (method security enforces users:resolve).
                 .requestMatchers("/api/v1/users/resolve").hasAnyAuthority("SCOPE_users:resolve", "SCOPE_users:read")
-                .anyRequest().hasAuthority("SCOPE_users:read")
+                .anyRequest().hasAnyAuthority("SCOPE_users:read", "SCOPE_products:write")
             )
             // Spring Security default: reads 'scope'/'scp' claim → SCOPE_ prefix authorities.
             // No custom converter needed — IAM-provider-agnostic.

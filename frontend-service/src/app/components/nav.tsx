@@ -1,4 +1,5 @@
-import { auth, signIn, signOut } from "@/auth";
+import { auth, signIn } from "@/auth";
+import { federatedSignOut } from "@/app/actions/auth";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 
@@ -16,6 +17,7 @@ async function getCartItemCount(): Promise<number> {
 export async function Nav() {
   const session = await auth();
   const cartCount = session ? await getCartItemCount() : 0;
+  const isAdmin = session?.scope?.split(" ").includes("products:write") ?? false;
 
   return (
     <nav>
@@ -23,28 +25,30 @@ export async function Nav() {
       {session && (
         <>
           <Link href="/products">Products</Link>
-          <Link href="/orders">Orders</Link>
-          <Link href="/profile">Profile</Link>
+          <Link href={isAdmin ? "/admin/orders" : "/orders"}>Orders</Link>
+          {!isAdmin && <Link href="/profile">Profile</Link>}
+          {isAdmin && (
+            <Link href="/admin" style={{ color: "#f59e0b" }}>
+              Admin
+            </Link>
+          )}
         </>
       )}
       <span className="spacer" />
       {session?.user ? (
         <>
-          <Link href="/cart" className="cart-icon" aria-label="Shopping cart">
-            🛒
-            {cartCount > 0 && (
-              <span className="cart-badge">{cartCount}</span>
-            )}
-          </Link>
+          {!isAdmin && (
+            <Link href="/cart" className="cart-icon" aria-label="Shopping cart">
+              🛒
+              {cartCount > 0 && (
+                <span className="cart-badge">{cartCount}</span>
+              )}
+            </Link>
+          )}
           <span style={{ fontSize: "0.875rem", color: "#94a3b8" }}>
             {session.user.email}
           </span>
-          <form
-            action={async () => {
-              "use server";
-              await signOut({ redirectTo: "/login" });
-            }}
-          >
+          <form action={federatedSignOut}>
             <button type="submit">Sign out</button>
           </form>
         </>

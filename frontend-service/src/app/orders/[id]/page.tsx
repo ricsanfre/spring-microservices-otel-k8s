@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { auth } from "@/auth";
 import { apiFetch, publicFetch } from "@/lib/api";
+import { OrderStatusEditor } from "./OrderStatusEditor";
 
 interface OrderItem {
   id: string;
@@ -37,6 +39,9 @@ export default async function OrderDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+
+  const session = await auth();
+  const isAdmin = session?.scope?.split(" ").includes("orders:write") ?? false;
 
   let order: Order | null = null;
   let error: string | null = null;
@@ -97,7 +102,11 @@ export default async function OrderDetailPage({
         </div>
         <div>
           <p style={{ fontSize: "0.75rem", color: "#64748b", marginBottom: "0.2rem" }}>Status</p>
-          <span className={`status status-${order.status}`}>{order.status}</span>
+          {isAdmin ? (
+            <OrderStatusEditor orderId={order.id} currentStatus={order.status} />
+          ) : (
+            <span className={`status status-${order.status}`}>{order.status}</span>
+          )}
         </div>
         <div>
           <p style={{ fontSize: "0.75rem", color: "#64748b", marginBottom: "0.2rem" }}>Placed</p>

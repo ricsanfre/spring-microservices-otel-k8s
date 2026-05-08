@@ -24,7 +24,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       authorization: {
         params: {
           scope:
-            "openid profile email users:read orders:read orders:write products:read reviews:read reviews:write cart:read cart:write",
+            "openid profile email users:read orders:read orders:write products:read products:write reviews:read reviews:write cart:read cart:write",
         },
       },
     }),
@@ -44,6 +44,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           accessToken: account.access_token,
           refreshToken: account.refresh_token,
           expiresAt: account.expires_at,
+          scope: account.scope,
+          // id_token is stored solely for federated logout (id_token_hint parameter).
+          // It is NOT forwarded to microservices — only the access_token is used for that.
+          idToken: account.id_token,
         };
         void triggerLazyRegistration(account.access_token!);
         return newToken;
@@ -61,6 +65,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // Expose the access_token on the session object so Server Components can forward it
     session({ session, token }) {
       session.accessToken = token.accessToken as string;
+      session.idToken = token.idToken as string | undefined;
+      session.scope = token.scope as string | undefined;
       if (token.error) {
         session.error = token.error as string;
       }
