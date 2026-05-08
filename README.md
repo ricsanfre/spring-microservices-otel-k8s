@@ -228,9 +228,9 @@ Manages the product catalog.
 |--------|------|-------------|---------------|
 | `GET` | `/api/v1/products` | List products (paginated) | Any authenticated user |
 | `GET` | `/api/v1/products/{id}` | Get product by ID | Any authenticated user |
-| `POST` | `/api/v1/products` | Create product | `ADMIN` |
-| `PUT` | `/api/v1/products/{id}` | Update product | `ADMIN` |
-| `DELETE` | `/api/v1/products/{id}` | Delete product | `ADMIN` |
+| `POST` | `/api/v1/products` | Create product | `SCOPE_products:write` (admin only) |
+| `PUT` | `/api/v1/products/{id}` | Update product | `SCOPE_products:write` (admin only) |
+| `DELETE` | `/api/v1/products/{id}` | Delete product | `SCOPE_products:write` (admin only) |
 | `POST` | `/api/v1/products/stock/reserve` | Reserve stock for a confirmed order (M2M only) | `SCOPE_products:write` |
 
 ---
@@ -243,11 +243,12 @@ Manages the full order lifecycle. Orders are created as `PENDING` previews and t
 
 | Method | Path | Description | Required Role |
 |--------|------|-------------|---------------|
+| `GET` | `/api/v1/orders` | List all orders on the platform | `SCOPE_products:write` (admin only) |
 | `POST` | `/api/v1/orders` | Create a new order preview (`PENDING`) | Any authenticated user |
 | `POST` | `/api/v1/orders/{id}/confirm` | Confirm order: reserve stock → `CONFIRMED` → publish Kafka event | Owner (`SCOPE_orders:write`) |
-| `GET` | `/api/v1/orders/{id}` | Get order by ID | Owner or `ADMIN` |
-| `GET` | `/api/v1/orders/user/{userId}` | List user's orders | Owner or `ADMIN` |
-| `PUT` | `/api/v1/orders/{id}/status` | Update order status | `ADMIN` |
+| `GET` | `/api/v1/orders/{id}` | Get order by ID | Owner or `SCOPE_products:write` |
+| `GET` | `/api/v1/orders/user/{userId}` | List user's orders | Owner or `SCOPE_products:write` |
+| `PUT` | `/api/v1/orders/{id}/status` | Update order status | `SCOPE_products:write` (admin only) |
 
 **Order status lifecycle:** `PENDING` → `CONFIRMED` → `SHIPPED` → `DELIVERED` | `CANCELLED`
 
@@ -301,6 +302,7 @@ The profile also holds a **shipping address** and a **billing account** (card di
 
 | Method | Path | Description | Required Role |
 |--------|------|-------------|---------------|
+| `GET` | `/api/v1/users` | List all registered users | `SCOPE_products:write` (admin only) |
 | `GET` | `/api/v1/users/me` | Get own profile (resolved from JWT `sub`) | Any authenticated user |
 | `GET` | `/api/v1/users/{id}` | Get user profile by ID | Any authenticated user |
 | `GET` | `/api/v1/users/resolve?idp_subject={sub}` | Resolve IAM `sub` → internal user profile | Service account only |
@@ -917,6 +919,11 @@ curl -H "Authorization: Bearer $SA_TOKEN" \
 |----------|----------|-------------|----------------|
 | `testuser` | `password` | `customer` on `e-commerce-web` | `openid profile email products:read orders:read orders:write reviews:read reviews:write users:read cart:read cart:write` |
 | `otheruser` | `password` | `customer` on `e-commerce-web` | `openid profile email products:read orders:read orders:write reviews:read reviews:write users:read cart:read cart:write` |
+| `adminuser` | `password` | `admin` on `e-commerce-web` | `openid profile email products:read products:write orders:read orders:write reviews:read reviews:write users:read notifications:receive` (no cart scopes — admins don't shop) |
+
+> **Admin discriminator:** `products:write` is present only in admin tokens. The frontend checks
+> `session?.scope?.split(" ").includes("products:write")` to toggle admin-only UI (dashboard,
+> all-orders/all-users tables, product creation). Cart icon and Profile link are hidden for admins.
 
 **Service account clients (M2M — Client Credentials):**
 
@@ -1013,28 +1020,49 @@ Make sure Keycloak is running (`make infra-up`) before starting the frontend —
 
 ```
 frontend-service/
-├── .env.local.example     ← copy to .env.local; fill AUTH_SECRET + AUTH_KEYCLOAK_SECRET
+├── .env.local.example     ← copy to .env.local; fill AUTH_SECRET + AUTH_KEYCLOAK_SECRET + AUTH_URL
 ├── Dockerfile             ← multi-stage build; output:standalone for k8s
 ├── next.config.ts         ← output:"standalone" enabled
 ├── package.json           ← Next.js 15, next-auth 5.0.0-beta (Auth.js v5), React 19; dev port 3001
 └── src/
-    ├── auth.ts            ← Auth.js v5: Keycloak provider, JWT/session callbacks, token refresh
+    ├── auth.ts            ← Auth.js v5: Keycloak provider, JWT/session callbacks (stores id_token),
+    │                         token refresh, id_token forwarded for federated logout only
     ├── middleware.ts      ← protects all routes (redirects to Keycloak login if no session)
     ├── types/
-    │   └── next-auth.d.ts ← Session augmented with accessToken + error fields
+    │   └── next-auth.d.ts ← Session augmented with accessToken, idToken, scope, error fields
     ├── lib/
     │   └── api.ts         ← apiFetch() — forwards Bearer JWT server-side to microservices
     └── app/
         ├── layout.tsx     ← root layout with Nav server component
         ├── page.tsx       ← home page (welcome + links)
-        ├── api/auth/[...nextauth]/route.ts  ← Auth.js OIDC callback handler
+        ├── actions/
+        │   └── auth.ts    ← federatedSignOut() server action — clears local Auth.js cookie then
+        │                     redirects to Keycloak end-session endpoint with id_token_hint
+        ├── api/
+        │   ├── auth/[...nextauth]/route.ts  ← Auth.js OIDC callback handler
+        │   └── admin/
+        │       ├── orders/route.ts  ← BFF: GET /api/admin/orders — guards products:write scope,
+        │       │                       proxies to order-service GET /api/v1/orders
+        │       └── users/route.ts   ← BFF: GET /api/admin/users — guards products:write scope,
+        │                               proxies to user-service GET /api/v1/users
         ├── components/
-        │   └── nav.tsx    ← server component: shows user email + sign-out
+        │   └── nav.tsx    ← server component: shows user email, conditional nav links
+        │                     (cart + profile hidden for admin; Orders → /admin/orders for admin)
+        │                     sign-out triggers federatedSignOut (local cookie + Keycloak session)
+        ├── admin/
+        │   ├── page.tsx          ← admin dashboard (redirects non-admin to /products)
+        │   ├── orders/page.tsx   ← all-orders table with status editor (admin only)
+        │   └── users/page.tsx    ← all-users table (admin only)
         ├── products/
-        │   └── page.tsx   ← server component: lists products from product-service
+        │   └── page.tsx   ← server component: lists products; Add to Cart hidden for admin
         └── orders/
-            └── page.tsx   ← server component: lists user orders from order-service
+            └── page.tsx   ← server component: lists user's own orders; redirects admin to
+                              /admin/orders
 ```
+
+> **Admin detection:** The frontend checks `session?.scope?.split(" ").includes("products:write")`.
+> Only the `admin` Keycloak role grants `products:write` — customer tokens never include it.
+> This scope-based check avoids any custom claim or role attribute in the JWT.
 
 ---
 

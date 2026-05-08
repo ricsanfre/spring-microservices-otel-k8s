@@ -48,8 +48,10 @@ flowchart TD
         subgraph USERS["Users"]
             U1["testuser\nclientRole: customer"]
             U2["otheruser\nclientRole: customer"]
+            U5["adminuser\nclientRole: admin"]
             U3["service-account-cart-service\n(Keycloak service account)"]
             U4["service-account-order-service\n(Keycloak service account)"]
+            U6["service-account-reviews-service\n(Keycloak service account)"]
         end
 
         CR_C -->|composites| CR_P
@@ -57,7 +59,10 @@ flowchart TD
         CR_C -->|composites| CR_R
         CR_C -->|composites| CR_U
         CR_C -->|composites| CR_CA
-        CR_A -->|composites| CR_C
+        CR_A -->|composites all of customer plus| CR_P
+        CR_A -->|composites| CR_O
+        CR_A -->|composites| CR_R
+        CR_A -->|composites| CR_U
         CR_A -->|composites| CR_N
 
         CR_P -->|clientScopeMappings| S1
@@ -83,8 +88,10 @@ flowchart TD
         C3 -->|owns service account| U4
         U1 -->|assigned role| CR_C
         U2 -->|assigned role| CR_C
+        U5 -->|assigned role| CR_A
         U3 -->|orders:write on order-service| CR_O
         U4 -->|products:write on product-service| CR_P
+        U6 -->|products:read + orders:read on resource servers| CR_P
     end
 
     Browser["Browser"]
@@ -194,7 +201,7 @@ remain on `e-commerce-web` and aggregate roles across service clients.
 | `notification-service` | `notifications:receive` | atomic |
 | `cart-service` | `cart:read`, `cart:write` | atomic |
 | `e-commerce-web` | `customer` — composite of `products:read`, `orders:read/write`, `reviews:read/write`, `users:read`, `cart:read/write` | composite |
-| `e-commerce-web` | `admin` — composite of all `customer` roles + `products:write` + `notifications:receive` | composite |
+| `e-commerce-web` | `admin` — composite of `products:read/write`, `orders:read/write`, `reviews:read/write`, `users:read`, `notifications:receive` (**no** `cart:read/write`) | composite |
 
 ### Usage in services
 
@@ -234,6 +241,11 @@ fullScopeAllowed:       false   ← client must explicitly request every scope i
 redirectUris:           http://localhost:3001/api/auth/callback/keycloak  (local dev — Auth.js)
                         https://app.local.test/api/auth/callback/keycloak (staging — Auth.js)
                         http://localhost:9876/callback                     (local dev — oauth2c CLI)
+attributes:
+  post.logout.redirect.uris: http://localhost:3001/*##https://app.local.test/*
+                        ← Keycloak 26 format; '##' separates multiple URIs.
+                          Required for federated logout (post_logout_redirect_uri validation).
+                          The field 'postLogoutRedirectUris' is NOT supported in the import JSON.
 webOrigins:             http://localhost:3001, https://app.local.test
 defaultClientScopes:    openid, basic, profile, email
 optionalClientScopes:   products:read, products:write, orders:read, orders:write,
@@ -282,11 +294,12 @@ All the scopes it needs must be included in the `scope` parameter of the authori
 
 #### JWT payload (user token from this client)
 
+**Customer token (`testuser` / `otheruser`):**
+
 ```json
 {
   "sub":               "f47ac10b-...",
   "iss":               "http://localhost:8180/realms/e-commerce",
-  "aud":               "account",
   "preferred_username": "testuser",
   "email":             "testuser@example.com",
   "given_name":        "Test",
@@ -296,6 +309,25 @@ All the scopes it needs must be included in the `scope` parameter of the authori
   "iat":               1745596400
 }
 ```
+
+**Admin token (`adminuser`):**
+
+```json
+{
+  "sub":               "a1b2c3d4-...",
+  "iss":               "http://localhost:8180/realms/e-commerce",
+  "preferred_username": "adminuser",
+  "email":             "admin@example.com",
+  "given_name":        "Admin",
+  "family_name":       "User",
+  "scope":             "openid profile email products:read products:write orders:read orders:write reviews:read reviews:write users:read notifications:receive",
+  "exp":               1745600000,
+  "iat":               1745596400
+}
+```
+
+> **Note:** `cart:read` and `cart:write` are absent from the admin token — the `admin` composite
+> role deliberately does not include cart roles. Admins manage the platform and do not shop.
 
 ---
 
@@ -405,18 +437,38 @@ explicitly requested by the client: `products:read orders:read orders:write revi
 A second test customer account. Assigned the `customer` client role on `e-commerce-web`.
 Useful for testing cross-user isolation (e.g., verifying that `otheruser` cannot read `testuser`'s orders).
 
+### `adminuser`
+
+| Attribute | Value |
+|-----------|-------|
+| Username | `adminuser` |
+| Email | `admin@example.com` |
+| First name | `Admin` |
+| Last name | `User` |
+| Password | `password` |
+| Temporary password | No |
+
+Platform administrator account. Assigned the `admin` composite client role on `e-commerce-web`.
+The `admin` role grants `products:read/write`, `orders:read/write`, `reviews:read/write`, `users:read`,
+and `notifications:receive`. It deliberately excludes `cart:read/write` — admins manage the platform
+and do not place orders or maintain a shopping cart.
+
+The `products:write` scope in the admin token is the discriminator used throughout the frontend
+(`session?.scope?.split(" ").includes("products:write")`) to enable admin-only UI elements.
+
 ### Per-service service accounts
 
 Keycloak automatically creates a service account user for each client with `serviceAccountsEnabled: true`.
 These are internal Keycloak users, not real humans.
 
-| Service account username | Created for | In realm JSON? |
-|--------------------------|-------------|----------------|
-| `service-account-product-service` | `product-service` client | No — auto-created, no role assignment needed |
-| `service-account-order-service` | `order-service` client | **Yes** — `products:write` on `product-service`; `users:resolve` on `user-service` |
-| `service-account-reviews-service` | `reviews-service` client | **Yes** — `products:read` on `product-service`; `orders:read` on `order-service`; `users:resolve` on `user-service` |
-| `service-account-user-service` | `user-service` client | No — auto-created, no role assignment needed |
-| `service-account-cart-service` | `cart-service` client | **Yes** — `orders:write` on `order-service`; `users:resolve` on `user-service` |
+| Service account username | Created for | In realm JSON? | Roles assigned |
+|--------------------------|-------------|----------------|----------------|
+| `service-account-product-service` | `product-service` | No — auto-created, no roles needed | — |
+| `service-account-order-service` | `order-service` | **Yes** | `products:write` on `product-service`; `users:resolve` on `user-service` |
+| `service-account-reviews-service` | `reviews-service` | **Yes** | `products:read` on `product-service`; `orders:read` on `order-service`; `users:resolve` on `user-service` |
+| `service-account-user-service` | `user-service` | No — auto-created, no roles needed | — |
+| `service-account-notification-service` | `notification-service` | No — Kafka consumer, no HTTP calls | — |
+| `service-account-cart-service` | `cart-service` | **Yes** | `orders:write` on `order-service`; `users:resolve` on `user-service` |
 
 The JWT issued via Client Credentials grant has `preferred_username: service-account-<client-id>`
 and carries only the scopes in `defaultClientScopes` that pass the `clientScopeMappings` role check.

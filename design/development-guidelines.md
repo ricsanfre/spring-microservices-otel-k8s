@@ -622,6 +622,8 @@ spring:
 spring:
   mongodb:
     uri: ${MONGODB_URI:mongodb://localhost:27017/products}
+    representation:
+      uuid: standard
 ```
 
 > **Spring Boot 4 migration note:** The MongoDB connection URI property was renamed in Spring Boot 4.
@@ -630,6 +632,15 @@ spring:
 > default `test` database and all queries return empty results.
 > Properties that require Spring Data MongoDB (e.g. `spring.data.mongodb.auto-index-creation`,
 > `spring.data.mongodb.repositories.type`) are unchanged.
+
+> **`spring.mongodb.representation.uuid: standard` is mandatory when any `@Document` field is of type `java.util.UUID`.**
+> Without it the MongoDB driver does not know which BSON binary subtype to use and throws
+> `CodecConfigurationException: The uuidRepresentation has not been specified, so the UUID cannot be encoded`
+> at the first write or query that involves a UUID field.
+> `standard` serialises UUIDs as BSON Binary subtype 4 (RFC 4122), which is the correct modern representation.
+> Note: the old `spring.mongodb.uuid-representation` property name is **not recognised** in Spring Boot 4 — it is silently ignored.
+> If a document only uses `String` IDs (ObjectId or manual hex) this property is not required, but setting
+> it is harmless and prevents future issues if UUID fields are added later.
 
 #### Document conventions
 
