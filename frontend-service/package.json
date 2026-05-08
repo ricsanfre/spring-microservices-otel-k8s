@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@vercel/otel": "^2.1.2",
     "next": "^15.3.0",
     "next-auth": "5.0.0-beta.31",
     "react": "^19.1.0",

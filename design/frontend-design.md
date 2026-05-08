@@ -289,3 +289,56 @@ Service base URLs are resolved from environment variables (`PRODUCTS_SERVICE_URL
 | `REVIEWS_SERVICE_URL` | reviews-service base URL | `http://localhost:8083` |
 | `USERS_SERVICE_URL` | user-service base URL | `http://localhost:8085` |
 | `CART_SERVICE_URL` | cart-service base URL | `http://localhost:8086` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP HTTP base URL for traces | `http://localhost:4318` |
+| `OTEL_SERVICE_NAME` | Service name reported in traces | `frontend-service` |
+
+---
+
+## 11. Observability — OpenTelemetry
+
+### 11.1 Approach
+
+Next.js 15 has a stable instrumentation hook (`src/instrumentation.ts`) that runs once at server startup on the Node.js runtime. The `@vercel/otel` package wires up the OpenTelemetry SDK there with zero boilerplate.
+
+**What is automatically instrumented (server-side only):**
+- Every incoming HTTP request (pages, Route Handlers, Server Actions) → a root server span
+- Every outbound `fetch()` call → a child span with `traceparent` header injected
+
+The `traceparent` header injection is the key integration point: `apiFetch()` and `publicFetch()` in `src/lib/api.ts` use the global `fetch`, so the OTel-patched version automatically propagates the W3C trace context to all microservices. In Tempo you see the full end-to-end trace: `GET /products` (frontend) → `GET /api/v1/products` (product-service) → JPA/MongoDB span.
+
+**Browser-side (client components)** is not instrumented — it requires `@opentelemetry/sdk-trace-web` and a CORS-enabled OTLP endpoint, which adds complexity without proportionate observability value for a BFF architecture.
+
+### 11.2 Implementation
+
+**`src/instrumentation.ts`** (loaded automatically by Next.js 15):
+```typescript
+import { registerOTel } from "@vercel/otel";
+
+export function register() {
+  registerOTel({
+    serviceName: process.env.OTEL_SERVICE_NAME ?? "frontend-service",
+  });
+}
+```
+
+`registerOTel` reads `OTEL_EXPORTER_OTLP_ENDPOINT` from the environment and configures an OTLP HTTP exporter — the same convention used by all Spring Boot services.
+
+### 11.3 Configuration
+
+Local development (LGTM all-in-one container on `:4318`):
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+```
+
+Kubernetes staging (`otel-collector` in the `monitoring` namespace):
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring:4318
+```
+
+### 11.4 Dependency
+
+```json
+"@vercel/otel": "^2.1.2"
+```
+
+No additional OTel dependencies are needed — `@vercel/otel` bundles the required `@opentelemetry/sdk-node` and OTLP exporter packages.
