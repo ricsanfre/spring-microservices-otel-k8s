@@ -1,6 +1,7 @@
-# Envoy Gateway — GatewayClass, Gateway, HTTPRoutes, SecurityPolicy
+# Envoy Gateway — GatewayClass, Gateway, HTTPRoutes
+# SecurityPolicy removed: microservices are no longer exposed externally.
+# JWT enforcement lives inside each Spring Boot service (OAuth2 Resource Server).
 resources:
   - gateway-class.yaml
   - gateway.yaml
   - httproutes.yaml
-  - security-policy.yaml

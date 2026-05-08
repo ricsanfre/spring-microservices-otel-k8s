@@ -42,7 +42,7 @@ Spring Boot microservice-based e-commerce platform implementing:
 | `user-service` | 8085 | PostgreSQL | User profile management; delegates identity to Keycloak |
 | `cart-service` | 8086 | Valkey | Shopping cart management; initiates checkout to order-service; clears cart on order confirmation via Kafka |
 
-> **Entry point:** External traffic enters through **Envoy Gateway** (Kubernetes Gateway API). There is no Spring Cloud Gateway service — Envoy handles JWT validation via a `SecurityPolicy` referencing the Keycloak JWKS endpoint, then routes directly to Kubernetes services. Service-to-service calls use plain Kubernetes Service DNS (`http://service-name:port`), resolved by kube-proxy — no service discovery library required.
+> **Entry point:** External traffic enters through **Envoy Gateway** (Kubernetes Gateway API). The external gateway exposes only three hostnames: `app.local.test` (Next.js BFF), `keycloak.local.test`, and `grafana.local.test`. **Microservices are not exposed externally.** The Next.js BFF calls them directly via Kubernetes Service DNS (`http://service-name:port`) server-side. JWT validation is handled by each service's own OAuth2 Resource Server configuration. See [ADR-015](design/adr-015-microservices-not-exposed-externally.md).
 
 ---
 
@@ -84,13 +84,11 @@ flowchart TD
     Client -- "1. Visit app (cookie)" --> EG
     EG -- "HTTPRoute app.local.test\n(no SecurityPolicy)" --> FE
     FE -. "2. OIDC Auth Code flow\n(server-side)" .-> KC
-    FE -- "3. Bearer JWT\n(server-side API calls)" --> EG
-    EG -. "validate JWT\nvia JWKS (SecurityPolicy)" .-> KC
-    EG -- "HTTPRoute" --> PS
-    EG -- "HTTPRoute" --> OS
-    EG -- "HTTPRoute" --> RS
-    EG -- "HTTPRoute" --> US
-    EG -- "HTTPRoute" --> CS
+    FE -- "3. Bearer JWT\n(cluster-internal DNS)" --> PS
+    FE -- "Bearer JWT\n(cluster-internal DNS)" --> OS
+    FE -- "Bearer JWT\n(cluster-internal DNS)" --> RS
+    FE -- "Bearer JWT\n(cluster-internal DNS)" --> US
+    FE -- "Bearer JWT\n(cluster-internal DNS)" --> CS
 
     CS -. "POST /cart/checkout\n(Client Credentials)" .-> OS
     OS -. "POST /products/stock/reserve\n(Client Credentials)" .-> PS
@@ -163,14 +161,13 @@ sequenceDiagram
 
     Note over B,SVC: Subsequent authenticated requests
     B->>FE: GET /orders (session cookie)
-    FE->>EG: GET /api/v1/orders + Authorization: Bearer JWT ← server-side
-    EG->>KC: GET /certs (JWKS) — SecurityPolicy, cached
-    EG-->>EG: Validate JWT signature + expiry + audience
-    EG->>SVC: Forward request + Authorization: Bearer JWT
+    FE->>SVC: GET /api/v1/orders + Authorization: Bearer JWT ← cluster-internal DNS (direct)
     SVC-->>SVC: Validate JWT (OAuth2 Resource Server)
-    SVC-->>EG: Response
-    EG-->>FE: Response
+    SVC-->>FE: Response
     FE-->>B: Rendered page
+
+    Note over FE,SVC: Microservices are not reachable externally (ADR-015).
+    Note over FE,SVC: Envoy Gateway only handles Browser ↔ frontend-service.
 ```
 
 ### Token Flow 2 — Service-to-Service (Client Credentials Grant)
@@ -212,8 +209,8 @@ Browser-facing Next.js 15 application implementing the BFF pattern. See [ADR-007
 | Auth library | Auth.js v5 |
 | Session storage | Encrypted HttpOnly cookie (JWT never in browser) |
 | Keycloak client | `e-commerce-web` (confidential — `client_secret` in server env only) |
-| API calls | Server Components / Route Handlers forward `Authorization: Bearer <token>` server-side |
-| Envoy HTTPRoute | `app.local.test` — **no `SecurityPolicy`** (Auth.js handles authentication) |
+| API calls | Server Components / Route Handlers call microservices directly via Kubernetes Service DNS (`http://service-name:port`) — no gateway hop |
+| Envoy HTTPRoute | `app.local.test` — **no `SecurityPolicy`** (Auth.js handles authentication); microservices have no external HTTPRoute |
 | Local dev port | 3001 (3000 is reserved for Grafana) |
 
 ---
@@ -674,18 +671,16 @@ flowchart TD
     Client -- "HTTPS *.local.test" --> LB
     LB --> GW
     CM -- "issues wildcard cert" --> GW
-    GW -. "JWT validate\n(SecurityPolicy → JWKS)" .-> KC
     GW -- "HTTPRoute app.local.test\n(no SecurityPolicy)" --> FE
-    GW -- "HTTPRoute /api/v1/users" --> US
-    GW -- "HTTPRoute /api/v1/products" --> PS
-    GW -- "HTTPRoute /api/v1/orders" --> OS
-    GW -- "HTTPRoute /api/v1/cart" --> CS
     GW -- "HTTPRoute keycloak.local.test" --> KC
     GW -- "HTTPRoute grafana.local.test" --> GRAFANA
 
-    %% ── BFF server-side API calls ─────────────────────────────────────────
+    %% ── BFF server-side API calls (cluster-internal DNS, no gateway hop) ──
     FE -. "OIDC Auth Code\n(server-side, client_secret)" .-> KC
-    FE -. "Bearer JWT\n(server-side)" .-> GW
+    FE -- "Bearer JWT\nhttp://user-service:8085" --> US
+    FE -- "Bearer JWT\nhttp://product-service:8081" --> PS
+    FE -- "Bearer JWT\nhttp://order-service:8082" --> OS
+    FE -- "Bearer JWT\nhttp://cart-service:8086" --> CS
 
     %% ── Service-to-service (plain K8s DNS) ────────────────────────────────
     CS -. "http://order-service:8082

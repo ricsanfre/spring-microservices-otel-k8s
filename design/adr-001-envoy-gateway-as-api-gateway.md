@@ -1,8 +1,24 @@
 # ADR-001 — Envoy Gateway as API Gateway
 
 **Date:** 2026-04-25  
-**Status:** Accepted  
+**Status:** Accepted (partially amended by [ADR-015](adr-015-microservices-not-exposed-externally.md))  
 **Deciders:** Project team
+
+---
+
+## Amendment — 2026-05-08 (ADR-015)
+
+With the adoption of the BFF pattern (ADR-007) the browser no longer calls microservices
+directly, making the external exposure of `api.local.test` unnecessary. **Microservice
+`HTTPRoute`s and the `SecurityPolicy` have been removed from the external gateway.** The
+gateway now only routes:
+- `app.local.test` → `frontend-service`
+- `keycloak.local.test` → Keycloak
+- `grafana.local.test` → Grafana
+
+The Next.js BFF calls microservices directly via Kubernetes Service DNS (`http://service-name:port`).
+JWT enforcement is handled exclusively by each service's OAuth2 Resource Server configuration.
+See [ADR-015](adr-015-microservices-not-exposed-externally.md) for the full rationale.
 
 ---
 

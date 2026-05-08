@@ -1,7 +1,7 @@
 # ADR-007 — Next.js BFF Frontend
 
 **Date:** 2026-04-26  
-**Status:** Accepted  
+**Status:** Accepted (see [ADR-015](adr-015-microservices-not-exposed-externally.md) for the follow-on decision on gateway exposure)  
 **Deciders:** Project team
 
 ---
@@ -13,7 +13,8 @@ Several deployment and security constraints shaped the choice:
 
 1. **Envoy Gateway is the sole ingress** — all external traffic must enter through it (TLS
    termination, routing). Adding a dedicated frontend deployment is straightforward via a new
-   `HTTPRoute`.
+   `HTTPRoute`. (Note: ADR-015 subsequently removed microservice routes from the external gateway;
+   the BFF calls services directly via Kubernetes Service DNS.)
 
 2. **JWT security in the browser is undesirable** — storing an access token in `localStorage` or
    `sessionStorage` exposes it to XSS attacks. The standard mitigation is to keep the token on the
@@ -54,11 +55,16 @@ The frontend operates as a **Backend-For-Frontend (BFF)**:
 ### Security — JWT never reaches the browser
 
 ```
-Browser  ──── HTTPS ────►  Next.js server  ──── Bearer JWT ────►  Envoy Gateway
-               (cookie)                           (server-side)           │
-                                                                           ▼
-                                                                    Microservices
+Browser  ──── HTTPS ────►  Next.js server  ──── Bearer JWT ────►  Microservices
+               (cookie)                      (cluster-internal           │
+                                              Kubernetes DNS)             ▼
+                                                                  OAuth2 Resource Server
+                                                                  (validates JWT directly)
 ```
+
+Since ADR-015, the Next.js server calls microservices directly via Kubernetes Service DNS
+(`http://service-name:port`) rather than routing through the external Envoy Gateway. The external
+gateway only handles the browser ↔ frontend-service leg.
 
 The browser's session state is an HttpOnly, Secure, SameSite=Lax cookie issued by Auth.js. The
 underlying JWT lives only in the Next.js server process (or an encrypted cookie payload). An XSS
@@ -100,14 +106,16 @@ Authorization: Bearer <user access_token>
 This preserves per-user authorization: the downstream microservice sees the real user's JWT, not
 a service-account token. The microservice does not need to know about Auth.js or Next.js.
 
-### Envoy Gateway — no `SecurityPolicy` on the frontend `HTTPRoute`
+### Envoy Gateway — only `app.local.test` remains
 
 The `app.local.test` HTTPRoute routes to `frontend-service`. **No `SecurityPolicy` is attached.**
 Keycloak authentication is handled by Auth.js inside the Next.js server — unauthenticated browser
 requests are redirected to the Keycloak login page by Auth.js middleware, not by Envoy.
 
-The existing `api.local.test` and per-service HTTPRoutes retain their `SecurityPolicy` (JWT
-validation) unchanged.
+Per ADR-015, the `api.local.test` hostname and all per-service HTTPRoutes have been removed from
+the external gateway. The `SecurityPolicy` (JWT validation at the gateway level) has also been
+removed — JWT enforcement now lives exclusively in each service's OAuth2 Resource Server
+configuration.
 
 ---
 
