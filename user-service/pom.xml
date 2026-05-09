@@ -75,6 +75,11 @@
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
+        <!-- Micrometer JDBC observation — SQL-level spans in Tempo -->
+        <dependency>
+            <groupId>net.ttddyy.observation</groupId>
+            <artifactId>datasource-micrometer-spring-boot</artifactId>
+        </dependency>
 
         <!-- ── Caching — Caffeine (lazy idp_subject → internal UUID resolution) -->
         <dependency>

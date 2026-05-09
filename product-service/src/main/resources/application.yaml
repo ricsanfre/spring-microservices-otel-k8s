@@ -27,6 +27,9 @@ management:
   tracing:
     sampling:
       probability: 1.0
+  observations:
+    mongodb:
+      enabled: true               # MongoDB command-level spans in Tempo
   otlp:
     metrics:
       export:

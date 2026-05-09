@@ -1319,8 +1319,38 @@ Use the existing [otel-demo](../otel-demo) module as the reference implementatio
 
 - All inbound HTTP requests (latency, status codes, trace context propagation)
 - Outbound `RestClient` calls
-- JPA/JDBC query spans
+- Redis/Valkey (`spring-boot-starter-data-redis` + Lettuce — uses Micrometer observations by default)
 - Spring `@Scheduled` methods
+
+### Database span instrumentation (opt-in)
+
+#### PostgreSQL / JDBC (user-service, order-service)
+
+Add `datasource-micrometer-spring-boot` — auto-configures a `DataSource` proxy that emits Micrometer observations for every SQL statement:
+
+```xml
+<!-- pom.xml — version pinned in root BOM -->
+<dependency>
+    <groupId>net.ttddyy.observation</groupId>
+    <artifactId>datasource-micrometer-spring-boot</artifactId>
+</dependency>
+```
+
+No YAML changes required — auto-configuration activates when the jar is on the classpath alongside `ObservationRegistry`.
+
+> **Why not `opentelemetry-jdbc`?**  
+> That library (from the OTel community instrumentation repo) requires changing `spring.datasource.url` to `jdbc:otel:postgresql://...` and setting `driver-class-name: io.opentelemetry.instrumentation.jdbc.OpenTelemetryDriver`. It targets the OTel community starter (`opentelemetry-spring-boot-starter`), which uses the raw OTel SDK. This project uses `spring-boot-starter-opentelemetry` (Micrometer Tracing path) — mixing in direct-OTel instrumentation risks duplicate spans and bypasses the Micrometer metrics pipeline. Use `datasource-micrometer-spring-boot` instead.
+
+#### MongoDB (product-service)
+
+Spring Data MongoDB registers a `MongoObservationCommandListener` automatically when an `ObservationRegistry` bean is present. Enable it explicitly in `application.yaml`:
+
+```yaml
+management:
+  observations:
+    mongodb:
+      enabled: true               # MongoDB command-level spans in Tempo
+```
 
 ### Kafka trace context propagation (opt-in)
 

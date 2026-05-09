@@ -41,6 +41,9 @@
         <!-- OpenTelemetry Logback appender (alpha — not managed by Spring Boot BOM) -->
         <otel-logback-appender.version>2.21.0-alpha</otel-logback-appender.version>
 
+        <!-- JDBC Micrometer observation — wraps DataSource for SQL-level spans (not in Spring Boot BOM) -->
+        <datasource-micrometer.version>2.2.1</datasource-micrometer.version>
+
         <!-- Springdoc OpenAPI UI -->
         <springdoc.version>3.0.0</springdoc.version>
 
@@ -76,6 +79,13 @@
                 <groupId>io.opentelemetry.instrumentation</groupId>
                 <artifactId>opentelemetry-logback-appender-1.0</artifactId>
                 <version>${otel-logback-appender.version}</version>
+            </dependency>
+
+            <!-- JDBC Micrometer observation — SQL-level spans for PostgreSQL services -->
+            <dependency>
+                <groupId>net.ttddyy.observation</groupId>
+                <artifactId>datasource-micrometer-spring-boot</artifactId>
+                <version>${datasource-micrometer.version}</version>
             </dependency>
 
             <!-- Springdoc OpenAPI UI -->
