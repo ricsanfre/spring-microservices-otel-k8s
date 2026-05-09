@@ -96,47 +96,42 @@ public class CartService {
 
     public OrderServiceClient.OrderResponse checkout(UUID userId) {
         log.debug("checkout userId={}", userId);
-        Span currentSpan = tracer.currentSpan();
-        if (currentSpan != null) currentSpan.tag("user.id", userId.toString());
-        MDC.put("user.id", userId.toString());
-        try {
-            Counter.builder("cart.checkout.initiated").register(meterRegistry).increment();
+        Span span = tracer.nextSpan().name("cart.checkout").start();
+        try (Tracer.SpanInScope ws = tracer.withSpan(span)) {
+            span.tag("user.id", userId.toString());
+            MDC.put("user.id", userId.toString());
+            try {
+                Counter.builder("cart.checkout.initiated").register(meterRegistry).increment();
 
-            Cart cart;
-            List<OrderServiceClient.OrderItemRequest> items;
-            Span validateSpan = tracer.nextSpan().name("checkout.validate").start();
-            try (Tracer.SpanInScope ws = tracer.withSpan(validateSpan)) {
-                cart = cartRepository.findByUserId(userId.toString())
+                Cart cart = cartRepository.findByUserId(userId.toString())
                         .orElseThrow(() -> new BusinessRuleException("Cart is empty for user " + userId));
                 if (cart.getItems() == null || cart.getItems().isEmpty()) {
                     throw new BusinessRuleException("Cart is empty for user " + userId);
                 }
-                items = cart.getItems().stream()
+                List<OrderServiceClient.OrderItemRequest> items = cart.getItems().stream()
                         .map(i -> new OrderServiceClient.OrderItemRequest(
                                 i.getProductId(), i.getQuantity(), i.getPrice()))
                         .toList();
-                validateSpan.tag("cart.item.count", String.valueOf(items.size()));
-            } finally {
-                validateSpan.end();
-            }
+                span.tag("cart.item.count", String.valueOf(items.size()));
 
-            log.info("Initiating checkout for userId={} with {} items", userId, items.size());
-            Span reserveSpan = tracer.nextSpan().name("checkout.reserve").start();
-            try (Tracer.SpanInScope ws = tracer.withSpan(reserveSpan)) {
-                OrderServiceClient.OrderResponse order = orderServiceClient.createOrder(
-                        new OrderServiceClient.CreateOrderRequest(userId, items));
-                reserveSpan.tag("order.id", order.id().toString());
-                Counter.builder("cart.checkout.confirmed").tag("result", "success").register(meterRegistry).increment();
-                log.info("Checkout completed userId={} orderId={}", userId, order.id());
-                return order;
-            } catch (Exception e) {
-                Counter.builder("cart.checkout.confirmed").tag("result", "failure").register(meterRegistry).increment();
-                throw e;
+                log.info("Initiating checkout for userId={} with {} items", userId, items.size());
+                try {
+                    OrderServiceClient.OrderResponse order = orderServiceClient.createOrder(
+                            new OrderServiceClient.CreateOrderRequest(userId, items));
+                    span.tag("order.id", order.id().toString());
+                    Counter.builder("cart.checkout.confirmed").tag("result", "success").register(meterRegistry).increment();
+                    log.info("Checkout completed userId={} orderId={}", userId, order.id());
+                    return order;
+                } catch (Exception e) {
+                    span.error(e);
+                    Counter.builder("cart.checkout.confirmed").tag("result", "failure").register(meterRegistry).increment();
+                    throw e;
+                }
             } finally {
-                reserveSpan.end();
+                MDC.remove("user.id");
             }
         } finally {
-            MDC.remove("user.id");
+            span.end();
         }
     }
 

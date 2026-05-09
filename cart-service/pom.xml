@@ -68,6 +68,12 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
         </dependency>
+        <!-- AOP required for @CircuitBreaker/@Retry annotations to be proxied.
+             spring-boot-starter-aop was removed in Spring Boot 4; add aspectjweaver directly. -->
+        <dependency>
+            <groupId>org.aspectj</groupId>
+            <artifactId>aspectjweaver</artifactId>
+        </dependency>
 
         <!-- ── Caffeine — local in-process cache for sub → userId mapping ── -->
         <dependency>

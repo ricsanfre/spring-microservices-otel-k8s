@@ -367,7 +367,44 @@ The base URL is configured in `application.yaml` under `spring.http.serviceclien
 >
 > Required import: `org.springframework.security.oauth2.client.AuthorizedClientServiceOAuth2AuthorizedClientManager`.
 
-Key rules:
+> ⚠️ **Critical: fix cross-service trace propagation — `ContextExecutorService` customizer**
+>
+> Spring Cloud's `CircuitBreakerAdapterDecorator` automatically wraps **every** `@ImportHttpServices`
+> HTTP Interface method call in a `FutureTask` submitted to `Resilience4JCircuitBreakerFactory`'s
+> internal `ThreadPoolExecutor`. That pool thread carries no OTel context, so `RestClient` has no
+> parent span and sends no `traceparent` header — downstream services start a completely new trace.
+>
+> **Symptoms:** cart-service checkout logs trace ID `abc123`, but order-service logs show a different
+> trace ID `xyz789` for the same request.
+>
+> **Fix:** Override the factory's executor with a context-capturing wrapper in every `HttpClientConfig`:
+>
+> ```java
+> @Bean
+> Customizer<Resilience4JCircuitBreakerFactory> contextPropagatingExecutorCustomizer() {
+>     return factory -> factory.configureExecutorService(
+>             ContextExecutorService.wrap(
+>                     Executors.newCachedThreadPool(),
+>                     ContextSnapshotFactory.builder().build()));
+> }
+> ```
+>
+> `ContextExecutorService.wrap()` captures `ContextSnapshot.captureAll()` on the **calling** Tomcat
+> thread (which has OTel context) at submission time, then restores it inside the pool thread before
+> the task runs. `ContextSnapshotFactory.builder().build()` uses the default global `ContextRegistry`
+> where OTel registers its `ObservationThreadLocalAccessor`.
+>
+> Required imports:
+> ```java
+> import io.micrometer.context.ContextExecutorService;
+> import io.micrometer.context.ContextSnapshotFactory;
+> import org.springframework.cloud.circuitbreaker.resilience4j.Resilience4JCircuitBreakerFactory;
+> import org.springframework.cloud.client.circuitbreaker.Customizer;
+> import java.util.concurrent.Executors;
+> ```
+>
+> **This bean is mandatory in every `HttpClientConfig` that uses `@ImportHttpServices` with
+> `spring-cloud-starter-circuitbreaker-resilience4j` on the classpath.**
 - Use **plain Kubernetes Service DNS** `http://service-name:port` — kube-proxy handles server-side load balancing. No `spring-cloud-starter-kubernetes-client-loadbalancer`, no Eureka, no RBAC permissions to the Kubernetes API. See [adr-002-plain-kubernetes-dns-service-calls.md](adr-002-plain-kubernetes-dns-service-calls.md).
 - `@ClientRegistrationId` on the interface selects the OAuth2 Client Credentials registration; `OAuth2RestClientHttpServiceGroupConfigurer` processes it and injects the bearer token automatically.
 - Use `RestClient` (not `RestTemplate` or `WebClient`) — it is the preferred synchronous client in Spring Boot 4
@@ -418,6 +455,24 @@ Define one named instance per downstream service the caller depends on.
 >   `AuthorizedClientServiceOAuth2AuthorizedClientManager` (see Section 5).
 > - `NoFallbackAvailableException` → `ConnectException` → wrong base URL or downstream service not
 >   started.
+
+### AOP dependency — required for annotation-driven circuit breakers
+
+`spring-boot-starter-aop` was **removed** in Spring Boot 4. Without `aspectjweaver` on the classpath,
+`@CircuitBreaker`, `@Retry`, and other Resilience4j annotations are **silently ignored** — the `@Aspect`
+beans are registered in the Spring context but Spring cannot create proxies around them.
+
+Add `aspectjweaver` directly to any service that uses annotation-driven circuit breaking. No version
+is needed — it is managed by the Spring Boot 4 parent BOM (`org.aspectj:aspectjweaver:1.9.25.1`):
+
+```xml
+<!-- AOP required for @CircuitBreaker/@Retry annotations to be proxied.
+     spring-boot-starter-aop was removed in Spring Boot 4; add aspectjweaver directly. -->
+<dependency>
+    <groupId>org.aspectj</groupId>
+    <artifactId>aspectjweaver</artifactId>
+</dependency>
+```
 
 ### Usage in service layer
 
@@ -940,12 +995,39 @@ public class HttpClientConfig {
         return OAuth2RestClientHttpServiceGroupConfigurer.from(authorizedClientManager);
     }
 
+    /**
+     * MANDATORY for distributed tracing: injects ObservationRegistry into every
+     * group's RestClient so outbound calls carry the W3C 'traceparent' header.
+     *
+     * Without this bean, @ImportHttpServices groups create plain RestClient instances
+     * (no ObservationRegistry) that never inject traceparent. Downstream services then
+     * start a new trace instead of continuing the caller's trace — spans appear
+     * disconnected in Tempo with a different traceId on each service.
+     *
+     * RestClientHttpServiceGroupConfigurer is the RestClient-specific variant of
+     * HttpServiceGroupConfigurer<RestClient.Builder> from spring-web 7.
+     * groups.forEachClient() calls the lambda once per registered group.
+     */
+    @Bean
+    RestClientHttpServiceGroupConfigurer observationGroupConfigurer(
+            ObservationRegistry observationRegistry) {
+        return groups -> groups.forEachClient(
+                (group, builder) -> builder.observationRegistry(observationRegistry));
+    }
+
     @Bean
     CacheManager cacheManager(
+            MeterRegistry meterRegistry,
             @Value("${<service>.user-resolver.cache-ttl-minutes:10}") long ttlMinutes) {
-        CaffeineCacheManager manager = new CaffeineCacheManager("userIdBySubject");
-        manager.setCaffeine(
-                Caffeine.newBuilder().expireAfterWrite(ttlMinutes, TimeUnit.MINUTES));
+        com.github.benmanes.caffeine.cache.Cache<Object, Object> nativeCache =
+                Caffeine.newBuilder()
+                        .expireAfterWrite(ttlMinutes, TimeUnit.MINUTES)
+                        .recordStats()
+                        .build();
+        CaffeineCacheMetrics.monitor(meterRegistry, nativeCache, "user.id.resolution");
+        CaffeineCache springCache = new CaffeineCache("userIdBySubject", nativeCache);
+        SimpleCacheManager manager = new SimpleCacheManager();
+        manager.setCaches(List.of(springCache));
         return manager;
     }
 }
@@ -2287,7 +2369,7 @@ When adding a new microservice, ensure all of the following are in place before 
 - [ ] `spring-boot-starter-oauth2-client`, `spring-cloud-starter-circuitbreaker-resilience4j`, `spring-boot-starter-cache`, `caffeine` in `pom.xml`
 - [ ] `UserServiceClient` HTTP Interface in `client/` package
 - [ ] `UserIdResolverService` with `@Cacheable("userIdBySubject")` + `@CircuitBreaker(name = "user-service")` in `service/` package
-- [ ] `HttpClientConfig` with `@EnableCaching`, `@ImportHttpServices(group="user-service", types=UserServiceClient.class)`, `OAuth2RestClientHttpServiceGroupConfigurer` bean, `SimpleCacheManager` + `CaffeineCache` + `CaffeineCacheMetrics.monitor()` for `userIdBySubject` (see §11 Caffeine cache metrics)
+- [ ] `HttpClientConfig` with `@EnableCaching`, `@ImportHttpServices(group="user-service", types=UserServiceClient.class)`, `OAuth2RestClientHttpServiceGroupConfigurer` bean, `RestClientHttpServiceGroupConfigurer` bean (sets `ObservationRegistry` so outbound calls carry `traceparent`), `SimpleCacheManager` + `CaffeineCache` + `CaffeineCacheMetrics.monitor()` for `userIdBySubject` (see §11 Caffeine cache metrics)
 - [ ] `spring.security.oauth2.client.registration.user-service` with `grant-type: client_credentials`, `scope: users:resolve`
 - [ ] `spring.http.serviceclient.user-service.base-url` property referencing `${USER_SERVICE_URL:http://localhost:8085}`
 - [ ] Resilience4j `user-service` circuit breaker / retry / timelimiter in `application.yaml`

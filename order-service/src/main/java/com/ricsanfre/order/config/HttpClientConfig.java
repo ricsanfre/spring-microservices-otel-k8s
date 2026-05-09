@@ -5,11 +5,16 @@ import com.ricsanfre.order.client.ProductServiceClient;
 import com.ricsanfre.order.client.UserServiceClient;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.cache.CaffeineCacheMetrics;
+import io.micrometer.context.ContextExecutorService;
+import io.micrometer.context.ContextSnapshotFactory;
+import io.micrometer.observation.ObservationRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.cache.caffeine.CaffeineCache;
 import org.springframework.cache.support.SimpleCacheManager;
+import org.springframework.cloud.circuitbreaker.resilience4j.Resilience4JCircuitBreakerFactory;
+import org.springframework.cloud.client.circuitbreaker.Customizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.client.AuthorizedClientServiceOAuth2AuthorizedClientManager;
@@ -17,9 +22,11 @@ import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.web.client.support.OAuth2RestClientHttpServiceGroupConfigurer;
+import org.springframework.web.client.support.RestClientHttpServiceGroupConfigurer;
 import org.springframework.web.service.registry.ImportHttpServices;
 
 import java.util.List;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -61,6 +68,34 @@ public class HttpClientConfig {
     OAuth2RestClientHttpServiceGroupConfigurer oauth2Configurer(
             OAuth2AuthorizedClientManager authorizedClientManager) {
         return OAuth2RestClientHttpServiceGroupConfigurer.from(authorizedClientManager);
+    }
+
+    /**
+     * Injects the Micrometer {@link ObservationRegistry} into every group's {@link org.springframework.web.client.RestClient}.
+     * Without this, outbound calls are plain HTTP with no {@code traceparent} header,
+     * causing downstream services to start a new trace instead of continuing the caller's trace.
+     */
+    @Bean
+    RestClientHttpServiceGroupConfigurer observationGroupConfigurer(ObservationRegistry observationRegistry) {
+        return groups -> groups.forEachClient(
+                (group, builder) -> builder.observationRegistry(observationRegistry));
+    }
+
+    /**
+     * Wraps the {@link Resilience4JCircuitBreakerFactory}'s internal executor with
+     * {@link ContextExecutorService} so that Micrometer context (OTel trace/span) is
+     * captured on the calling Tomcat thread at task submission and restored inside the
+     * circuit-breaker pool thread before the HTTP Interface method executes.
+     *
+     * <p>Spring Cloud's {@code CircuitBreakerAdapterDecorator} wraps every
+     * {@code @ImportHttpServices} call via {@code executorService.submit(FutureTask)}.
+     * Without this, pool threads carry no OTel context and outbound requests have no
+     * {@code traceparent} header — downstream services start a new disconnected trace.
+     */
+    @Bean
+    Customizer<Resilience4JCircuitBreakerFactory> contextPropagatingExecutorCustomizer() {
+        return factory -> factory.configureExecutorService(
+                ContextExecutorService.wrap(Executors.newCachedThreadPool(), ContextSnapshotFactory.builder().build()));
     }
 
     @Bean
