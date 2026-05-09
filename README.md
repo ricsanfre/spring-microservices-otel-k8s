@@ -129,87 +129,27 @@ The root `Makefile` provides per-service targets. Run `make help` to see all tar
 - All other tools via `mise install` (Java 25, Maven 3.9, Node.js 22, `jq`)
 - `curl` (standard on Linux/macOS)
 
-#### user-service
+#### Backend services
+
+Start infrastructure first, then run the desired service. All services require at minimum the `infra` + `auth` profiles (`make infra-min-up`); add `observability` for Grafana traces (`make infra-up`).
+
+| Service | Build & run | Dev shortcut (infra + run) | Local port |
+|---------|-------------|---------------------------|------------|
+| `user-service` | `make us-run` | `make us-dev` | 8085 |
+| `product-service` | `make ps-run` | `make ps-dev` | 8081 |
+| `order-service` | `make os-run` | `make os-dev` | 8082 |
+| `reviews-service` | `make rvs-run` | `make rvs-dev` | 8083 |
+| `notification-service` | `make ns-run` | — (run `make infra-min-up` first) | 8084 |
+| `cart-service` | `make cs-run` | `make cs-dev` | 8086 |
+
+The dev shortcut builds the JAR, starts infra, and launches the service in one command:
 
 ```bash
-# 1. Start infrastructure (postgres + kafka + keycloak + grafana-lgtm)
-#    Blocks until all healthchecks pass (~60–90 s on first run)
-make infra-up
-
-# 2. Build JAR and run
-make us-run
-
-# Shortcut: infra-up + run in one command
-make us-dev
+make infra-up   # start all infrastructure (postgres, mongo, valkey, kafka, keycloak, grafana)
+make us-run     # build + run user-service (or any other *-run target above)
 ```
 
-**Get a token and call the API:**
-
-```bash
-# User token — Authorization Code flow (opens browser for Keycloak login)
-# Requires: oauth2c installed (via `mise install`)
-TOKEN=$(make -s us-token)
-curl -s -w "\nHTTP %{http_code}\n" -H "Authorization: Bearer $TOKEN" http://localhost:8085/api/v1/users/me
-
-# Service-account token (client credentials — no browser required)
-SA_TOKEN=$(make -s us-token-sa)
-curl -H "Authorization: Bearer $SA_TOKEN" \
-     "http://localhost:8085/api/v1/users/resolve?idp_subject=<sub>"
-```
-
-> `make us-token` uses [oauth2c](https://github.com/cloudentity/oauth2c) to perform the
-> Authorization Code flow. A browser window opens to the Keycloak login page; after login,
-> the token is captured automatically. See [ADR-011](design/adr-011-oauth2c-local-api-testing.md)
-> for rationale (password grant is disabled on the BFF client).
-
----
-
-#### product-service
-
-```bash
-# 1. Start infrastructure (mongodb + kafka + keycloak + grafana-lgtm)
-make infra-up
-
-# 2. Build JAR and run
-make ps-run
-
-# Shortcut: infra-up + run in one command
-make ps-dev
-```
-
-**Seed the product catalog (books — sci-fi & fantasy):**
-
-The MongoDB container auto-seeds on first start via `docker/mongo/init-products.js`. If the data volume already exists you can re-run the seed explicitly:
-
-```bash
-make ps-seed   # idempotent — skips silently if catalog already populated
-```
-
-To wipe and re-seed from scratch:
-
-```bash
-make infra-clean   # destroy volumes
-make infra-up      # re-create containers → init script runs automatically
-```
-
-**Call the API:**
-
-```bash
-# Obtain a user token via Authorization Code flow (reuses the same Keycloak as user-service)
-TOKEN=$(make -s us-token)
-
-# List all products (paginated)
-curl -s -H "Authorization: Bearer $TOKEN" \
-     "http://localhost:8081/api/v1/products" | jq .
-
-# Filter by category
-curl -s -H "Authorization: Bearer $TOKEN" \
-     "http://localhost:8081/api/v1/products?category=science-fiction" | jq .
-curl -s -H "Authorization: Bearer $TOKEN" \
-     "http://localhost:8081/api/v1/products?category=fantasy" | jq .
-```
-
----
+Each service's Swagger UI is available at `http://localhost:<port>/swagger-ui.html` once running.
 
 #### frontend-service
 
@@ -231,6 +171,49 @@ npm run dev
 Make sure Keycloak is running (`make infra-up`) before starting the frontend — Auth.js needs to reach the Keycloak OIDC discovery endpoint at `http://localhost:8180/realms/e-commerce`.
 
 See [design/frontend-design.md — Source Layout](design/frontend-design.md#12-source-layout) for the full annotated directory tree.
+
+#### Seeding the product catalog
+
+The MongoDB container auto-seeds on first start via `docker/mongo/init-products.js`. If the data volume already exists, re-run the seed explicitly:
+
+```bash
+make ps-seed   # idempotent — skips silently if catalog already populated
+```
+
+To wipe and re-seed from scratch:
+
+```bash
+make infra-clean   # destroy volumes
+make infra-up      # re-create containers → init script runs automatically
+```
+
+#### Getting tokens for API testing
+
+```bash
+# User token — Authorization Code flow (opens browser for Keycloak login)
+# Requires: oauth2c installed (via `mise install`)
+TOKEN=$(make -s us-token)
+
+# Service-account token — Client Credentials (no browser required)
+SA_TOKEN=$(make -s us-token-sa)
+```
+
+> `make us-token` uses [oauth2c](https://github.com/cloudentity/oauth2c) to perform the
+> Authorization Code flow. A browser window opens to the Keycloak login page; after login,
+> the token is captured automatically. See [ADR-011](design/adr-011-oauth2c-local-api-testing.md)
+> for rationale (password grant is disabled on the BFF client).
+
+Use the token with any service:
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8085/api/v1/users/me
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/v1/products | jq .
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8082/api/v1/orders/user/me | jq .
+
+# Service-account call (resolve endpoint — M2M only)
+curl -s -H "Authorization: Bearer $SA_TOKEN" \
+     "http://localhost:8085/api/v1/users/resolve?idp_subject=<sub>"
+```
 
 ---
 
