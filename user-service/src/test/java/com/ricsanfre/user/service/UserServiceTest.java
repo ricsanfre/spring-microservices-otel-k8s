@@ -7,10 +7,14 @@ import com.ricsanfre.user.api.model.UpdateUserRequest;
 import com.ricsanfre.user.api.model.UserResponse;
 import com.ricsanfre.user.domain.User;
 import com.ricsanfre.user.repository.UserRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -30,6 +34,12 @@ class UserServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Spy
+    private MeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+    @Mock
+    private Tracer tracer;
 
     @InjectMocks
     private UserService userService;

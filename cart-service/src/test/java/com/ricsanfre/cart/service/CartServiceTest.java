@@ -6,12 +6,17 @@ import com.ricsanfre.cart.domain.Cart;
 import com.ricsanfre.cart.repository.CartRepository;
 import com.ricsanfre.common.exception.BusinessRuleException;
 import com.ricsanfre.common.exception.ResourceNotFoundException;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
@@ -23,6 +28,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -34,12 +40,36 @@ class CartServiceTest {
     @Mock
     private OrderServiceClient orderServiceClient;
 
+    @Spy
+    private MeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+    @Mock
+    private Tracer tracer;
+
+    @Mock
+    private Span mockSpan;
+
+    @Mock
+    private Tracer.SpanInScope mockSpanInScope;
+
     @InjectMocks
     private CartService cartService;
 
     private static final UUID USER_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final String PRODUCT_A = "prod-a";
     private static final String PRODUCT_B = "prod-b";
+
+    @BeforeEach
+    void setUp() {
+        // Stub Tracer span chain used in checkout() custom spans.
+        // Lenient to avoid UnnecessaryStubbingException in tests that don't call checkout().
+        lenient().when(tracer.nextSpan()).thenReturn(mockSpan);
+        lenient().when(mockSpan.name(anyString())).thenReturn(mockSpan);
+        lenient().when(mockSpan.start()).thenReturn(mockSpan);
+        lenient().when(mockSpan.tag(anyString(), anyString())).thenReturn(mockSpan);
+        lenient().when(tracer.withSpan(any())).thenReturn(mockSpanInScope);
+        // tracer.currentSpan() returns null by default (Mockito) — null-check in service handles this
+    }
 
     // ── helpers ──────────────────────────────────────────────────────────────
 

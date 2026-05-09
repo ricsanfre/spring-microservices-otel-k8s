@@ -14,8 +14,13 @@ import com.ricsanfre.order.domain.OrderStatus;
 import com.ricsanfre.order.kafka.OrderConfirmedEvent;
 import com.ricsanfre.order.kafka.OrderEventPublisher;
 import com.ricsanfre.order.repository.OrderRepository;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Tracer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -38,44 +43,64 @@ public class OrderService {
     private final UserIdResolverService userIdResolverService;
     private final OrderEventPublisher eventPublisher;
     private final ProductServiceClient productServiceClient;
+    private final MeterRegistry meterRegistry;
+    private final Tracer tracer;
 
     // ── Create ────────────────────────────────────────────────────────────────
 
     public OrderResponse createOrder(CreateOrderRequest request, Authentication auth) {
+        log.debug("createOrder itemCount={}", request.getItems().size());
         UUID userId = resolveUserId(request, auth);
 
-        List<OrderItem> items = request.getItems().stream()
-                .map(i -> OrderItem.builder()
-                        .productId(i.getProductId())
-                        .quantity(i.getQuantity())
-                        .unitPrice(i.getUnitPrice())
-                        .build())
-                .toList();
+        io.micrometer.tracing.Span currentSpan = tracer.currentSpan();
+        if (currentSpan != null) currentSpan.tag("user.id", userId.toString());
+        MDC.put("user.id", userId.toString());
+        try {
+            List<OrderItem> items = request.getItems().stream()
+                    .map(i -> OrderItem.builder()
+                            .productId(i.getProductId())
+                            .quantity(i.getQuantity())
+                            .unitPrice(i.getUnitPrice())
+                            .build())
+                    .toList();
 
-        double totalAmount = items.stream()
-                .mapToDouble(i -> i.getUnitPrice() * i.getQuantity())
-                .sum();
+            double totalAmount = items.stream()
+                    .mapToDouble(i -> i.getUnitPrice() * i.getQuantity())
+                    .sum();
 
-        Order order = Order.builder()
-                .userId(userId)
-                .status(OrderStatus.PENDING)
-                .totalAmount(totalAmount)
-                .build();
+            Order order = Order.builder()
+                    .userId(userId)
+                    .status(OrderStatus.PENDING)
+                    .totalAmount(totalAmount)
+                    .build();
 
-        // Establish bidirectional reference before persisting
-        items.forEach(item -> item.setOrder(order));
-        order.setItems(items);
+            // Establish bidirectional reference before persisting
+            items.forEach(item -> item.setOrder(order));
+            order.setItems(items);
 
-        Order saved = orderRepository.save(order);
-        log.info("Created PENDING order id={} for userId={} with {} items, total={}",
-                saved.getId(), saved.getUserId(), saved.getItems().size(), saved.getTotalAmount());
+            Order saved = orderRepository.save(order);
 
-        return toResponse(saved);
+            Counter.builder("orders.created")
+                    .tag("status", saved.getStatus().name())
+                    .register(meterRegistry)
+                    .increment();
+            DistributionSummary.builder("order.value.amount")
+                    .baseUnit("currency_units")
+                    .register(meterRegistry)
+                    .record(saved.getTotalAmount());
+
+            log.info("Created PENDING order orderId={} userId={} itemCount={} totalAmount={}",
+                    saved.getId(), saved.getUserId(), saved.getItems().size(), saved.getTotalAmount());
+            return toResponse(saved);
+        } finally {
+            MDC.remove("user.id");
+        }
     }
 
     // ── Confirm ───────────────────────────────────────────────────────────────
 
     public OrderResponse confirmOrder(UUID id, Authentication auth) {
+        log.debug("confirmOrder orderId={}", id);
         Order order = findOrderById(id);
 
         if (order.getStatus() != OrderStatus.PENDING) {
@@ -98,7 +123,13 @@ public class OrderService {
         order.setStatus(OrderStatus.CONFIRMED);
         Order saved = orderRepository.save(order);
 
-        log.info("Confirmed order id={} for userId={}", saved.getId(), saved.getUserId());
+        Counter.builder("orders.status.changed")
+                .tag("from", OrderStatus.PENDING.name())
+                .tag("to", OrderStatus.CONFIRMED.name())
+                .register(meterRegistry)
+                .increment();
+
+        log.info("Confirmed order orderId={} userId={}", saved.getId(), saved.getUserId());
 
         eventPublisher.publishOrderConfirmed(new OrderConfirmedEvent(
                 saved.getId(),
@@ -114,6 +145,7 @@ public class OrderService {
 
     @Transactional(readOnly = true)
     public OrderResponse findById(UUID id, Authentication auth) {
+        log.debug("findById orderId={}", id);
         Order order = findOrderById(id);
         checkOwnerOrServiceAccount(order.getUserId(), auth);
         return toResponse(order);
@@ -121,6 +153,7 @@ public class OrderService {
 
     @Transactional(readOnly = true)
     public List<OrderResponse> findByUserId(UUID userId, Authentication auth) {
+        log.debug("findByUserId userId={}", userId);
         checkOwnerOrServiceAccount(userId, auth);
         return orderRepository.findByUserId(userId).stream()
                 .map(this::toResponse)
@@ -137,11 +170,19 @@ public class OrderService {
     // ── Update ────────────────────────────────────────────────────────────────
 
     public OrderResponse updateStatus(UUID id, UpdateOrderStatusRequest request) {
+        log.debug("updateStatus orderId={}", id);
         Order order = findOrderById(id);
+        OrderStatus previousStatus = order.getStatus();
         OrderStatus newStatus = OrderStatus.valueOf(request.getStatus().getValue());
-        log.info("Updating order id={} status: {} → {}", id, order.getStatus(), newStatus);
         order.setStatus(newStatus);
-        return toResponse(orderRepository.save(order));
+        Order saved = orderRepository.save(order);
+        Counter.builder("orders.status.changed")
+                .tag("from", previousStatus.name())
+                .tag("to", newStatus.name())
+                .register(meterRegistry)
+                .increment();
+        log.info("Order status updated orderId={} from={} to={}", id, previousStatus, newStatus);
+        return toResponse(saved);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

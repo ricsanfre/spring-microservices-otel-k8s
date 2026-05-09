@@ -8,8 +8,12 @@ import com.ricsanfre.user.api.model.UpdateUserRequest;
 import com.ricsanfre.user.api.model.UserResponse;
 import com.ricsanfre.user.domain.User;
 import com.ricsanfre.user.repository.UserRepository;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Tracer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -25,10 +29,13 @@ import java.util.UUID;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final MeterRegistry meterRegistry;
+    private final Tracer tracer;
 
     @Transactional
     public UserResponse getOrCreateCurrentUser(Authentication authentication) {
         String idpSubject = JwtUtils.getSubject(authentication);
+        log.debug("getOrCreateCurrentUser idpSubject={}", idpSubject);
         User user = userRepository.findByIdpSubject(idpSubject)
                 .orElseGet(() -> {
                     String email = JwtUtils.getEmail(authentication);
@@ -40,11 +47,20 @@ public class UserService {
                             })
                             .orElseGet(() -> lazyRegister(authentication, idpSubject));
                 });
-        return toResponse(user);
+
+        io.micrometer.tracing.Span currentSpan = tracer.currentSpan();
+        if (currentSpan != null) currentSpan.tag("user.id", user.getId().toString());
+        MDC.put("user.id", user.getId().toString());
+        try {
+            return toResponse(user);
+        } finally {
+            MDC.remove("user.id");
+        }
     }
 
     @Transactional(readOnly = true)
     public UserResponse findById(UUID id) {
+        log.debug("findById userId={}", id);
         return userRepository.findById(id)
                 .map(this::toResponse)
                 .orElseThrow(() -> new ResourceNotFoundException("User", id));
@@ -59,6 +75,7 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public UserResponse findByIdpSubject(String idpSubject) {
+        log.debug("findByIdpSubject idpSubject={}", idpSubject);
         return userRepository.findByIdpSubject(idpSubject)
                 .map(this::toResponse)
                 .orElseThrow(() -> new ResourceNotFoundException("User with idp_subject", idpSubject));
@@ -97,7 +114,9 @@ public class UserService {
                 user.setBillingSameAsShipping(billing.getSameAsShipping());
         }
 
-        return toResponse(userRepository.save(user));
+        User saved = userRepository.save(user);
+        log.info("User profile updated id={}", id);
+        return toResponse(saved);
     }
 
     private User lazyRegister(Authentication authentication, String idpSubject) {
@@ -109,7 +128,9 @@ public class UserService {
                 .firstName(JwtUtils.getGivenName(authentication))
                 .lastName(JwtUtils.getFamilyName(authentication))
                 .build();
-        return userRepository.save(newUser);
+        User saved = userRepository.save(newUser);
+        Counter.builder("users.registered").register(meterRegistry).increment();
+        return saved;
     }
 
     private UserResponse toResponse(User user) {

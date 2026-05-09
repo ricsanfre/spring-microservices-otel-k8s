@@ -8,8 +8,13 @@ import com.ricsanfre.reviews.client.OrderServiceClient;
 import com.ricsanfre.reviews.client.ProductServiceClient;
 import com.ricsanfre.reviews.domain.Review;
 import com.ricsanfre.reviews.repository.ReviewRepository;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Tracer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 
@@ -29,17 +34,25 @@ public class ReviewService {
     private final UserIdResolverService userIdResolverService;
     private final ProductServiceClient productServiceClient;
     private final OrderServiceClient orderServiceClient;
+    private final MeterRegistry meterRegistry;
+    private final Tracer tracer;
 
     public List<ReviewResponse> getByProduct(String productId) {
+        log.debug("getByProduct productId={}", productId);
         return reviewRepository.findByProductId(productId).stream()
                 .map(this::toResponse)
                 .toList();
     }
 
     public ReviewResponse createReview(String idpSubject, CreateReviewRequest request) {
+        log.debug("createReview productId={} orderId={}", request.getProductId(), request.getOrderId());
         // 1. Resolve JWT sub → internal userId (ADR-004 lazy resolution)
         UUID userId = userIdResolverService.resolveInternalId(idpSubject);
 
+        io.micrometer.tracing.Span currentSpan = tracer.currentSpan();
+        if (currentSpan != null) currentSpan.tag("user.id", userId.toString());
+        MDC.put("user.id", userId.toString());
+        try {
         // 2. Verify product exists
         try {
             productServiceClient.getProduct(request.getProductId());
@@ -84,12 +97,20 @@ public class ReviewService {
                 .build();
 
         Review saved = reviewRepository.save(review);
+
+        Counter.builder("reviews.submitted").register(meterRegistry).increment();
+        DistributionSummary.builder("review.rating").register(meterRegistry).record(request.getRating());
+
         log.info("Review created id={} productId={} orderId={} userId={}",
                 saved.getId(), saved.getProductId(), saved.getOrderId(), saved.getUserId());
         return toResponse(saved);
+        } finally {
+            MDC.remove("user.id");
+        }
     }
 
     public void deleteReview(String reviewId, String idpSubject) {
+        log.debug("deleteReview reviewId={}", reviewId);
         Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new ResourceNotFoundException("Review", reviewId));
 

@@ -2,6 +2,9 @@ package com.ricsanfre.cart.service;
 
 import com.ricsanfre.cart.client.UserServiceClient;
 import com.ricsanfre.common.exception.ResourceNotFoundException;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -13,6 +16,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 /**
@@ -28,11 +34,30 @@ class UserIdResolverServiceTest {
     @Mock
     private UserServiceClient userServiceClient;
 
+    @Mock
+    private Tracer tracer;
+
+    @Mock
+    private Span mockSpan;
+
+    @Mock
+    private Tracer.SpanInScope mockSpanInScope;
+
     @InjectMocks
     private UserIdResolverService userIdResolverService;
 
     private static final String IDP_SUBJECT = "keycloak-sub-abc123";
     private static final UUID INTERNAL_ID = UUID.fromString("00000000-0000-0000-0000-000000000042");
+
+    @BeforeEach
+    void setUp() {
+        // Lenient to avoid UnnecessaryStubbingException in tests that don't call resolveInternalId()
+        lenient().when(tracer.nextSpan()).thenReturn(mockSpan);
+        lenient().when(mockSpan.name(anyString())).thenReturn(mockSpan);
+        lenient().when(mockSpan.start()).thenReturn(mockSpan);
+        lenient().when(mockSpan.tag(anyString(), anyString())).thenReturn(mockSpan);
+        lenient().when(tracer.withSpan(any())).thenReturn(mockSpanInScope);
+    }
 
     // ── resolveInternalId ────────────────────────────────────────────────────
 

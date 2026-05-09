@@ -7,11 +7,15 @@ import com.ricsanfre.reviews.client.OrderServiceClient;
 import com.ricsanfre.reviews.client.ProductServiceClient;
 import com.ricsanfre.reviews.domain.Review;
 import com.ricsanfre.reviews.repository.ReviewRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.client.HttpClientErrorException;
 
@@ -39,6 +43,12 @@ class ReviewServiceTest {
 
     @Mock
     private OrderServiceClient orderServiceClient;
+
+    @Spy
+    private MeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+    @Mock
+    private Tracer tracer;
 
     @InjectMocks
     private ReviewService reviewService;

@@ -10,6 +10,9 @@ import com.ricsanfre.product.api.model.StockReserveRequest;
 import com.ricsanfre.product.api.model.UpdateProductRequest;
 import com.ricsanfre.product.domain.Product;
 import com.ricsanfre.product.repository.ProductRepository;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -28,11 +31,17 @@ import java.util.List;
 public class ProductService {
 
     private final ProductRepository productRepository;
+    private final MeterRegistry meterRegistry;
 
     public ProductPage list(String category, Pageable pageable) {
+        log.debug("list category={} page={} size={}", category, pageable.getPageNumber(), pageable.getPageSize());
         Page<Product> page = (category != null && !category.isBlank())
                 ? productRepository.findByCategoryIgnoreCase(category, pageable)
                 : productRepository.findAll(pageable);
+
+        DistributionSummary.builder("product.search.results")
+                .register(meterRegistry)
+                .record(page.getNumberOfElements());
 
         return ProductPage.builder()
                 .content(page.getContent().stream().map(this::toResponse).toList())
@@ -44,6 +53,7 @@ public class ProductService {
     }
 
     public ProductResponse getById(String id) {
+        log.debug("getById productId={}", id);
         return productRepository.findById(id)
                 .map(this::toResponse)
                 .orElseThrow(() -> new ResourceNotFoundException("Product", id));
@@ -59,7 +69,13 @@ public class ProductService {
                 .imageUrl(request.getImageUrl())
                 .stockQty(request.getStockQty() != null ? request.getStockQty() : 0)
                 .build();
-        return toResponse(productRepository.save(product));
+        Product saved = productRepository.save(product);
+        Counter.builder("products.created")
+                .tag("category", saved.getCategory() != null ? saved.getCategory() : "uncategorized")
+                .register(meterRegistry)
+                .increment();
+        log.info("Product created id={} name={} category={}", saved.getId(), saved.getName(), saved.getCategory());
+        return toResponse(saved);
     }
 
     public ProductResponse update(String id, UpdateProductRequest request) {
@@ -74,15 +90,18 @@ public class ProductService {
         if (request.getImageUrl() != null)    product.setImageUrl(request.getImageUrl());
         if (request.getStockQty() != null)    product.setStockQty(request.getStockQty());
 
-        return toResponse(productRepository.save(product));
+        Product saved = productRepository.save(product);
+        log.info("Product updated id={} name={}", id, product.getName());
+        return toResponse(saved);
     }
 
     public void delete(String id) {
-        log.info("Deleting product id={}", id);
+        log.debug("delete productId={}", id);
         if (!productRepository.existsById(id)) {
             throw new ResourceNotFoundException("Product", id);
         }
         productRepository.deleteById(id);
+        log.info("Product deleted id={}", id);
     }
 
     /**

@@ -1,7 +1,6 @@
 package com.ricsanfre.order.service;
 
 import com.ricsanfre.common.exception.BusinessRuleException;
-import com.ricsanfre.common.exception.BusinessRuleException;
 import com.ricsanfre.common.exception.ResourceNotFoundException;
 import com.ricsanfre.order.api.model.CreateOrderRequest;
 import com.ricsanfre.order.api.model.OrderItemRequest;
@@ -13,11 +12,15 @@ import com.ricsanfre.order.domain.OrderItem;
 import com.ricsanfre.order.domain.OrderStatus;
 import com.ricsanfre.order.kafka.OrderEventPublisher;
 import com.ricsanfre.order.repository.OrderRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -54,6 +57,12 @@ class OrderServiceTest {
 
     @Mock
     private ProductServiceClient productServiceClient;
+
+    @Spy
+    private MeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+    @Mock
+    private Tracer tracer;
 
     @InjectMocks
     private OrderService orderService;
@@ -102,7 +111,7 @@ class OrderServiceTest {
     }
 
     @Test
-    void createOrder_userNotFound_throwsResourceNotFoundException() {
+    void createOrder_userNotFound_throwsBusinessRuleException() {
         when(userIdResolverService.resolveInternalId(SUB))
                 .thenThrow(new ResourceNotFoundException("User", SUB));
 
@@ -112,8 +121,10 @@ class OrderServiceTest {
                 ))
                 .build();
 
+        // resolveUserId catches ResourceNotFoundException (M2M fallback) but request.getUserId() is null
+        // so it rethrows as BusinessRuleException
         assertThatThrownBy(() -> orderService.createOrder(request, ownerAuth))
-                .isInstanceOf(ResourceNotFoundException.class);
+                .isInstanceOf(BusinessRuleException.class);
         verify(orderRepository, never()).save(any());
         verifyNoInteractions(eventPublisher);
     }

@@ -8,8 +8,13 @@ import com.ricsanfre.cart.domain.Cart;
 import com.ricsanfre.cart.repository.CartRepository;
 import com.ricsanfre.common.exception.BusinessRuleException;
 import com.ricsanfre.common.exception.ResourceNotFoundException;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
@@ -26,8 +31,11 @@ public class CartService {
 
     private final CartRepository cartRepository;
     private final OrderServiceClient orderServiceClient;
+    private final MeterRegistry meterRegistry;
+    private final Tracer tracer;
 
     public CartResponse getCart(UUID userId) {
+        log.debug("getCart userId={}", userId);
         Cart cart = cartRepository.findByUserId(userId.toString())
                 .orElseGet(() -> emptyCart(userId));
         return toResponse(cart);
@@ -61,7 +69,10 @@ public class CartService {
         }
 
         cart.setItems(items);
-        return toResponse(cartRepository.save(cart));
+        CartResponse response = toResponse(cartRepository.save(cart));
+        Counter.builder("cart.items.added").register(meterRegistry).increment();
+        log.info("Cart item upserted userId={} productId={} itemCount={}", userId, productId, response.getTotalItems());
+        return response;
     }
 
     public CartResponse removeItem(UUID userId, String productId) {
@@ -73,7 +84,9 @@ public class CartService {
         if (!removed) {
             throw new ResourceNotFoundException("CartItem", productId);
         }
-        return toResponse(cartRepository.save(cart));
+        CartResponse response = toResponse(cartRepository.save(cart));
+        log.info("Cart item removed userId={} productId={} itemCount={}", userId, productId, response.getTotalItems());
+        return response;
     }
 
     public void clearCart(UUID userId) {
@@ -82,20 +95,49 @@ public class CartService {
     }
 
     public OrderServiceClient.OrderResponse checkout(UUID userId) {
-        Cart cart = cartRepository.findByUserId(userId.toString())
-                .orElseThrow(() -> new BusinessRuleException("Cart is empty for user " + userId));
+        log.debug("checkout userId={}", userId);
+        Span currentSpan = tracer.currentSpan();
+        if (currentSpan != null) currentSpan.tag("user.id", userId.toString());
+        MDC.put("user.id", userId.toString());
+        try {
+            Counter.builder("cart.checkout.initiated").register(meterRegistry).increment();
 
-        if (cart.getItems() == null || cart.getItems().isEmpty()) {
-            throw new BusinessRuleException("Cart is empty for user " + userId);
+            Cart cart;
+            List<OrderServiceClient.OrderItemRequest> items;
+            Span validateSpan = tracer.nextSpan().name("checkout.validate").start();
+            try (Tracer.SpanInScope ws = tracer.withSpan(validateSpan)) {
+                cart = cartRepository.findByUserId(userId.toString())
+                        .orElseThrow(() -> new BusinessRuleException("Cart is empty for user " + userId));
+                if (cart.getItems() == null || cart.getItems().isEmpty()) {
+                    throw new BusinessRuleException("Cart is empty for user " + userId);
+                }
+                items = cart.getItems().stream()
+                        .map(i -> new OrderServiceClient.OrderItemRequest(
+                                i.getProductId(), i.getQuantity(), i.getPrice()))
+                        .toList();
+                validateSpan.tag("cart.item.count", String.valueOf(items.size()));
+            } finally {
+                validateSpan.end();
+            }
+
+            log.info("Initiating checkout for userId={} with {} items", userId, items.size());
+            Span reserveSpan = tracer.nextSpan().name("checkout.reserve").start();
+            try (Tracer.SpanInScope ws = tracer.withSpan(reserveSpan)) {
+                OrderServiceClient.OrderResponse order = orderServiceClient.createOrder(
+                        new OrderServiceClient.CreateOrderRequest(userId, items));
+                reserveSpan.tag("order.id", order.id().toString());
+                Counter.builder("cart.checkout.confirmed").tag("result", "success").register(meterRegistry).increment();
+                log.info("Checkout completed userId={} orderId={}", userId, order.id());
+                return order;
+            } catch (Exception e) {
+                Counter.builder("cart.checkout.confirmed").tag("result", "failure").register(meterRegistry).increment();
+                throw e;
+            } finally {
+                reserveSpan.end();
+            }
+        } finally {
+            MDC.remove("user.id");
         }
-
-        List<OrderServiceClient.OrderItemRequest> items = cart.getItems().stream()
-                .map(i -> new OrderServiceClient.OrderItemRequest(
-                        i.getProductId(), i.getQuantity(), i.getPrice()))
-                .toList();
-
-        log.info("Initiating checkout for userId={} with {} items", userId, items.size());
-        return orderServiceClient.createOrder(new OrderServiceClient.CreateOrderRequest(userId, items));
     }
 
     // ── Mapping ──────────────────────────────────────────────────────────────

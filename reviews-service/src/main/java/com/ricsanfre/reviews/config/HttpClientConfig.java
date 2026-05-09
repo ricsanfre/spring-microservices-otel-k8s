@@ -4,10 +4,13 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.ricsanfre.reviews.client.OrderServiceClient;
 import com.ricsanfre.reviews.client.ProductServiceClient;
 import com.ricsanfre.reviews.client.UserServiceClient;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.binder.cache.CaffeineCacheMetrics;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
-import org.springframework.cache.caffeine.CaffeineCacheManager;
+import org.springframework.cache.caffeine.CaffeineCache;
+import org.springframework.cache.support.SimpleCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.client.AuthorizedClientServiceOAuth2AuthorizedClientManager;
@@ -17,6 +20,7 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 import org.springframework.security.oauth2.client.web.client.support.OAuth2RestClientHttpServiceGroupConfigurer;
 import org.springframework.web.service.registry.ImportHttpServices;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -54,10 +58,17 @@ public class HttpClientConfig {
 
     @Bean
     CacheManager cacheManager(
+            MeterRegistry meterRegistry,
             @Value("${reviews.user-resolver.cache-ttl-minutes:10}") long ttlMinutes) {
-        CaffeineCacheManager manager = new CaffeineCacheManager("userIdBySubject");
-        manager.setCaffeine(
-                Caffeine.newBuilder().expireAfterWrite(ttlMinutes, TimeUnit.MINUTES));
+        com.github.benmanes.caffeine.cache.Cache<Object, Object> nativeCache =
+                Caffeine.newBuilder()
+                        .expireAfterWrite(ttlMinutes, TimeUnit.MINUTES)
+                        .recordStats()
+                        .build();
+        CaffeineCacheMetrics.monitor(meterRegistry, nativeCache, "user.id.resolution");
+        CaffeineCache springCache = new CaffeineCache("userIdBySubject", nativeCache);
+        SimpleCacheManager manager = new SimpleCacheManager();
+        manager.setCaches(List.of(springCache));
         return manager;
     }
 }

@@ -1322,6 +1322,234 @@ Use the existing [otel-demo](../otel-demo) module as the reference implementatio
 - Redis/Valkey (`spring-boot-starter-data-redis` + Lettuce — uses Micrometer observations by default)
 - Spring `@Scheduled` methods
 
+### Business metrics — MeterRegistry pattern
+
+Inject `io.micrometer.core.instrument.MeterRegistry` via `@RequiredArgsConstructor` into any service class that emits business events. Use the builder API — **never** call `new Counter(...)` directly.
+
+#### Counters
+
+```java
+Counter.builder("orders.created")
+    .tag("status", saved.getStatus().name())   // low-cardinality tags only
+    .register(meterRegistry)
+    .increment();
+```
+
+#### Distribution summaries (histograms)
+
+```java
+DistributionSummary.builder("order.value.amount")
+    .baseUnit("currency_units")
+    .register(meterRegistry)
+    .record(saved.getTotalAmount());
+
+DistributionSummary.builder("review.rating")
+    .register(meterRegistry)
+    .record(request.getRating());    // value is 1–5
+```
+
+#### Naming and tagging rules
+
+- **Metric names**: lowercase, dot-separated nouns — `orders.created`, `cart.checkout.confirmed`
+- **Tags**: key=value pairs, both lowercase — `.tag("status", "PENDING")`, `.tag("result", "success")`
+- **Low cardinality only**: never use UUIDs, email addresses, or free-form strings as tag values — Prometheus cardinality explodes
+- `register(meterRegistry)` is idempotent; calling it every time a counter increments is safe (returns the already-registered instance)
+- Call `Counter.builder(...).register(meterRegistry).increment()` _after_ the operation succeeds — do not emit the metric before you know the action completed
+
+#### Metrics catalogue (implemented)
+
+| Metric | Type | Tags | Service |
+|--------|------|------|---------|
+| `orders.created` | Counter | `status` | order-service |
+| `orders.status.changed` | Counter | `from`, `to` | order-service |
+| `order.value.amount` | DistributionSummary | — | order-service |
+| `cart.items.added` | Counter | — | cart-service |
+| `cart.checkout.initiated` | Counter | — | cart-service |
+| `cart.checkout.confirmed` | Counter | `result` (success/failure) | cart-service |
+| `products.created` | Counter | `category` | product-service |
+| `product.search.results` | DistributionSummary | — | product-service |
+| `reviews.submitted` | Counter | — | reviews-service |
+| `review.rating` | DistributionSummary | — | reviews-service |
+| `users.registered` | Counter | — | user-service |
+| `notifications.sent` | Counter | `type`, `status` | notification-service |
+
+#### Unit testing with MeterRegistry
+
+Use `@Spy MeterRegistry meterRegistry = new SimpleMeterRegistry()` — a real in-memory registry. This lets counter operations succeed without NPEs (unlike `@Mock`, which returns null from `register()`):
+
+```java
+@ExtendWith(MockitoExtension.class)
+class OrderServiceTest {
+
+    @Spy
+    MeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+    @Mock
+    Tracer tracer;
+
+    @InjectMocks
+    OrderService orderService;
+}
+```
+
+---
+
+### Custom spans — Micrometer Tracing pattern
+
+Inject `io.micrometer.tracing.Tracer` (Micrometer Tracing — **not** the raw OTel SDK `Tracer`) via `@RequiredArgsConstructor`. Use it to wrap expensive multi-step operations in named child spans visible in Tempo.
+
+#### Creating a child span
+
+```java
+Span span = tracer.nextSpan().name("checkout.validate").start();
+try (Tracer.SpanInScope ws = tracer.withSpan(span)) {
+    span.tag("cart.item.count", String.valueOf(items.size()));
+    // ... business logic ...
+} finally {
+    span.end();   // always end the span even on exception
+}
+```
+
+#### Tagging the current (HTTP) span
+
+To add attributes to the already-active span (the one created automatically for the inbound HTTP request) without creating a new child span, use `tracer.currentSpan()` with a null-check:
+
+```java
+io.micrometer.tracing.Span currentSpan = tracer.currentSpan();
+if (currentSpan != null) {
+    currentSpan.tag("user.id", userId.toString());
+}
+```
+
+`currentSpan()` returns `null` when there is no active trace context (e.g. in unit tests, or if sampling is set to 0). Always guard with a null-check.
+
+#### Custom spans catalogue (implemented)
+
+| Span name | Service | Key tags |
+|-----------|---------|----------|
+| `checkout.validate` | cart-service | `cart.item.count` |
+| `checkout.reserve` | cart-service | `order.id` |
+| `user.resolve.idp_subject` | cart-service, order-service, reviews-service | `cache.hit`, `user.id` |
+
+#### Unit testing with Tracer
+
+Use `@Mock Tracer` plus mocks for `Span` and `Tracer.SpanInScope`. Stub the full chain with `lenient()` in `@BeforeEach` — stubs needed only for methods that create spans, so lenient avoids `UnnecessaryStubbingException` in tests that exercise other methods:
+
+```java
+@Mock Tracer tracer;
+@Mock Span mockSpan;
+@Mock Tracer.SpanInScope mockSpanInScope;
+
+@BeforeEach
+void setUp() {
+    lenient().when(tracer.nextSpan()).thenReturn(mockSpan);
+    lenient().when(mockSpan.name(anyString())).thenReturn(mockSpan);
+    lenient().when(mockSpan.start()).thenReturn(mockSpan);
+    lenient().when(mockSpan.tag(anyString(), anyString())).thenReturn(mockSpan);
+    lenient().when(tracer.withSpan(any())).thenReturn(mockSpanInScope);
+    // tracer.currentSpan() returns null by default — null-check in service handles it safely
+}
+```
+
+---
+
+### User identity propagation — span attribute and MDC
+
+After resolving the internal `userId` (ADR-004), propagate it to both the active trace span and the MDC so that Tempo and Loki can filter by user. Always clean up MDC in a `finally` block.
+
+```java
+// Tag the current HTTP span so Tempo can filter: {span.user.id="<uuid>"}
+io.micrometer.tracing.Span currentSpan = tracer.currentSpan();
+if (currentSpan != null) currentSpan.tag("user.id", userId.toString());
+
+// Set the MDC field so all log lines in this request include user.id
+MDC.put("user.id", userId.toString());
+try {
+    // ... business logic ...
+} finally {
+    MDC.remove("user.id");   // mandatory — virtual threads reuse thread state
+}
+```
+
+> **Why not a `HandlerInterceptor`?** The user ID is only known after the `UserIdResolverService` call completes (which may involve a round-trip to `user-service`). The service layer is the correct place to set it.
+
+> **MDC + virtual threads:** Spring Boot 4 with `spring.threads.virtual.enabled: true` mounts virtual threads on carrier threads. SLF4J MDC state is per-thread, so `MDC.remove()` in `finally` is mandatory — without it, the carrier thread's MDC leaks to the next virtual thread mounted on it.
+
+---
+
+### Caffeine cache metrics
+
+To expose Caffeine hit/miss/eviction metrics to Prometheus, replace `CaffeineCacheManager` with `SimpleCacheManager` + `CaffeineCache` + `CaffeineCacheMetrics.monitor()`. The native Caffeine cache must have `recordStats()` enabled.
+
+```java
+@Bean
+CacheManager cacheManager(
+        MeterRegistry meterRegistry,
+        @Value("${<service>.user-resolver.cache-ttl-minutes:10}") long ttlMinutes) {
+
+    com.github.benmanes.caffeine.cache.Cache<Object, Object> nativeCache =
+            Caffeine.newBuilder()
+                    .expireAfterWrite(ttlMinutes, TimeUnit.MINUTES)
+                    .recordStats()        // enables hit/miss counters
+                    .build();
+
+    CaffeineCacheMetrics.monitor(meterRegistry, nativeCache, "user.id.resolution");
+
+    CaffeineCache caffeineCache = new CaffeineCache("userIdBySubject", nativeCache);
+    SimpleCacheManager manager = new SimpleCacheManager();
+    manager.setCaches(List.of(caffeineCache));
+    return manager;
+}
+```
+
+This exposes `cache.gets{cache=user.id.resolution, result=hit|miss}` and `cache.evictions{cache=user.id.resolution}` in Prometheus automatically.
+
+> Do **not** use `CaffeineCacheManager.setCaffeine(spec)` for cache metrics — it builds the native cache internally and does not expose it for `CaffeineCacheMetrics.monitor()`.
+
+---
+
+### Structured logging conventions
+
+Use consistent parameterised key=value log messages so Loki can filter by field.
+
+#### Log level policy
+
+| Level | When to use |
+|-------|------------|
+| `DEBUG` | Method entry on every public method — diagnostic context, not emitted in production unless log level changed |
+| `INFO` | Completion of every write/mutating operation — confirms the action succeeded |
+| `WARN` | Recoverable situations, expected error paths (e.g. `ResourceNotFoundException` caught by `GlobalExceptionHandler`) |
+| `ERROR` | Unexpected failures — always include the exception |
+
+#### Entry/completion pattern
+
+```java
+// Entry (DEBUG) — always at the top of the method, before any work
+log.debug("createOrder itemCount={}", request.getItems().size());
+
+// Completion (INFO) — after the mutation succeeds; include the new entity's ID
+log.info("Order created orderId={} userId={} itemCount={} totalAmount={}",
+        saved.getId(), saved.getUserId(), saved.getItems().size(), saved.getTotalAmount());
+```
+
+#### Standard field names (use these consistently across all services)
+
+| Field | Example value |
+|-------|---------------|
+| `orderId` | `3fa85f64-5717-4562-b3fc-2c963f66afa6` |
+| `userId` | `550e8400-e29b-41d4-a716-446655440001` |
+| `productId` | `prod-abc123` |
+| `reviewId` | `665f1a2b3c4d5e6f7a8b9c0d` |
+| `itemCount` | `3` |
+| `totalAmount` | `49.97` |
+| `category` | `electronics` |
+| `from` / `to` | `PENDING` / `CONFIRMED` |
+| `result` | `success` / `failure` |
+
+> Private mapper methods (`toResponse(...)`, `emptyCart(...)`) do not need entry/exit logging — they contain no I/O or business decisions.
+
+---
+
 ### Database span instrumentation (opt-in)
 
 #### PostgreSQL / JDBC (user-service, order-service)
@@ -2034,6 +2262,12 @@ When adding a new microservice, ensure all of the following are in place before 
 - [ ] `spring.application.name` set to the service name
 - [ ] OTEL OTLP endpoints configured (defaulting to `localhost:4318`)
 - [ ] `management.tracing.sampling.probability: 1.0` (dev)
+- [ ] `MeterRegistry` injected in service classes; business counters/distribution summaries emitted after successful operations (see §11 Business metrics)
+- [ ] `Tracer` injected in service classes that resolve user identity or wrap multi-step flows; use `tracer.currentSpan()` with null-check for tagging, `tracer.nextSpan()` for child spans (see §11 Custom spans)
+- [ ] `user.id` span tag and `MDC.put("user.id", ...)` set after user resolution; `MDC.remove` in `finally` (see §11 User identity propagation)
+- [ ] `CaffeineCacheMetrics.monitor(...)` called in `cacheManager` bean with `.recordStats()` on the native cache (services using ADR-004 resolver — see §11 Caffeine cache metrics)
+- [ ] `management.observations.mongodb.enabled: true` set for MongoDB-backed services (see §11 Database spans)
+- [ ] Every public service method has a `log.debug` entry line and a `log.info` completion line on mutating paths (see §11 Structured logging)
 
 ### Build & Container
 - [ ] Jib plugin configured in `pom.xml`
@@ -2053,7 +2287,7 @@ When adding a new microservice, ensure all of the following are in place before 
 - [ ] `spring-boot-starter-oauth2-client`, `spring-cloud-starter-circuitbreaker-resilience4j`, `spring-boot-starter-cache`, `caffeine` in `pom.xml`
 - [ ] `UserServiceClient` HTTP Interface in `client/` package
 - [ ] `UserIdResolverService` with `@Cacheable("userIdBySubject")` + `@CircuitBreaker(name = "user-service")` in `service/` package
-- [ ] `HttpClientConfig` with `@EnableCaching`, `@ImportHttpServices(group="user-service", types=UserServiceClient.class)`, `OAuth2RestClientHttpServiceGroupConfigurer` bean, `CaffeineCacheManager` for `userIdBySubject`
+- [ ] `HttpClientConfig` with `@EnableCaching`, `@ImportHttpServices(group="user-service", types=UserServiceClient.class)`, `OAuth2RestClientHttpServiceGroupConfigurer` bean, `SimpleCacheManager` + `CaffeineCache` + `CaffeineCacheMetrics.monitor()` for `userIdBySubject` (see §11 Caffeine cache metrics)
 - [ ] `spring.security.oauth2.client.registration.user-service` with `grant-type: client_credentials`, `scope: users:resolve`
 - [ ] `spring.http.serviceclient.user-service.base-url` property referencing `${USER_SERVICE_URL:http://localhost:8085}`
 - [ ] Resilience4j `user-service` circuit breaker / retry / timelimiter in `application.yaml`
