@@ -342,3 +342,65 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring:4318
 ```
 
 No additional OTel dependencies are needed — `@vercel/otel` bundles the required `@opentelemetry/sdk-node` and OTLP exporter packages.
+
+---
+
+## 12. Source Layout
+
+```
+frontend-service/
+├── .env.local.example     ← copy to .env.local; fill AUTH_SECRET + AUTH_KEYCLOAK_SECRET + AUTH_URL
+├── Dockerfile             ← multi-stage build; output:standalone for k8s
+├── next.config.ts         ← output:"standalone" enabled
+├── package.json           ← Next.js 15, next-auth 5.0.0-beta (Auth.js v5), React 19; dev port 3001
+└── src/
+    ├── auth.ts            ← Auth.js v5: Keycloak provider, JWT/session callbacks (stores id_token),
+    │                         token refresh, id_token forwarded for federated logout only
+    ├── middleware.ts      ← protects all routes (redirects to Keycloak login if no session)
+    ├── instrumentation.ts ← @vercel/otel bootstrap (runs once at server startup)
+    ├── types/
+    │   └── next-auth.d.ts ← Session augmented with accessToken, idToken, scope, error fields
+    ├── lib/
+    │   └── api.ts         ← apiFetch() / publicFetch() — forwards Bearer JWT server-side to microservices
+    └── app/
+        ├── layout.tsx     ← root layout with Nav server component
+        ├── page.tsx       ← home page (welcome + links)
+        ├── actions/
+        │   └── auth.ts    ← federatedSignOut() server action — clears local Auth.js cookie then
+        │                     redirects to Keycloak end-session endpoint with id_token_hint
+        ├── api/
+        │   ├── auth/[...nextauth]/route.ts  ← Auth.js OIDC callback handler
+        │   ├── cart/items/[productId]/route.ts
+        │   ├── checkout/route.ts
+        │   ├── orders/[id]/confirm/route.ts
+        │   ├── orders/[id]/status/route.ts
+        │   ├── orders/delivered/route.ts
+        │   ├── products/route.ts
+        │   ├── products/[id]/route.ts
+        │   ├── reviews/route.ts
+        │   ├── reviews/[id]/route.ts
+        │   └── admin/
+        │       ├── orders/route.ts  ← guards products:write scope; proxies to order-service
+        │       └── users/route.ts   ← guards products:write scope; proxies to user-service
+        ├── components/
+        │   └── nav.tsx    ← server component: conditional nav links; sign-out triggers federatedSignOut
+        ├── login/
+        │   └── page.tsx   ← custom sign-in page
+        ├── admin/
+        │   ├── page.tsx          ← admin dashboard (redirects non-admin to /products)
+        │   ├── products/new/page.tsx
+        │   ├── products/[id]/edit/page.tsx
+        │   ├── orders/page.tsx   ← all-orders table with status editor (admin only)
+        │   └── users/page.tsx    ← all-users table (admin only)
+        ├── products/
+        │   └── page.tsx   ← product catalog; Add to Cart hidden for admin
+        ├── cart/
+        │   └── page.tsx   ← shopping cart with checkout
+        ├── orders/
+        │   ├── page.tsx   ← current user's orders; redirects admin to /admin/orders
+        │   └── [id]/page.tsx
+        ├── profile/
+        │   └── page.tsx
+        └── reviews/
+            └── [productId]/page.tsx
+```
