@@ -43,6 +43,9 @@ spec:
   #   kubectl create secret generic keycloak-db-secret \
   #     --from-literal=username=keycloak_owner --from-literal=password=<CHANGE_ME> \
   #     --namespace postgres
+  #   kubectl create secret generic orders-db-secret \
+  #     --from-literal=username=orders_owner --from-literal=password=<CHANGE_ME
+  #     --namespace postgres
   managed:
     roles:
       - name: users_owner
@@ -51,6 +54,12 @@ spec:
         inherit: true
         passwordSecret:
           name: users-db-secret
+      - name: orders_owner
+        ensure: present
+        login: true
+        inherit: true
+        passwordSecret:
+          name: orders-db-secret
       - name: keycloak_owner
         ensure: present
         login: true
