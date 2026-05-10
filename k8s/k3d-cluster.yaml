@@ -7,7 +7,8 @@ agents: 2                      # two worker nodes
 kubeAPI:
   host: "kube-api.local.test"  # resolves to 127.0.0.1 via .local.test wildcard DNS
   hostPort: "6445"
-
+# Setting version of k3s
+image: rancher/k3s:v1.36.0-k3s1
 # Expose ports 80 and 443 via the k3d load-balancer container so that
 # Envoy Gateway (running inside the cluster) is reachable on localhost.
 ports:
