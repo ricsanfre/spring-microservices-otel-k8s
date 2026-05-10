@@ -337,7 +337,8 @@ k8s-operators: k8s-namespaces ## Install all infrastructure operators via Helm
 
 	@echo "── Strimzi Kafka Operator ───────────────────────────────────────────"
 	helm upgrade --install strimzi-kafka-operator \
-	    oci://quay.io/strimzi-helm-charts/strimzi-kafka-operator \
+	    oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+		--version 1.0.0 \
 	    --namespace kafka --create-namespace \
 	    --values k8s/helm/strimzi-operator-values.yaml \
 	    --wait
