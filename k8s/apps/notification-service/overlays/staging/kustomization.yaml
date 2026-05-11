@@ -2,6 +2,13 @@
 #
 # Build & apply:
 #   kubectl apply -k k8s/apps/notification-service/overlays/staging
+#
+# Kafka SCRAM secret — copy from the Strimzi-generated Secret in the kafka namespace:
+#   kubectl get secret notification-service -n kafka -o json \
+#     | jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.ownerReferences)
+#            | .metadata.name = "notification-service-kafka-secret"
+#            | .metadata.namespace = "e-commerce"' \
+#     | kubectl apply -f -
 resources:
   - ../../base
 

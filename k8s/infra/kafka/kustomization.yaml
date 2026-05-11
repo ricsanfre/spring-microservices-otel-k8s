@@ -1,5 +1,6 @@
-# Kafka — Strimzi Kafka cluster + KafkaTopic CRs
+# Kafka — Strimzi Kafka cluster + KafkaTopic + KafkaUser CRs
 # Namespace: kafka
 resources:
   - cluster.yaml
   - topics.yaml
+  - users.yaml

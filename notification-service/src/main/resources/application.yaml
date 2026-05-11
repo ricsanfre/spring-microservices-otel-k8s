@@ -9,6 +9,9 @@ spring:
       # TraceContext from message headers and creates a child span linked to the
       # producer's trace, propagating the trace context across the Kafka boundary.
       observation-enabled: true
+      # Retry after an auth exception instead of stopping the listener container.
+      # Handles the window where kafka-init hasn't finished creating ACLs yet.
+      auth-exception-retry-interval: 10s
     consumer:
       group-id: notification-group
       auto-offset-reset: earliest
@@ -19,6 +22,16 @@ spring:
       properties:
         spring.json.use.type.headers: false
         spring.json.value.default.type: com.ricsanfre.notification.kafka.OrderConfirmedEvent
+    # SASL/SCRAM-SHA-512 authentication (applies to all consumers in this service).
+    # KAFKA_USERNAME is non-sensitive — set in ConfigMap or use the default below.
+    # KAFKA_PASSWORD must be injected from a Secret (K8s) or .env file (local dev).
+    properties:
+      security.protocol: SASL_PLAINTEXT
+      sasl.mechanism: SCRAM-SHA-512
+      sasl.jaas.config: >-
+        org.apache.kafka.common.security.scram.ScramLoginModule required
+        username="${KAFKA_USERNAME:notification-service}"
+        password="${KAFKA_PASSWORD:notification-service-secret}";
 
   mvc:
     problemdetails:

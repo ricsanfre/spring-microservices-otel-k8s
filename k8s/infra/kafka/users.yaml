@@ -1,0 +1,96 @@
+# Strimzi — KafkaUser CRs (SCRAM-SHA-512 + ACLs)
+# Namespace: kafka
+#
+# Strimzi's User Operator automatically:
+#   1. Generates a random password for each user.
+#   2. Stores it in a Kubernetes Secret named after the KafkaUser (kafka namespace).
+#      Secret keys:  password        — raw password string
+#                    sasl.jaas.config — full JAAS login module string
+#   3. Creates SCRAM-SHA-512 credentials on the Kafka broker.
+#   4. Reconciles ACLs on every spec change.
+#
+# The Secret is created in the 'kafka' namespace.  Copy it to the 'e-commerce'
+# namespace before deploying the corresponding app (see staging overlay comments).
+#
+# Apply:
+#   kubectl apply -f k8s/infra/kafka/users.yaml
+---
+# order-service — Kafka producer
+# Publishes: order.created.v1, order.confirmed.v1
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: order-service
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      # Write to order.created.v1
+      - resource:
+          type: topic
+          name: order.created.v1
+          patternType: literal
+        operations: [Write, Create, Describe]
+      # Write to order.confirmed.v1
+      - resource:
+          type: topic
+          name: order.confirmed.v1
+          patternType: literal
+        operations: [Write, Create, Describe]
+---
+# notification-service — Kafka consumer
+# Consumes: order.confirmed.v1 (consumer group: notification-group)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: notification-service
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: order.confirmed.v1
+          patternType: literal
+        operations: [Read, Describe]
+      - resource:
+          type: group
+          name: notification-group
+          patternType: literal
+        operations: [Read]
+---
+# cart-service — Kafka consumer
+# Consumes: order.confirmed.v1 (consumer group: cart-service-group)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: cart-service
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: order.confirmed.v1
+          patternType: literal
+        operations: [Read, Describe]
+      - resource:
+          type: group
+          name: cart-service-group
+          patternType: literal
+        operations: [Read]

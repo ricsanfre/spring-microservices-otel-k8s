@@ -5,7 +5,22 @@
 # Apply:
 #   kubectl apply -f k8s/infra/kafka/cluster.yaml
 ---
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: kafka-pool
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka
+spec:
+  replicas: 1
+  storage:
+    type: ephemeral # ephemeral is fine for laptop staging
+  roles:
+    - broker
+    - controller
+---
+apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
   name: kafka
@@ -16,36 +31,33 @@ metadata:
     strimzi.io/node-pools: enabled
 spec:
   kafka:
-    version: 3.9.0
-    metadataVersion: 3.9-IV0
-    replicas: 1
+    version: 4.1.2
+    metadataVersion: 4.1-IV0
     listeners:
-      - name: plain
-        port: 9092
-        type: internal
-        tls: false
+      # TLS listener — used by the Strimzi Entity Operator for internal admin access.
+      # Keep even if app services use the scram listener.
       - name: tls
         port: 9093
         type: internal
         tls: true
+      # SASL/SCRAM-SHA-512 listener — all microservice connections must authenticate.
+      # Bootstrap: kafka-kafka-bootstrap.kafka.svc.cluster.local:9095
+      - name: scram
+        port: 9095
+        type: internal
+        tls: false
+        authentication:
+          type: scram-sha-512
+    authorization:
+      # SimpleAclAuthorizer (backed by StandardAuthorizer in KRaft mode).
+      # Deny by default — every service must have explicit KafkaUser ACLs.
+      type: simple
     config:
       offsets.topic.replication.factor: 1
       transaction.state.log.replication.factor: 1
       transaction.state.log.min.isr: 1
       default.replication.factor: 1
       min.insync.replicas: 1
-    storage:
-      type: ephemeral     # ephemeral is fine for laptop staging
-
-  # KRaft controller (co-located in the same pod for single-node)
-  kafkaNodePools:
-    - name: controller
-      roles:
-        - controller
-        - broker
-      replicas: 1
-      storage:
-        type: ephemeral
 
   entityOperator:
     topicOperator: {}

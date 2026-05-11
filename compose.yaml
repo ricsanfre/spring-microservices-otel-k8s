@@ -90,35 +90,78 @@ services:
 
   # ── Messaging ───────────────────────────────────────────────────────────────
   # KRaft mode — no Zookeeper. Single-node dev broker.
-  # Advertised on localhost:9092 so JARs running on the host can connect directly.
+  #
+  # Listeners:
+  #   APP      (SASL_PLAINTEXT, port 9092) — for microservices and host JARs.
+  #            Advertised as localhost:9092 so host-side JARs can connect.
+  #   INTERNAL (PLAINTEXT, port 9094)      — for kafka-init and health-check only.
+  #            Only reachable inside the Docker network (no host port mapping).
+  #   CONTROLLER (PLAINTEXT, port 9093)    — KRaft internal, never exposed.
+  #
+  # ACL authorisation (StandardAuthorizer, KRaft):
+  #   allow.everyone.if.no.acl.found = false  → deny-by-default.
+  #   User:ANONYMOUS is a super-user           → INTERNAL (PLAINTEXT) connections
+  #   bypass ACLs, which lets kafka-init run admin commands without credentials.
+  #
+  # SCRAM users are created by the kafka-init service after the broker is healthy.
   kafka:
     image: apache/kafka:4.1.2
     profiles: [infra]
     ports:
-      - "9092:9092"
+      - "9092:9092"   # APP — SASL_PLAINTEXT for microservices / host JARs
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://kafka:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      # Three listeners: APP (SASL), INTERNAL (PLAINTEXT), CONTROLLER (KRaft)
+      KAFKA_LISTENERS: APP://0.0.0.0:9092,INTERNAL://0.0.0.0:9094,CONTROLLER://kafka:9093
+      KAFKA_ADVERTISED_LISTENERS: APP://localhost:9092,INTERNAL://kafka:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: APP:SASL_PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # SASL/SCRAM configuration for the APP listener
+      KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512
+      # Broker-side JAAS: ScramLoginModule with no credentials (users live in KRaft metadata)
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/opt/kafka/config/kafka_server_jaas.conf"
+      # ACL authorisation — deny by default; ANONYMOUS (INTERNAL/PLAINTEXT) is super-user
+      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"
+      KAFKA_SUPER_USERS: "User:ANONYMOUS"
     volumes:
       - kafka-data:/var/lib/kafka/data
+      - ./docker/kafka/kafka_server_jaas.conf:/opt/kafka/config/kafka_server_jaas.conf:ro
     networks: [e-commerce]
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      # Use the INTERNAL (PLAINTEXT) listener for health-checks — no credentials needed
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9094 > /dev/null 2>&1"]
       interval: 15s
       timeout: 10s
       retries: 10
       start_period: 30s
+
+  # One-shot init container: creates SCRAM users + ACLs once Kafka is healthy.
+  # Connects via the INTERNAL (PLAINTEXT) listener — no credentials required.
+  # Set *_KAFKA_PASSWORD env vars to override dev-default passwords.
+  kafka-init:
+    image: apache/kafka:4.1.2
+    profiles: [infra]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./docker/kafka/create-users.sh:/create-users.sh:ro
+    entrypoint: ["/bin/bash", "/create-users.sh"]
+    networks: [e-commerce]
+    environment:
+      ORDER_SERVICE_KAFKA_PASSWORD: ${ORDER_SERVICE_KAFKA_PASSWORD:-order-service-secret}
+      NOTIFICATION_SERVICE_KAFKA_PASSWORD: ${NOTIFICATION_SERVICE_KAFKA_PASSWORD:-notification-service-secret}
+      CART_SERVICE_KAFKA_PASSWORD: ${CART_SERVICE_KAFKA_PASSWORD:-cart-service-secret}
+    restart: "no"
 
   # ── IAM ─────────────────────────────────────────────────────────────────────
   keycloak:

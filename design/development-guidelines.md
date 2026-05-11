@@ -1195,6 +1195,78 @@ public record OrderCreatedEvent(
 
 **Important:** Use the internal service UUID for `userId` (ADR-004). Never expose the Keycloak `sub` in Kafka events.
 
+### Authentication — SASL/SCRAM-SHA-512
+
+All Kafka connections (producer and consumer) must authenticate with SASL/SCRAM-SHA-512. Unauthenticated access is rejected at the broker.
+
+**Why SCRAM?** SASL/SCRAM-SHA-512 is the standard password-based mechanism supported natively by Apache Kafka in KRaft mode without requiring a separate Kerberos infrastructure. Credentials are stored in Kafka's internal metadata log and managed via `kafka-configs.sh` (local dev) or Strimzi `KafkaUser` CRs (Kubernetes).
+
+#### Spring Boot configuration
+
+Add a `properties` block under `spring.kafka` with the three required properties. `sasl.jaas.config` is a multi-line string that embeds the username/password from environment variables:
+
+```yaml
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # ... producer / consumer / listener config ...
+    properties:
+      security.protocol: SASL_PLAINTEXT
+      sasl.mechanism: SCRAM-SHA-512
+      sasl.jaas.config: >-
+        org.apache.kafka.common.security.scram.ScramLoginModule required
+        username="${KAFKA_USERNAME:<service-name>}"
+        password="${KAFKA_PASSWORD:<service-name>-secret}";
+```
+
+`spring.kafka.properties` applies to **both** producers and consumers in the same application — no duplication needed.
+
+**Environment variables:**
+
+| Variable | Where set | Sensitivity |
+|---|---|---|
+| `KAFKA_BOOTSTRAP_SERVERS` | ConfigMap | Non-sensitive |
+| `KAFKA_USERNAME` | ConfigMap | Non-sensitive |
+| `KAFKA_PASSWORD` | Secret | **Sensitive** — never commit |
+
+For local dev, the defaults in `application.yaml` (`order-service-secret`, etc.) match the passwords set by `docker/kafka/create-users.sh`. Override via `.env` or `export` for custom passwords.
+
+#### Authorization — ACLs
+
+Authorization follows deny-by-default (`allow.everyone.if.no.acl.found=false`). Every service is granted only the permissions it needs:
+
+| Service | Topic | Operations | Consumer Group |
+|---|---|---|---|
+| `order-service` | `order.created.v1`, `order.confirmed.v1` | Write, Create, Describe | — |
+| `notification-service` | `order.confirmed.v1` | Read, Describe | `notification-group` (Read) |
+| `cart-service` | `order.confirmed.v1` | Read, Describe | `cart-service-group` (Read) |
+
+**Local dev (Docker Compose):** The `kafka-init` one-shot container (`docker/kafka/create-users.sh`) connects to the broker's internal PLAINTEXT listener (where `User:ANONYMOUS` is a super-user) and in order:
+1. **Pre-creates all topics** — `auto.create.topics.enable` is disabled on the broker. This is required because with deny-by-default ACLs, a consumer connecting to a non-existent topic would trigger an implicit auto-create attempt under the consumer's principal, which lacks `Create` permission, resulting in `TOPIC_AUTHORIZATION_FAILED`.
+2. **Creates SCRAM-SHA-512 credentials** for each service.
+3. **Sets ACLs** per service (see table above).
+
+`auth-exception-retry-interval: 10s` is also set on all consumer listener containers. This prevents the listener from stopping permanently if a `TopicAuthorizationException` occurs (e.g. startup before `kafka-init` completes) — Spring Kafka will retry the subscription every 10 seconds until it succeeds.
+
+**Kubernetes (Strimzi):** Each service has a `KafkaUser` CR in `k8s/infra/kafka/users.yaml`. Strimzi's User Operator generates the SCRAM credentials, stores them in a `kafka`-namespace Secret (key: `password`), and reconciles the ACLs automatically on every spec change. Topics are pre-created via `KafkaTopic` CRs in `k8s/infra/kafka/topics.yaml` — `auto.create.topics.enable` is not set on the Strimzi cluster (defaults to `false` in Strimzi-managed clusters).
+
+#### Copying the Strimzi Secret to the app namespace
+
+The `KafkaUser` Secret is created in the `kafka` namespace. Before deploying a service you must copy it to the `e-commerce` namespace:
+
+```bash
+kubectl get secret <service-name> -n kafka -o json \
+  | jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,
+            .metadata.creationTimestamp,.metadata.ownerReferences)
+       | .metadata.name = "<service-name>-kafka-secret"
+       | .metadata.namespace = "e-commerce"' \
+  | kubectl apply -f -
+```
+
+The Deployment mounts this secret as `KAFKA_PASSWORD` via `secretKeyRef`.
+
+---
+
 ### Producer Configuration (`application.yaml`)
 
 ```yaml
@@ -1206,6 +1278,13 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    properties:
+      security.protocol: SASL_PLAINTEXT
+      sasl.mechanism: SCRAM-SHA-512
+      sasl.jaas.config: >-
+        org.apache.kafka.common.security.scram.ScramLoginModule required
+        username="${KAFKA_USERNAME:order-service}"
+        password="${KAFKA_PASSWORD:order-service-secret}";
 ```
 
 Use `StringSerializer` for keys and `JsonSerializer` for values. The `JsonSerializer` serializes the event record to JSON automatically — no extra configuration needed.
@@ -1243,6 +1322,9 @@ spring:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     listener:
       observation-enabled: true   # enables trace context propagation — see §11
+      # Retry on TopicAuthorizationException instead of stopping the container permanently.
+      # Required when auto.create.topics.enable=false and ACLs may not yet exist at startup.
+      auth-exception-retry-interval: 10s
     consumer:
       group-id: ${spring.application.name}
       auto-offset-reset: earliest
@@ -1256,6 +1338,13 @@ spring:
         # always deserialize to the local mirror record.
         spring.json.use.type.headers: false
         spring.json.value.default.type: com.ricsanfre.<service>.kafka.<EventClass>
+    properties:
+      security.protocol: SASL_PLAINTEXT
+      sasl.mechanism: SCRAM-SHA-512
+      sasl.jaas.config: >-
+        org.apache.kafka.common.security.scram.ScramLoginModule required
+        username="${KAFKA_USERNAME:<service-name>}"
+        password="${KAFKA_PASSWORD:<service-name>-secret}";
 ```
 
 Define a **mirror record** in the consumer's `kafka/` package with the same field names as the producer's event. The `JsonDeserializer` maps by field name, so the package and class name do not need to match.

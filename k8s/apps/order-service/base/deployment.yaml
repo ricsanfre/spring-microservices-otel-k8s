@@ -44,6 +44,13 @@ spec:
                 secretKeyRef:
                   name: order-service-oauth-secret
                   key: ORDER_SERVICE_CLIENT_SECRET
+            # Kafka SCRAM-SHA-512 password (Strimzi generates and stores in kafka namespace;
+            # copy to e-commerce namespace as order-service-kafka-secret before deploying).
+            - name: KAFKA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: order-service-kafka-secret
+                  key: password
 
           livenessProbe:
             httpGet:

@@ -30,6 +30,15 @@ spec:
             - configMapRef:
                 name: notification-service-config
 
+          env:
+            # Kafka SCRAM-SHA-512 password (Strimzi generates and stores in kafka namespace;
+            # copy to e-commerce namespace as notification-service-kafka-secret before deploying).
+            - name: KAFKA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: notification-service-kafka-secret
+                  key: password
+
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness

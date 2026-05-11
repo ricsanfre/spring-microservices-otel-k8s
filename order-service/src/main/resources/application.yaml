@@ -52,6 +52,16 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    # SASL/SCRAM-SHA-512 authentication (applies to all producers in this service).
+    # KAFKA_USERNAME is non-sensitive — set in ConfigMap or use the default below.
+    # KAFKA_PASSWORD must be injected from a Secret (K8s) or .env file (local dev).
+    properties:
+      security.protocol: SASL_PLAINTEXT
+      sasl.mechanism: SCRAM-SHA-512
+      sasl.jaas.config: >-
+        org.apache.kafka.common.security.scram.ScramLoginModule required
+        username="${KAFKA_USERNAME:order-service}"
+        password="${KAFKA_PASSWORD:order-service-secret}";
 
   mvc:
     problemdetails:

@@ -5,6 +5,13 @@
 #   kustomize build k8s/apps/cart-service/overlays/staging | kubectl apply -f -
 # or:
 #   kubectl apply -k k8s/apps/cart-service/overlays/staging
+#
+# Kafka SCRAM secret — copy from the Strimzi-generated Secret in the kafka namespace:
+#   kubectl get secret cart-service -n kafka -o json \
+#     | jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.ownerReferences)
+#            | .metadata.name = "cart-service-kafka-secret"
+#            | .metadata.namespace = "e-commerce"' \
+#     | kubectl apply -f -
 resources:
   - ../../base
 
