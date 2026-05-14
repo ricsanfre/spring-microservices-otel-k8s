@@ -13,7 +13,7 @@
 #   - Only GITHUB_TOKEN is required — no manually configured secrets
 #
 # Services covered (implemented — have full src/ + tests):
-#   Java:     product-service, user-service, cart-service
+#   Java:     product-service, user-service, cart-service, order-service, reviews-service, notification-service
 #   Frontend: frontend-service (Next.js 15, separate job)
 #
 # Test naming convention (ADR-012):
@@ -30,6 +30,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   # ── Change detection ──────────────────────────────────────────────────────
@@ -51,14 +54,32 @@ jobs:
               - 'product-service/**'
               - 'common/**'
               - 'pom.xml'
+              - '.github/workflows/ci.yaml'
             user-service:
               - 'user-service/**'
               - 'common/**'
               - 'pom.xml'
+              - '.github/workflows/ci.yaml'
             cart-service:
               - 'cart-service/**'
               - 'common/**'
               - 'pom.xml'
+              - '.github/workflows/ci.yaml'
+            order-service:
+              - 'order-service/**'
+              - 'common/**'
+              - 'pom.xml'
+              - '.github/workflows/ci.yaml'
+            reviews-service:
+              - 'reviews-service/**'
+              - 'common/**'
+              - 'pom.xml'
+              - '.github/workflows/ci.yaml'
+            notification-service:
+              - 'notification-service/**'
+              - 'common/**'
+              - 'pom.xml'
+              - '.github/workflows/ci.yaml'
 
       # Frontend has a different toolchain — detected separately
       - uses: dorny/paths-filter@v3
@@ -67,6 +88,7 @@ jobs:
           filters: |
             frontend:
               - 'frontend-service/**'
+              - '.github/workflows/ci.yaml'
 
   # ── Java services — build, test, publish ─────────────────────────────────
   build-java:
