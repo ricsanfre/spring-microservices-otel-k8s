@@ -20,7 +20,7 @@ spec:
       containers:
         - name: user-service
           # Image tag is set by the staging overlay via kustomize image transform
-          image: localhost:5000/user-service:latest
+          image: e-commerce-registry:5000/user-service:latest
           imagePullPolicy: Always
           ports:
             - name: http
@@ -34,7 +34,7 @@ spec:
           env:
             # DB credentials from CNPG-managed secret (postgres namespace)
             # The secret is copied into e-commerce namespace by the staging overlay.
-            - name: DB_USERNAME
+            - name: DB_USER
               valueFrom:
                 secretKeyRef:
                   name: user-service-db-secret
@@ -45,11 +45,18 @@ spec:
                   name: user-service-db-secret
                   key: password
 
-          livenessProbe:
+          startupProbe:
             httpGet:
               path: /actuator/health/liveness
               port: 8085
             initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 12
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8085
             periodSeconds: 10
             failureThreshold: 3
 
@@ -57,7 +64,6 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8085
-            initialDelaySeconds: 20
             periodSeconds: 10
             failureThreshold: 3
 

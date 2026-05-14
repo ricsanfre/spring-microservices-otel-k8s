@@ -6,7 +6,7 @@ resources:
   - ../../base
 
 images:
-  - name: localhost:5000/reviews-service
+  - name: e-commerce-registry:5000/reviews-service
     newTag: "latest"
 
 patches:

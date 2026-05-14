@@ -19,7 +19,7 @@ spec:
 
       containers:
         - name: order-service
-          image: localhost:5000/order-service:latest
+          image: e-commerce-registry:5000/order-service:latest
           imagePullPolicy: Always
           ports:
             - name: http

@@ -12,7 +12,7 @@ resources:
   - ../../base
 
 images:
-  - name: localhost:5000/frontend-service
+  - name: e-commerce-registry:5000/frontend-service
     newTag: "latest"
 
 patches:

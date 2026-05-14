@@ -9,6 +9,7 @@ resources:
   - deployment.yaml
   - service.yaml
 
-commonLabels:
-  app.kubernetes.io/name: user-service
-  app.kubernetes.io/part-of: e-commerce
+labels:
+  - pairs:
+      app.kubernetes.io/name: user-service
+      app.kubernetes.io/part-of: e-commerce

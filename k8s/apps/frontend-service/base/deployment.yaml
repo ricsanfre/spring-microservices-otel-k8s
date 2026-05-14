@@ -20,7 +20,7 @@ spec:
       containers:
         - name: frontend-service
           # Image tag is set by the staging overlay via kustomize image transform
-          image: localhost:5000/frontend-service:latest
+          image: e-commerce-registry:5000/frontend-service:latest
           imagePullPolicy: Always
           ports:
             - name: http

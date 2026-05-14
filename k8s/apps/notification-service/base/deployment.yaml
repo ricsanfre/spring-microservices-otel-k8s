@@ -19,7 +19,7 @@ spec:
 
       containers:
         - name: notification-service
-          image: localhost:5000/notification-service:latest
+          image: e-commerce-registry:5000/notification-service:latest
           imagePullPolicy: Always
           ports:
             - name: http

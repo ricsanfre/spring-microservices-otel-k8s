@@ -6,7 +6,7 @@ resources:
   - ../../base
 
 images:
-  - name: localhost:5000/product-service
+  - name: e-commerce-registry:5000/product-service
     newTag: "latest"
 
 patches:

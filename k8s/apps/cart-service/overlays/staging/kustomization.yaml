@@ -17,7 +17,7 @@ resources:
 
 # Set the image to use the k3d local registry with an explicit tag.
 images:
-  - name: localhost:5000/cart-service
+  - name: e-commerce-registry:5000/cart-service
     newTag: "latest"
 
 # Staging-specific patches
