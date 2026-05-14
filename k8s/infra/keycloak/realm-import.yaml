@@ -7,7 +7,7 @@
 # Apply:
 #   kubectl apply -f k8s/infra/keycloak/realm-import.yaml
 ---
-apiVersion: k8s.keycloak.org/v2alpha1
+apiVersion: k8s.keycloak.org/v2beta1
 kind: KeycloakRealmImport
 metadata:
   name: e-commerce-realm
@@ -91,9 +91,6 @@ spec:
                   - "users:read"
                 notification-service:
                   - "notifications:receive"
-                cart-service:
-                  - "cart:read"
-                  - "cart:write"
 
     clientScopeMappings:
       product-service:
@@ -339,6 +336,8 @@ spec:
         directAccessGrantsEnabled: false
         serviceAccountsEnabled: false
         fullScopeAllowed: false
+        attributes:
+          post.logout.redirect.uris: "http://localhost:3001/*##https://app.local.test/*"
         redirectUris:
           - "http://localhost:3001/api/auth/callback/keycloak"
           - "https://app.local.test/api/auth/callback/keycloak"
@@ -509,3 +508,16 @@ spec:
             - "orders:read"
           user-service:
             - "users:resolve"
+
+      - username: adminuser
+        enabled: true
+        email: admin@example.com
+        firstName: Admin
+        lastName: User
+        credentials:
+          - type: password
+            value: password
+            temporary: false
+        clientRoles:
+          e-commerce-web:
+            - admin

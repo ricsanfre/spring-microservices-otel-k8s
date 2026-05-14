@@ -479,13 +479,13 @@ All services export traces, metrics, and logs via the **OTLP protocol**. The pip
 |--------|---------|------------------------|
 | **Traces** | Grafana Tempo | `spring-boot-starter-opentelemetry` — W3C TraceContext propagation |
 | **Logs** | Grafana Loki | Logback `OpenTelemetryAppender` — logs correlated with trace IDs |
-| **Metrics** | Grafana Mimir | Micrometer via OTLP — JVM, HTTP server, Kafka consumer lag |
+| **Metrics** | Prometheus | Micrometer via OTLP — JVM, HTTP server, Kafka consumer lag |
 
 ---
 
 ### Local Development — `grafana/otel-lgtm` (all-in-one)
 
-In the Docker Compose environment a single `grafana/otel-lgtm` container provides the full OTLP receiver, Loki, Tempo, Mimir (Prometheus-compatible), and Grafana UI. Services send OTLP directly to it.
+In the Docker Compose environment a single `grafana/otel-lgtm` container provides the full OTLP receiver, Loki, Tempo, Prometheus, and Pyroscope, and Grafana UI. Services send OTLP directly to it.
 
 ```
   ┌──────────────────────────────────────────┐
@@ -497,9 +497,9 @@ In the Docker Compose environment a single `grafana/otel-lgtm` container provide
           │   grafana/otel-lgtm     │  ← Docker Compose  (profile: observability)
           │   all-in-one image      │
           │                         │
-          │  ┌─────┐ ┌─────┐ ┌───┐ │
-          │  │Loki │ │Tempo│ │ M │ │  M = Mimir (Prometheus-compatible)
-          │  └─────┘ └─────┘ └───┘ │
+          │  ┌─────┐ ┌─────┐ ┌───┐  │
+          │  │Loki │ │Tempo│ │ P │  │  P = Prometheus
+          │  └─────┘ └─────┘ └───┘  │
           │       Grafana :3000     │
           └─────────────────────────┘
 ```
@@ -508,9 +508,11 @@ OTLP endpoint used by Spring Boot services: `http://localhost:4318`
 
 ---
 
-### Staging (k3d) — OpenTelemetry Operator + lgtm-distributed
+### Staging (k3d) — OpenTelemetry Operator + kube-prometheus-stack + Tempo + Loki
 
-In the Kubernetes staging cluster, the **OpenTelemetry Operator** manages a central `OpenTelemetryCollector` deployment. Services send a single OTLP stream to the collector, which fans it out to the dedicated backends provided by the **`lgtm-distributed`** Helm chart.
+In the Kubernetes staging cluster, the **OpenTelemetry Operator** manages a central `OpenTelemetryCollector` deployment. Services send a single OTLP stream to the collector, which fans it out to three dedicated backends: monolithic **Tempo** (traces), monolithic **Loki** (logs), and **Prometheus** via **kube-prometheus-stack** (metrics + Grafana UI). All backends use ephemeral `emptyDir` storage — appropriate for an ephemeral k3d staging cluster.
+
+> **Why not `lgtm-distributed`?** The `grafana/lgtm-distributed` umbrella chart is deprecated. The individual charts (`grafana/tempo`, `grafana/loki`, `prometheus-community/kube-prometheus-stack`) are the current recommended path.
 
 ```
   ┌──────────────────────────────────────────────────────┐
@@ -527,18 +529,20 @@ In the Kubernetes staging cluster, the **OpenTelemetry Operator** manages a cent
           │              → resource/staging              │
           └────┬────────────────┬──────────────┬─────────┘
                │ traces         │ logs         │ metrics
+               │ OTLP gRPC      │ OTLP HTTP    │ OTLP HTTP
                ▼                ▼              ▼
   ┌────────────────┐  ┌──────────────┐  ┌────────────────────┐
-  │ Tempo          │  │ Loki         │  │ Mimir              │
-  │ distributor    │  │ gateway      │  │ nginx              │
-  │ :4317 (gRPC)   │  │ :3100 (HTTP) │  │ :80/otlp (HTTP)    │
+  │ Tempo          │  │ Loki         │  │ Prometheus         │
+  │ monolithic     │  │ monolithic   │  │ (kube-prom-stack)  │
+  │ :4317 (gRPC)   │  │ :3100/otlp   │  │ :9090/otlp         │
   └───────┬────────┘  └──────┬───────┘  └────────┬───────────┘
-          └──────────────────┴──────────────────┘
+          └──────────────────┴───────────────────┘
                              │
-                    ┌────────▼────────┐
-                    │  Grafana UI     │
+                    ┌────────▼─────────────┐
+                    │  Grafana UI          │
                     │  grafana.local.test  │
-                    └─────────────────┘
+                    │  (kube-prom-stack)   │
+                    └──────────────────────┘
 ```
 
 All components run in the `monitoring` namespace:
@@ -546,10 +550,10 @@ All components run in the `monitoring` namespace:
 | Component | Helm release | Service (cluster-internal) |
 |-----------|-------------|---------------------------|
 | OTel Collector | `opentelemetry-operator` (CR: `otel`) | `otel-collector.monitoring:4317/4318` |
-| Loki gateway | `lgtm` (lgtm-distributed) | `lgtm-loki-gateway.monitoring:3100` |
-| Tempo distributor | `lgtm` (lgtm-distributed) | `lgtm-tempo-distributor.monitoring:4317` |
-| Mimir nginx | `lgtm` (lgtm-distributed) | `lgtm-mimir-distributed-nginx.monitoring:80` |
-| Grafana UI | `lgtm` (lgtm-distributed) | `https://grafana.local.test` (via Envoy Gateway) |
+| Loki (monolithic) | `loki` (grafana/loki) | `loki.monitoring:3100` |
+| Tempo (monolithic) | `tempo` (grafana/tempo) | `tempo.monitoring:4317/4318/3200` |
+| Prometheus | `kube-prom-stack` (kube-prometheus-stack) | `kube-prom-stack-kube-prom-prometheus.monitoring:9090` |
+| Grafana UI | `kube-prom-stack` (kube-prometheus-stack) | `https://grafana.local.test` (via Envoy Gateway) |
 
 ---
 
@@ -609,9 +613,9 @@ flowchart TD
 
                 subgraph NS_MON["monitoring"]
                     OTELCOL["OTel Collector\n(OTel Operator)\n:4317 / :4318"]
-                    LOKI["Loki"]
-                    TEMPO["Tempo"]
-                    MIMIR["Mimir"]
+                    LOKI["Loki\n(monolithic)"]
+                    TEMPO["Tempo\n(monolithic)"]
+                    PROM["Prometheus\n(kube-prom-stack)"]
                     GRAFANA["Grafana\ngrafana.local.test"]
                 end
             end
@@ -666,10 +670,10 @@ flowchart TD
     CS -- "OTLP :4317" --> OTELCOL
     OTELCOL -- "traces" --> TEMPO
     OTELCOL -- "logs" --> LOKI
-    OTELCOL -- "metrics" --> MIMIR
+    OTELCOL -- "metrics" --> PROM
     TEMPO --> GRAFANA
     LOKI --> GRAFANA
-    MIMIR --> GRAFANA
+    PROM --> GRAFANA
 ```
 
 ### Cluster Layout
@@ -683,7 +687,7 @@ flowchart TD
 | `mongodb` | MongoDB Community operator + replica set |
 | `postgres` | CloudNativePG operator + PostgreSQL cluster |
 | `valkey` | Valkey single-instance Deployment (cart cache) |
-| `monitoring` | OTel Operator, OTel Collector, Grafana LGTM stack |
+| `monitoring` | OTel Operator, OTel Collector, Tempo, Loki, Prometheus + Grafana (kube-prom-stack) |
 
 ### `k8s/` Directory Layout
 
@@ -698,7 +702,9 @@ k8s/
 │   ├── cnpg-operator-values.yaml
 │   ├── mongodb-operator-values.yaml
 │   ├── keycloak-operator-values.yaml   ← install notes (no Helm chart)
-│   ├── lgtm-distributed-values.yaml   ← Grafana LGTM (Loki + Tempo + Mimir + Grafana)
+│   ├── kube-prometheus-stack-values.yaml  ← Prometheus + Grafana (kube-prometheus-stack)
+│   ├── tempo-values.yaml              ← Grafana Tempo monolithic (emptyDir)
+│   ├── loki-values.yaml               ← Grafana Loki monolithic (emptyDir, canary+cache disabled)
 │   └── otel-operator-values.yaml      ← OpenTelemetry Operator
 ├── infra/                              ← Kustomize apps — operator-managed CRs
 │   ├── cert-manager/
@@ -719,13 +725,13 @@ k8s/
 │   ├── keycloak/
 │   │   ├── kustomization.yaml
 │   │   ├── operator/                   ← Kustomize app — Keycloak Operator (CRDs + Deployment)
-│   │   │   ├── kustomization.yaml
-│   │   │   └── namespace.yaml
-│   │   ├── keycloak.yaml               ← Keycloak CR
-│   │   └── realm-import.yaml           ← KeycloakRealmImport CR
+│   │   │   └── kustomization.yaml
+│   │   ├── keycloak.yaml               ← Keycloak CR (HTTP only; strict: false for direct cluster-internal access)
+│   │   ├── realm-import.yaml           ← KeycloakRealmImport CR
+│   │   └── httproute.yaml              ← HTTPRoute keycloak.local.test → keycloak-service:8080
 │   ├── otel-collector/
 │   │   ├── kustomization.yaml
-│   │   └── collector.yaml              ← OpenTelemetryCollector CR (OTLP → Tempo/Loki/Mimir)
+│   │   └── collector.yaml              ← OpenTelemetryCollector CR (OTLP → Tempo/Loki/Prometheus)
 │   └── valkey/
 │       ├── kustomization.yaml
 │       ├── deployment.yaml             ← single-replica Valkey Deployment (namespace: valkey)

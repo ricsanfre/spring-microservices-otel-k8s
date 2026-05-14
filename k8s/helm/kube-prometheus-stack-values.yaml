@@ -1,0 +1,185 @@
+# kube-prometheus-stack — Helm values for k3d staging (single-node laptop)
+# Chart   : prometheus-community/kube-prometheus-stack
+# Repo    : https://prometheus-community.github.io/helm-charts
+#
+# Design goals for k3d:
+#   - Prometheus with emptyDir storage + OTLP receiver enabled (no PVC)
+#   - Grafana datasources and Prometheus config mirror grafana/docker-otel-lgtm:
+#       https://github.com/grafana/docker-otel-lgtm/blob/main/docker/prometheus.yaml
+#       https://github.com/grafana/docker-otel-lgtm/blob/main/docker/grafana-datasources.yaml
+#   - Grafana admin credentials from a k8s Secret (grafana-admin-secret)
+#   - Alertmanager disabled (not needed for staging)
+#
+# Required secret (create once before `make k8s-infra-monitoring`):
+#   kubectl create secret generic grafana-admin-secret \
+#     --from-literal=admin-user=admin \
+#     --from-literal=admin-password=<CHANGE_ME> \
+#     --namespace monitoring
+#
+# Helm install:
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack \
+#     --namespace monitoring --create-namespace \
+#     -f k8s/helm/kube-prometheus-stack-values.yaml
+#
+# Internal endpoints:
+#   Metrics (OTLP HTTP) → kube-prom-stack-kube-prom-prometheus.monitoring.svc.cluster.local:9090/api/v1/otlp/v1/metrics
+#   Grafana UI          → kube-prom-stack-grafana.monitoring.svc.cluster.local:80
+# -----------------------------------------------------------------------------
+
+# ── Grafana UI ────────────────────────────────────────────────────────────────
+grafana:
+  enabled: true
+  replicas: 1
+
+  admin:
+    existingSecret: grafana-admin-secret
+    userKey: admin-user
+    passwordKey: admin-password
+
+  grafana.ini:
+    server:
+      root_url: "https://grafana.local.test"
+    feature_toggles:
+      enable: "traceqlSearch traceqlStreaming"
+
+  persistence:
+    enabled: false
+
+  # Disable the chart's auto-generated Prometheus+Alertmanager datasource ConfigMap.
+  # We provide a full custom datasources.yaml below; having both would cause Grafana
+  # to see two datasources with isDefault:true and fail provisioning.
+  sidecar:
+    datasources:
+      defaultDatasourceEnabled: false
+
+  # Datasources mirroring grafana/docker-otel-lgtm grafana-datasources.yaml
+  # URLs updated to point at in-cluster Kubernetes service DNS endpoints.
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          uid: prometheus
+          url: http://kube-prom-stack-kube-prom-prometheus.monitoring.svc.cluster.local:9090
+          isDefault: true
+          editable: true
+          jsonData:
+            httpMethod: POST
+            timeInterval: 60s
+            exemplarTraceIdDestinations:
+              - name: trace_id
+                datasourceUid: tempo
+                urlDisplayLabel: "Trace: ${__value.raw}"
+
+        - name: Tempo
+          type: tempo
+          uid: tempo
+          url: http://tempo.monitoring.svc.cluster.local:3200
+          editable: true
+          jsonData:
+            tracesToLogsV2:
+              customQuery: true
+              datasourceUid: loki
+              query: '{${__tags}} | trace_id = "${__trace.traceId}"'
+              tags:
+                - key: "service.name"
+                  value: "service_name"
+            serviceMap:
+              datasourceUid: prometheus
+            search:
+              hide: false
+            nodeGraph:
+              enabled: true
+            lokiSearch:
+              datasourceUid: loki
+
+        - name: Loki
+          type: loki
+          uid: loki
+          url: http://loki.monitoring.svc.cluster.local:3100
+          editable: true
+          jsonData:
+            derivedFields:
+              - name: trace_id
+                matcherType: label
+                matcherRegex: trace_id
+                url: "${__value.raw}"
+                datasourceUid: tempo
+                urlDisplayLabel: "Trace: ${__value.raw}"
+
+# ── Prometheus ────────────────────────────────────────────────────────────────
+# Configuration mirrors grafana/docker-otel-lgtm prometheus.yaml
+prometheus:
+  prometheusSpec:
+    # Enable native histograms feature flag
+    # Mirrors: global.scrape_native_histograms: true
+    additionalArgs:
+      - name: enable-feature
+        value: native-histograms
+
+    # OTLP receiver — keep resource attributes and promote key ones to labels.
+    # Enabling OTLP receiver
+    enableOTLPReceiver: true
+    # Mirrors: otlp.keep_identifying_resource_attributes + otlp.promote_resource_attributes
+    otlp:
+      keepIdentifyingResourceAttributes: true
+      # Use default translation strategy. Dots in attribute keys are replaced with underscores, and common attributes are promoted to labels.
+      # This allows OTLP metrics to be queried in Grafana with labels like service_name="
+      # translationStrategy: NoUTF8EscapingWithSuffixes
+      promoteResourceAttributes:
+        - service.instance.id
+        - service.name
+        - service.namespace
+        - service.version
+        - cloud.availability_zone
+        - cloud.region
+        - container.name
+        - deployment.environment        # backward compatibility
+        - deployment.environment.name
+        - k8s.cluster.name
+        - k8s.container.name
+        - k8s.cronjob.name
+        - k8s.daemonset.name
+        - k8s.deployment.name
+        - k8s.job.name
+        - k8s.namespace.name
+        - k8s.node.name
+        - k8s.pod.name
+        - k8s.replicaset.name
+        - k8s.statefulset.name
+        - host.name
+        - postgresql.database.name
+        - postgresql.schema.name
+        - postgresql.table.name
+        - postgresql.index.name
+        - database                      # used by otelcol mongodb receiver
+        - kafka.cluster.alias
+
+    # TSDB — absorb out-of-order samples arriving via OTLP ingest.
+    # Mirrors: storage.tsdb.out_of_order_time_window: 10m
+    tsdb:
+      outOfOrderTimeWindow: 10m
+
+    # Ephemeral storage — no PVC needed for staging
+    storageSpec: {}
+
+    # Short retention to avoid filling emptyDir on the runner
+    retention: 6h
+
+# ── Alertmanager — disabled for staging ──────────────────────────────────────
+alertmanager:
+  enabled: false
+
+# ── Node Exporter — useful for OS / container CPU / memory metrics ────────────
+nodeExporter:
+  enabled: true
+
+# ── kube-state-metrics — Kubernetes resource metrics ─────────────────────────
+kubeStateMetrics:
+  enabled: true
+
+# ── Prometheus Operator ───────────────────────────────────────────────────────
+prometheusOperator:
+  enabled: true

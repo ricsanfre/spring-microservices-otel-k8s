@@ -9,6 +9,10 @@
 #   kubectl create secret generic keycloak-db-secret \
 #     --from-literal=username=keycloak_owner --from-literal=password=<CHANGE_ME> \
 #     --namespace keycloak
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: keycloak
 resources:
   - keycloak.yaml
   - realm-import.yaml
+  - httproute.yaml

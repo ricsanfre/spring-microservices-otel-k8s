@@ -1,0 +1,75 @@
+# Grafana Loki — monolithic (SingleBinary) mode, Helm values for k3d staging
+# Chart   : grafana/loki
+# Repo    : https://grafana.github.io/helm-charts
+#
+# Design goals for k3d:
+#   - SingleBinary deployment, 1 replica
+#   - Filesystem / emptyDir storage (ephemeral — logs lost on pod restart, acceptable for staging)
+#   - Auth disabled (single-tenant, no multi-tenancy needed)
+#   - OTLP log push accepted on :3100/otlp/v1/logs (Loki >= 3.0)
+#   - Gateway disabled — direct pod access is sufficient for staging
+#
+# Helm install:
+#   helm repo add grafana https://grafana.github.io/helm-charts
+#   helm upgrade --install loki grafana/loki \
+#     --namespace monitoring --create-namespace \
+#     -f k8s/helm/loki-values.yaml
+#
+# Internal endpoints:
+#   Loki native push  → loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
+#   Loki OTLP push    → loki.monitoring.svc.cluster.local:3100/otlp/v1/logs
+#   Loki query        → loki.monitoring.svc.cluster.local:3100
+# -----------------------------------------------------------------------------
+
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+
+  commonConfig:
+    replication_factor: 1
+
+  storage:
+    type: filesystem
+
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+singleBinary:
+  replicas: 1
+
+# Disable MinIO — filesystem storage is used
+minio:
+  enabled: false
+
+# Disable gateway — direct pod access is sufficient for staging
+gateway:
+  enabled: false
+
+# Disable read/write/backend split components (SingleBinary handles everything)
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+# Disable canary and helm tests — write/read path validation not needed for staging
+lokiCanary:
+  enabled: false
+
+test:
+  enabled: false
+
+# Disable memcached caches — filesystem storage, no distributed caching needed
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false

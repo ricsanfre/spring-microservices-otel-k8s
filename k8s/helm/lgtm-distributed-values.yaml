@@ -1,3 +1,16 @@
+# DEPRECATED — grafana/lgtm-distributed is no longer maintained.
+#
+# This file is kept for historical reference only.
+# It has been replaced by three separate charts:
+#
+#   kube-prometheus-stack-values.yaml  ← Prometheus + Grafana
+#   tempo-values.yaml                  ← Grafana Tempo (monolithic, emptyDir)
+#   loki-values.yaml                   ← Grafana Loki (monolithic, emptyDir)
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# Original content below (do not use):
+# ─────────────────────────────────────────────────────────────────────────────
+
 # Grafana LGTM Distributed — Helm values for k3d staging (single-node laptop)
 # Chart   : grafana/lgtm-distributed
 # Repo    : https://grafana.github.io/helm-charts

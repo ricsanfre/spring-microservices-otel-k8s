@@ -1,15 +1,17 @@
 # OpenTelemetry Collector — central OTLP fan-out
 #
-# Receives OTLP signals from all Spring Boot services and routes them to the
-# appropriate Grafana LGTM backends (Tempo / Loki / Mimir).
+# Receives OTLP signals from all Spring Boot services and routes them to:
+#   Traces  → Tempo monolithic  (grafana/tempo Helm release)
+#   Logs    → Loki monolithic   (grafana/loki Helm release)
+#   Metrics → Prometheus        (kube-prometheus-stack Helm release)
 #
 # Service endpoints visible to Spring Boot apps inside the cluster:
 #   OTLP gRPC  → otel-collector.monitoring.svc.cluster.local:4317
 #   OTLP HTTP  → otel-collector.monitoring.svc.cluster.local:4318
 #
 # Required:
-#   - opentelemetry-operator installed (make k8s-operators)
-#   - LGTM stack deployed (make k8s-infra-monitoring)
+#   - opentelemetry-operator installed (make k8s-otel-operator-helm)
+#   - Observability stack deployed    (make k8s-infra-monitoring)
 # ─────────────────────────────────────────────────────────────────────────────
 apiVersion: opentelemetry.io/v1beta1
 kind: OpenTelemetryCollector
@@ -63,29 +65,26 @@ spec:
 
     # ── Exporters ────────────────────────────────────────────────────────────
     exporters:
-      # Traces → Tempo (gRPC OTLP)
-      # Tempo distributor service from the lgtm-distributed Helm release
+      # Traces → Tempo monolithic (grafana/tempo Helm release)
       otlp/tempo:
-        endpoint: lgtm-tempo-distributor.monitoring.svc.cluster.local:4317
+        endpoint: tempo.monitoring.svc.cluster.local:4317
         tls:
           insecure: true
 
-      # Logs → Loki (HTTP push)
-      # Loki gateway from the lgtm-distributed Helm release
+      # Logs → Loki monolithic (grafana/loki Helm release, gateway disabled)
       # Resource attributes service.name / service.instance.id are mapped to
       # Loki stream labels job / instance automatically.
       loki:
-        endpoint: http://lgtm-loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push
+        endpoint: http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
         default_labels_enabled:
           exporter: false
           job: true
           instance: true
           level: true
 
-      # Metrics → Mimir (OTLP HTTP)
-      # Mimir nginx service from the lgtm-distributed Helm release
-      otlphttp/mimir:
-        endpoint: http://lgtm-mimir-distributed-nginx.monitoring.svc.cluster.local/otlp
+      # Metrics → Prometheus OTLP receiver (kube-prometheus-stack Helm release)
+      otlphttp/prometheus:
+        endpoint: http://kube-prom-stack-kube-prom-prometheus.monitoring.svc.cluster.local:9090/api/v1/otlp
 
     # ── Pipelines ────────────────────────────────────────────────────────────
     service:
@@ -103,4 +102,4 @@ spec:
         metrics:
           receivers: [otlp]
           processors: [memory_limiter, batch, resource/staging]
-          exporters: [otlphttp/mimir]
+          exporters: [otlphttp/prometheus]

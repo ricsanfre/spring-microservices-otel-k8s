@@ -13,6 +13,15 @@
 MAVEN   ?= mvn
 DOMAIN  ?= local.test           # default domain for all ingress hostnames
 KEYCLOAK_OPERATOR_VERSION ?= 26.6.1  # https://github.com/keycloak/keycloak-k8s-resources/releases
+POSTGRES_PASSWORD ?= postgres
+KEYCLOAK_PASSWORD ?= admin
+KEYCLOAK_DB_PASSWORD ?= keycloak_db_password
+USERS_DB_PASSWORD ?= users_db_password
+ORDERS_DB_PASSWORD ?= orders_db_password
+MONGODB_REVIEWS_PASSWORD ?= mongodb_reviews_password
+MONGODB_NOTIFICATIONS_PASSWORD ?= mongodb_notifications_password
+GRAFANA_PASSWORD ?= grafana_password
+FRONTEND_SERVICE_KEYCLOAK_SECRET ?= frontend_service_keycloak_secret
 
 .DEFAULT_GOAL := help
 .PHONY: help \
@@ -32,7 +41,9 @@ KEYCLOAK_OPERATOR_VERSION ?= 26.6.1  # https://github.com/keycloak/keycloak-k8s-
         ns-build ns-test ns-verify ns-image \
         ns-run \
         k3d-create k3d-delete k3d-info \
-        k8s-namespaces k8s-operators k8s-keycloak-operator \
+        k8s-namespaces k8s-keycloak-operator \
+		k8s-postgres-secret k8s-keycloak-secret k8s-mongodb-secrets k8s-grafana-secret k8s-frontend-service-secret k8s-secrets \
+		k8s-cert-manager-helm k8s-envoy-gateway-helm k8s-strimzi-operator-helm k8s-cnpg-operator-helm k8s-mongodb-operator-helm k8s-otel-operator-helm \
         k8s-infra k8s-infra-cert-manager k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey \
         k8s-infra-kafka k8s-infra-keycloak k8s-infra-envoy-gateway k8s-infra-monitoring k8s-infra-otel-collector k8s-up \
         k8s-apps-deploy k8s-apps-delete \
@@ -312,13 +323,60 @@ k3d-info: ## Show k3d cluster status and kubeconfig context
 	@kubectl config get-contexts
 
 # ──────────────────────────────────────────────────────────────────────────────
-# k8s — operator installation  (run once after k3d-create)
+# k8s — Infra installation  (run once after k3d-create)
 # ──────────────────────────────────────────────────────────────────────────────
 
 k8s-namespaces: ## Create all Kubernetes namespaces
 	kubectl apply -f k8s/namespaces.yaml
 
-k8s-operators: k8s-namespaces ## Install all infrastructure operators via Helm
+k8s-postgres-secret: ## Create Kubernetes secret for PostgreSQL credentials (used by CNPG bootstrap)
+	kubectl create secret generic postgres-superuser-secret \
+	--from-literal=username=postgres \
+	--from-literal=password=$(POSTGRES_PASSWORD) \
+	--namespace postgres
+	kubectl create secret generic users-db-secret \
+	--from-literal=username=users_owner \
+	--from-literal=password=$(USERS_DB_PASSWORD) \
+	--namespace postgres
+	kubectl create secret generic orders-db-secret \
+	--from-literal=username=orders_owner \
+	--from-literal=password=$(ORDERS_DB_PASSWORD) \
+	--namespace postgres
+	kubectl create secret generic keycloak-db-secret \
+	--from-literal=username=keycloak_owner \
+	--from-literal=password=$(KEYCLOAK_DB_PASSWORD) \
+	--namespace postgres
+	kubectl create secret generic keycloak-db-secret \
+	--from-literal=username=keycloak_owner \
+	--from-literal=password=$(KEYCLOAK_DB_PASSWORD) \
+	--namespace keycloak
+
+k8s-keycloak-secret: ## Create Kubernetes secret for Keycloak admin credentials (used by Keycloak Operator bootstrap)
+	kubectl create secret generic keycloak-admin-secret \
+	--from-literal=username=admin --from-literal=password=$(KEYCLOAK_PASSWORD) \
+	--namespace keycloak
+
+
+k8s-mongodb-secrets: ## Create Kubernetes secrets for MongoDB credentials (used by Community Operator bootstrap)
+	kubectl create secret generic mongodb-reviews-secret \
+	--from-literal=password=$(MONGODB_REVIEWS_PASSWORD) --namespace mongodb
+	kubectl create secret generic mongodb-notifications-secret \
+	--from-literal=password=$(MONGODB_NOTIFICATIONS_PASSWORD) --namespace mongodb
+
+k8s-grafana-secret: ## Create Kubernetes secret for Grafana admin credentials (used by kube-prometheus-stack)
+	kubectl create secret generic grafana-admin-secret \
+	--from-literal=admin-user=admin --from-literal=admin-password=$(GRAFANA_PASSWORD) \
+	--namespace monitoring
+
+k8s-frontend-service-secret: ## Create Kubernetes secret for frontend-service (Auth.js session key + Keycloak BFF client secret)
+	kubectl create secret generic frontend-service-secret \
+	--from-literal=AUTH_SECRET=$(openssl rand -base64 32) \
+	--from-literal=AUTH_KEYCLOAK_SECRET=$(FRONTEND_SERVICE_KEYCLOAK_SECRET) \
+	--namespace e-commerce
+
+k8s-secrets: k8s-postgres-secret k8s-keycloak-secret k8s-mongodb-secrets k8s-grafana-secret k8s-frontend-service-secret ## Create all Kubernetes secrets
+
+k8s-cert-manager-helm: ## Install cert-manager + trust-manager via Helm
 	@echo "── cert-manager ────────────────────────────────────────────────────"
 	helm repo add jetstack https://charts.jetstack.io --force-update
 	helm upgrade --install cert-manager jetstack/cert-manager \
@@ -326,7 +384,7 @@ k8s-operators: k8s-namespaces ## Install all infrastructure operators via Helm
 	    --version v1.16.2 \
 	    --values k8s/helm/cert-manager-values.yaml \
 	    --wait
-
+k8s-envoy-gateway-helm: ## Install Envoy Gateway via Helm (version controlled by helm chart version v1.4.1)
 	@echo "── Envoy Gateway ───────────────────────────────────────────────────"
 	helm upgrade --install envoy-gateway \
 	    oci://docker.io/envoyproxy/gateway-helm \
@@ -334,7 +392,7 @@ k8s-operators: k8s-namespaces ## Install all infrastructure operators via Helm
 	    --namespace envoy-gateway-system --create-namespace \
 	    --values k8s/helm/envoy-gateway-values.yaml \
 	    --wait
-
+k8s-strimzi-operator-helm: ## Install Strimzi Kafka Operator via Helm (version controlled by strimzi-operator-values.yaml)
 	@echo "── Strimzi Kafka Operator ───────────────────────────────────────────"
 	helm upgrade --install strimzi-kafka-operator \
 	    oci://quay.io/strimzi-helm/strimzi-kafka-operator \
@@ -343,6 +401,7 @@ k8s-operators: k8s-namespaces ## Install all infrastructure operators via Helm
 	    --values k8s/helm/strimzi-operator-values.yaml \
 	    --wait
 
+k8s-cnpg-operator-helm: ## Install CloudNativePG Operator via Helm (version controlled by cnpg-operator-values.yaml)
 	@echo "── CloudNativePG Operator ───────────────────────────────────────────"
 	helm repo add cnpg https://cloudnative-pg.github.io/charts --force-update
 	helm upgrade --install cnpg cnpg/cloudnative-pg \
@@ -350,6 +409,7 @@ k8s-operators: k8s-namespaces ## Install all infrastructure operators via Helm
 	    --values k8s/helm/cnpg-operator-values.yaml \
 	    --wait
 
+k8s-mongodb-operator-helm: ## Install MongoDB Community Operator via Helm (version controlled by mongodb-operator-values.yaml)
 	@echo "── MongoDB Community Operator ────────────────────────────────────────"
 	helm repo add mongodb https://mongodb.github.io/helm-charts --force-update
 	helm upgrade --install mongodb-operator mongodb/community-operator \
@@ -357,9 +417,7 @@ k8s-operators: k8s-namespaces ## Install all infrastructure operators via Helm
 	    --values k8s/helm/mongodb-operator-values.yaml \
 	    --wait
 
-	@echo "── Keycloak Operator ─────────────────────────────────────────────────"
-	$(MAKE) k8s-keycloak-operator
-
+k8s-otel-operator-helm: ## Install OpenTelemetry Operator via Helm (version controlled by otel-operator-values.yaml)
 	@echo "── OpenTelemetry Operator ────────────────────────────────────────────"
 	helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts --force-update
 	helm upgrade --install opentelemetry-operator open-telemetry/opentelemetry-operator \
@@ -374,43 +432,54 @@ k8s-keycloak-operator: ## Install Keycloak Operator via Kustomize (version contr
 	    | sed 's|/26\.6\.1/|/$(KEYCLOAK_OPERATOR_VERSION)/|g' \
 	    | kubectl apply -f -
 
-k8s-infra-cert-manager: ## Deploy cert-manager issuers + wildcard TLS certificate
+k8s-infra-cert-manager: k8s-cert-manager-helm ## Deploy cert-manager issuers + wildcard TLS certificate
 	kubectl apply -k k8s/infra/cert-manager
 	@echo "Waiting for local-test-ca-issuer to be Ready..."
 	kubectl wait --for=condition=ready clusterissuer/local-test-ca-issuer --timeout=120s
 
-k8s-infra-postgres: ## Deploy PostgreSQL cluster via CNPG operator
+k8s-infra-postgres: k8s-cnpg-operator-helm k8s-postgres-secret## Deploy PostgreSQL cluster via CNPG operator
 	kubectl apply -k k8s/infra/postgres
 
-k8s-infra-mongodb: ## Deploy MongoDB replica set via Community operator
+k8s-infra-mongodb: k8s-mongodb-operator-helm ## Deploy MongoDB replica set via Community operator
 	kubectl apply -k k8s/infra/mongodb
 
-k8s-infra-kafka: ## Deploy Kafka cluster + topics via Strimzi operator
+k8s-infra-kafka: k8s-strimzi-operator-helm ## Deploy Kafka cluster + topics via Strimzi operator
 	kubectl apply -k k8s/infra/kafka
 
-k8s-infra-keycloak: ## Deploy Keycloak instance + realm import via Keycloak operator
+k8s-infra-keycloak: k8s-keycloak-operator ## Deploy Keycloak instance + realm import via Keycloak operator
 	kubectl apply -k k8s/infra/keycloak
 
-k8s-infra-envoy-gateway: ## Deploy Envoy Gateway resources (GatewayClass, Gateway, HTTPRoutes, SecurityPolicy)
+k8s-infra-envoy-gateway: k8s-envoy-gateway-helm ## Deploy Envoy Gateway resources (GatewayClass, Gateway, HTTPRoutes, SecurityPolicy)
 	kubectl apply -k k8s/envoy-gateway
 
-k8s-infra-monitoring: ## Deploy Grafana LGTM observability stack (lgtm-distributed Helm chart)
-	@echo "── Grafana LGTM Stack ──────────────────────────────────────────────"
-	helm repo add grafana https://grafana.github.io/helm-charts --force-update
-	helm upgrade --install lgtm grafana/lgtm-distributed \
+k8s-infra-monitoring: ## Deploy observability stack: kube-prometheus-stack + Tempo + Loki (monolithic, emptyDir)
+	@echo "── kube-prometheus-stack (Prometheus + Grafana) ────────────────────"
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
+	helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack \
 	    --namespace monitoring --create-namespace \
-	    --values k8s/helm/lgtm-distributed-values.yaml \
+	    --values k8s/helm/kube-prometheus-stack-values.yaml \
 	    --wait --timeout 10m
+	@echo "── Grafana Tempo (monolithic) ───────────────────────────────────────"
+	helm repo add grafana https://grafana.github.io/helm-charts --force-update
+	helm upgrade --install tempo grafana/tempo \
+	    --namespace monitoring --create-namespace \
+	    --values k8s/helm/tempo-values.yaml \
+	    --wait
+	@echo "── Grafana Loki (monolithic) ────────────────────────────────────────"
+	helm upgrade --install loki grafana/loki \
+	    --namespace monitoring --create-namespace \
+	    --values k8s/helm/loki-values.yaml \
+	    --wait --timeout 5m
 
-k8s-infra-otel-collector: ## Deploy OpenTelemetry Collector via the OTel Operator
+k8s-infra-otel-collector: k8s-otel-operator-helm ## Deploy OpenTelemetry Collector via the OTel Operator
 	kubectl apply -k k8s/infra/otel-collector
 
 k8s-infra-valkey: ## Deploy Valkey (Redis-compatible cache) via plain Deployment
 	kubectl apply -k k8s/infra/valkey
 
-k8s-infra: k8s-infra-cert-manager k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey k8s-infra-kafka k8s-infra-keycloak k8s-infra-envoy-gateway k8s-infra-monitoring k8s-infra-otel-collector ## Deploy all infrastructure resources (cert-manager, postgres, mongodb, valkey, kafka, keycloak, envoy-gateway, monitoring, otel-collector)
+k8s-infra: k8s-namespaces k8s-secrets k8s-infra-cert-manager k8s-infra-envoy-gateway k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey k8s-infra-kafka k8s-infra-keycloak k8s-infra-monitoring k8s-infra-otel-collector ## Deploy all infrastructure resources (cert-manager, postgres, mongodb, valkey, kafka, keycloak, envoy-gateway, monitoring, otel-collector)
 
-k8s-up: k3d-create k8s-operators k8s-infra ## Full staging environment setup (create cluster + install operators + deploy infra)
+k8s-up: k3d-create k8s-infra ## Full staging environment setup (create cluster + install operators + deploy infra)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # k8s — application deployment

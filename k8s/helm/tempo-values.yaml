@@ -1,0 +1,46 @@
+# Grafana Tempo — monolithic mode, Helm values for k3d staging
+# Chart   : grafana/tempo
+# Repo    : https://grafana.github.io/helm-charts
+#
+# Design goals for k3d:
+#   - Monolithic (single-binary) deployment, 1 replica
+#   - emptyDir storage (ephemeral — traces lost on pod restart, acceptable for staging)
+#   - OTLP ingestion on gRPC :4317 and HTTP :4318
+#   - Query API exposed on :3200 (used by Grafana datasource)
+#
+# Helm install:
+#   helm repo add grafana https://grafana.github.io/helm-charts
+#   helm upgrade --install tempo grafana/tempo \
+#     --namespace monitoring --create-namespace \
+#     -f k8s/helm/tempo-values.yaml
+#
+# Internal endpoints:
+#   OTLP gRPC  → tempo.monitoring.svc.cluster.local:4317
+#   OTLP HTTP  → tempo.monitoring.svc.cluster.local:4318
+#   Query API  → tempo.monitoring.svc.cluster.local:3200
+# -----------------------------------------------------------------------------
+
+replicas: 1
+
+tempo:
+  reportingEnabled: false
+
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+
+# No PVC — emptyDir is sufficient for ephemeral staging
+persistence:
+  enabled: false

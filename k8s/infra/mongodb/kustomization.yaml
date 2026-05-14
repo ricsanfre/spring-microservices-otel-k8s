@@ -6,5 +6,8 @@
 #     --from-literal=password=<CHANGE_ME> --namespace mongodb
 #   kubectl create secret generic mongodb-notifications-secret \
 #     --from-literal=password=<CHANGE_ME> --namespace mongodb
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: mongodb
 resources:
   - community.yaml

@@ -12,7 +12,7 @@
 # Apply:
 #   kubectl apply -k k8s/infra/keycloak
 ---
-apiVersion: k8s.keycloak.org/v2alpha1
+apiVersion: k8s.keycloak.org/v2beta1
 kind: Keycloak
 metadata:
   name: keycloak
@@ -20,14 +20,19 @@ metadata:
 spec:
   instances: 1          # single instance for laptop staging
 
-  # Use the wildcard TLS cert issued by cert-manager
-  # (copy the secret into the keycloak namespace or use a separate cert)
+  # HTTP only — Envoy Gateway terminates TLS externally; Istio handles mTLS internally
   http:
-    tlsSecret: keycloak-tls
+    httpEnabled: true
 
-  # Hostname used by Envoy Gateway HTTPRoute + OIDC discovery
+  # External URL embedded in tokens (issuer claim, OIDC discovery)
+  # strict: false        — accept requests on any hostname (internal cluster DNS + external via Envoy)
+  # backchannelDynamic   — derive backchannel base URL from the incoming request, so internal
+  #                        microservices calling http://keycloak-service.keycloak.svc.cluster.local:8080
+  #                        get correct backchannel URLs without going through Envoy Gateway
   hostname:
     hostname: keycloak.local.test
+    strict: false
+    backchannelDynamic: true
 
   db:
     vendor: postgres
@@ -48,21 +53,3 @@ spec:
       value: "true"
     - name: metrics-enabled
       value: "true"
----
-# TLS certificate for keycloak.local.test (separate from the envoy-gateway wildcard)
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: keycloak-tls
-  namespace: keycloak
-spec:
-  secretName: keycloak-tls
-  duration: 8760h
-  renewBefore: 720h
-  commonName: "keycloak.local.test"
-  dnsNames:
-    - "keycloak.local.test"
-  issuerRef:
-    name: local-test-ca-issuer
-    kind: ClusterIssuer
-    group: cert-manager.io

@@ -41,28 +41,9 @@ spec:
         - name: frontend-service
           port: 3000
 ---
-# ── Keycloak passthrough route ─────────────────────────────────────────────
-# Routes keycloak.local.test to the Keycloak service in the keycloak namespace.
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: keycloak
-  namespace: keycloak
-spec:
-  parentRefs:
-    - name: eg
-      namespace: envoy-gateway-system
-      sectionName: https
-  hostnames:
-    - "keycloak.local.test"
-  rules:
-    - backendRefs:
-        - name: keycloak-service
-          port: 8080
----
 # ── Grafana ────────────────────────────────────────────────────────────────
 # Routes grafana.local.test to the Grafana pod in the monitoring namespace.
-# Release name 'lgtm' → service name 'lgtm-grafana'.
+# Release name 'kube-prom-stack' → service name 'kube-prom-stack-grafana'.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -77,5 +58,5 @@ spec:
     - "grafana.local.test"
   rules:
     - backendRefs:
-        - name: lgtm-grafana
+        - name: kube-prom-stack-grafana
           port: 80
