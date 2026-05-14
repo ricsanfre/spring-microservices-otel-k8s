@@ -127,6 +127,7 @@ jobs:
       - name: Build and push image to ghcr.io (Jib)
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         run: |
+          mvn -N install -DskipTests --no-transfer-progress
           mvn -pl common install -DskipTests --no-transfer-progress
           mvn -pl ${{ matrix.service }} compile jib:build \
             --no-transfer-progress \
