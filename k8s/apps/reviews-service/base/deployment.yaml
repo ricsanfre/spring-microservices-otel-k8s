@@ -19,7 +19,7 @@ spec:
 
       containers:
         - name: reviews-service
-          image: ghcr.io/ricsanfre/reviews-service:latest
+          image: ghcr.io/ricsanfre/micro-sp4-otel/reviews-service:latest
           imagePullPolicy: Always
           ports:
             - name: http

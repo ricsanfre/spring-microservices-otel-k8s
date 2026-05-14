@@ -13,6 +13,7 @@
 MAVEN   ?= mvn
 DOMAIN  ?= local.test           # default domain for all ingress hostnames
 GITHUB_OWNER ?= ricsanfre  # Override: GITHUB_OWNER=myorg make k8s-us-image
+GITHUB_REPO  ?= micro-sp4-otel  # Override: GITHUB_REPO=myrepo make k8s-us-image
 KEYCLOAK_OPERATOR_VERSION ?= 26.6.1  # https://github.com/keycloak/keycloak-k8s-resources/releases
 POSTGRES_PASSWORD ?= postgres
 KEYCLOAK_PASSWORD ?= admin
@@ -542,7 +543,7 @@ k8s-us-image: us-build ## Build + push user-service image to ghcr.io
 	$(MAVEN) -N install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl user-service jib:build \
-	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER) \
+	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO) \
 	    --no-transfer-progress
 
 k8s-us-deploy: ## Deploy user-service to staging (Kustomize staging overlay)
@@ -555,7 +556,7 @@ k8s-cs-image: cs-build ## Build + push cart-service image to ghcr.io
 	$(MAVEN) -N install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl cart-service jib:build \
-	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER) \
+	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO) \
 	    --no-transfer-progress
 
 k8s-cs-deploy: ## Deploy cart-service to staging (Kustomize staging overlay)
@@ -568,7 +569,7 @@ k8s-ps-image: ps-build ## Build + push product-service image to ghcr.io
 	$(MAVEN) -N install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl product-service jib:build \
-	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER) \
+	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO) \
 	    --no-transfer-progress
 
 k8s-ps-deploy: ## Deploy product-service to staging (Kustomize staging overlay)
@@ -581,7 +582,7 @@ k8s-os-image: os-build ## Build + push order-service image to ghcr.io
 	$(MAVEN) -N install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl order-service jib:build \
-	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER) \
+	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO) \
 	    --no-transfer-progress
 
 k8s-os-deploy: ## Deploy order-service to staging (Kustomize staging overlay)
@@ -594,7 +595,7 @@ k8s-rvs-image: rvs-build ## Build + push reviews-service image to ghcr.io
 	$(MAVEN) -N install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl reviews-service jib:build \
-	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER) \
+	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO) \
 	    --no-transfer-progress
 
 k8s-rvs-deploy: ## Deploy reviews-service to staging (Kustomize staging overlay)
@@ -607,7 +608,7 @@ k8s-ns-image: ns-build ## Build + push notification-service image to ghcr.io
 	$(MAVEN) -N install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl notification-service jib:build \
-	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER) \
+	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO) \
 	    --no-transfer-progress
 
 k8s-ns-deploy: ## Deploy notification-service to staging (Kustomize staging overlay)
@@ -617,8 +618,8 @@ k8s-ns-delete: ## Remove notification-service from staging
 	kubectl delete -k k8s/apps/notification-service/overlays/staging --ignore-not-found
 
 k8s-fe-image: ## Build + push frontend-service image to ghcr.io
-	docker build -t ghcr.io/$(GITHUB_OWNER)/frontend-service:latest frontend-service/
-	docker push ghcr.io/$(GITHUB_OWNER)/frontend-service:latest
+	docker build -t ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO)/frontend-service:latest frontend-service/
+	docker push ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO)/frontend-service:latest
 
 k8s-fe-deploy: ## Deploy frontend-service to staging (Kustomize staging overlay)
 	kubectl apply -k k8s/apps/frontend-service/overlays/staging

@@ -20,7 +20,7 @@ spec:
       containers:
         - name: user-service
           # Image tag is set by the staging overlay via kustomize image transform
-          image: ghcr.io/ricsanfre/user-service:latest
+          image: ghcr.io/ricsanfre/micro-sp4-otel/user-service:latest
           imagePullPolicy: Always
           ports:
             - name: http
