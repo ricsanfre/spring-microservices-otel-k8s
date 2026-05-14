@@ -49,9 +49,9 @@ http:
   httpEnabled: true      # plain HTTP on port 8080; no tlsSecret
 
 hostname:
-  hostname: keycloak.local.test   # embedded in tokens (iss claim, OIDC discovery)
-  strict: false                   # accept requests on any Host header
-  backchannelDynamic: true        # derive backchannel URL from the incoming request
+  hostname: https://keycloak.local.test   # full URL required when backchannelDynamic: true
+  strict: false                           # accept requests on any Host header
+  backchannelDynamic: true                # derive backchannel URL from the incoming request
 ```
 
 **`strict: false`** allows internal microservices to reach Keycloak via cluster DNS

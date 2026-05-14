@@ -2,7 +2,7 @@
 # Namespace: keycloak
 #
 # Prerequisites — create secrets before applying:
-#   kubectl create secret generic keycloak-admin-secret \
+#   kubectl create secret generic keycloak-secret \
 #     --from-literal=username=admin --from-literal=password=<CHANGE_ME> \
 #     --namespace keycloak
 #   kubectl create secret generic keycloak-db-secret \
@@ -30,7 +30,7 @@ spec:
   #                        microservices calling http://keycloak-service.keycloak.svc.cluster.local:8080
   #                        get correct backchannel URLs without going through Envoy Gateway
   hostname:
-    hostname: keycloak.local.test
+    hostname: https://keycloak.local.test
     strict: false
     backchannelDynamic: true
 
@@ -46,7 +46,11 @@ spec:
       name: keycloak-db-secret
       key: password
 
-  # Admin credentials
+  # Bootstrap admin account (only used on first start; ignored once realm is initialised)
+  bootstrapAdmin:
+    user:
+      secret: keycloak-admin-secret
+
   startOptimized: false
   additionalOptions:
     - name: health-enabled
