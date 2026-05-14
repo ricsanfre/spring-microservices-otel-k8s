@@ -18,10 +18,14 @@ KEYCLOAK_PASSWORD ?= admin
 KEYCLOAK_DB_PASSWORD ?= keycloak_db_password
 USERS_DB_PASSWORD ?= users_db_password
 ORDERS_DB_PASSWORD ?= orders_db_password
+MONGODB_PRODUCTS_PASSWORD ?= mongodb_products_password
 MONGODB_REVIEWS_PASSWORD ?= mongodb_reviews_password
 MONGODB_NOTIFICATIONS_PASSWORD ?= mongodb_notifications_password
 GRAFANA_PASSWORD ?= grafana_password
-FRONTEND_SERVICE_KEYCLOAK_SECRET ?= frontend_service_keycloak_secret
+FRONTEND_SERVICE_KEYCLOAK_SECRET ?= e-commerce-web-secret
+CART_SERVICE_CLIENT_SECRET ?= cart-service-secret
+ORDER_SERVICE_CLIENT_SECRET ?= order-service-secret
+REVIEWS_SERVICE_CLIENT_SECRET ?= reviews-service-secret
 
 .DEFAULT_GOAL := help
 .PHONY: help \
@@ -42,7 +46,8 @@ FRONTEND_SERVICE_KEYCLOAK_SECRET ?= frontend_service_keycloak_secret
         ns-run \
         k3d-create k3d-delete k3d-info \
         k8s-namespaces k8s-keycloak-operator \
-		k8s-postgres-secret k8s-keycloak-secret k8s-mongodb-secrets k8s-grafana-secret k8s-frontend-service-secret k8s-secrets \
+		k8s-postgres-secret k8s-keycloak-secret k8s-mongodb-secrets k8s-grafana-secret k8s-frontend-service-secret \
+		k8s-us-secret k8s-ps-secret k8s-cs-secret k8s-os-secret k8s-rvs-secret k8s-ns-secret k8s-secrets \
 		k8s-cert-manager-helm k8s-envoy-gateway-helm k8s-strimzi-operator-helm k8s-cnpg-operator-helm k8s-mongodb-operator-helm k8s-otel-operator-helm \
         k8s-infra k8s-infra-cert-manager k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey \
         k8s-infra-kafka k8s-infra-keycloak k8s-infra-envoy-gateway k8s-infra-monitoring k8s-infra-otel-collector k8s-up \
@@ -358,6 +363,8 @@ k8s-keycloak-secret: ## Create Kubernetes secret for Keycloak admin credentials 
 
 
 k8s-mongodb-secrets: ## Create Kubernetes secrets for MongoDB credentials (used by Community Operator bootstrap)
+	kubectl create secret generic mongodb-products-secret \
+	--from-literal=password=$(MONGODB_PRODUCTS_PASSWORD) --namespace mongodb
 	kubectl create secret generic mongodb-reviews-secret \
 	--from-literal=password=$(MONGODB_REVIEWS_PASSWORD) --namespace mongodb
 	kubectl create secret generic mongodb-notifications-secret \
@@ -374,7 +381,50 @@ k8s-frontend-service-secret: ## Create Kubernetes secret for frontend-service (A
 	--from-literal=AUTH_KEYCLOAK_SECRET=$(FRONTEND_SERVICE_KEYCLOAK_SECRET) \
 	--namespace e-commerce
 
-k8s-secrets: k8s-postgres-secret k8s-keycloak-secret k8s-mongodb-secrets k8s-grafana-secret k8s-frontend-service-secret ## Create all Kubernetes secrets
+k8s-us-secret: ## Create Kubernetes secret for user-service DB credentials
+	kubectl create secret generic user-service-db-secret \
+	--from-literal=username=users_owner \
+	--from-literal=password=$(USERS_DB_PASSWORD) \
+	--namespace e-commerce
+
+k8s-ps-secret: ## Create Kubernetes secret for product-service MongoDB URI
+	kubectl create secret generic product-service-mongodb-secret \
+	--from-literal=MONGODB_URI="mongodb://products_owner:$(MONGODB_PRODUCTS_PASSWORD)@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/products?authSource=admin&replicaSet=mongodb" \
+	--namespace e-commerce
+
+k8s-cs-secret: ## Create Kubernetes secrets for cart-service (OAuth2 client + Kafka password from Strimzi)
+	kubectl create secret generic cart-service-oauth-secret \
+	--from-literal=CART_SERVICE_CLIENT_SECRET=$(CART_SERVICE_CLIENT_SECRET) \
+	--namespace e-commerce
+	kubectl create secret generic cart-service-kafka-secret \
+	--from-literal=password="$(shell kubectl get secret cart-service -n kafka -o jsonpath='{.data.password}' | base64 -d)" \
+	--namespace e-commerce
+
+k8s-os-secret: ## Create Kubernetes secrets for order-service (DB password + OAuth2 client + Kafka password from Strimzi)
+	kubectl create secret generic order-service-db-secret \
+	--from-literal=password=$(ORDERS_DB_PASSWORD) \
+	--namespace e-commerce
+	kubectl create secret generic order-service-oauth-secret \
+	--from-literal=ORDER_SERVICE_CLIENT_SECRET=$(ORDER_SERVICE_CLIENT_SECRET) \
+	--namespace e-commerce
+	kubectl create secret generic order-service-kafka-secret \
+	--from-literal=password="$(shell kubectl get secret order-service -n kafka -o jsonpath='{.data.password}' | base64 -d)" \
+	--namespace e-commerce
+
+k8s-rvs-secret: ## Create Kubernetes secrets for reviews-service (MongoDB URI + OAuth2 client)
+	kubectl create secret generic reviews-service-mongodb-secret \
+	--from-literal=MONGODB_URI="mongodb://reviews_owner:$(MONGODB_REVIEWS_PASSWORD)@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/reviews?authSource=admin&replicaSet=mongodb" \
+	--namespace e-commerce
+	kubectl create secret generic reviews-service-oauth-secret \
+	--from-literal=REVIEWS_SERVICE_CLIENT_SECRET=$(REVIEWS_SERVICE_CLIENT_SECRET) \
+	--namespace e-commerce
+
+k8s-ns-secret: ## Create Kubernetes secret for notification-service Kafka password (from Strimzi)
+	kubectl create secret generic notification-service-kafka-secret \
+	--from-literal=password="$(shell kubectl get secret notification-service -n kafka -o jsonpath='{.data.password}' | base64 -d)" \
+	--namespace e-commerce
+
+k8s-secrets: k8s-postgres-secret k8s-keycloak-secret k8s-mongodb-secrets k8s-grafana-secret k8s-frontend-service-secret k8s-us-secret k8s-ps-secret k8s-cs-secret k8s-os-secret k8s-rvs-secret k8s-ns-secret ## Create all Kubernetes secrets
 
 k8s-cert-manager-helm: ## Install cert-manager + trust-manager via Helm
 	@echo "── cert-manager ────────────────────────────────────────────────────"
