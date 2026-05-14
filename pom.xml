@@ -51,7 +51,7 @@
         <openapi-generator.version>7.12.0</openapi-generator.version>
 
         <!-- Jib — OCI image builds without Docker daemon -->
-        <jib.version>3.4.4</jib.version>
+        <jib.version>3.5.1</jib.version>
 
         <!-- Default image registry (override on command line for CI / k3d) -->
         <!--   Local k3d:   -Ddocker.registry=localhost:5000             -->
@@ -153,6 +153,7 @@
                     <artifactId>jib-maven-plugin</artifactId>
                     <version>${jib.version}</version>
                     <configuration>
+                        <allowInsecureRegistries>true</allowInsecureRegistries>
                         <from>
                             <!-- Slim JRE matching java.version property -->
                             <image>eclipse-temurin:25-jre-alpine</image>
