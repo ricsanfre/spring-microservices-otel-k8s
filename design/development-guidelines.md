@@ -2845,9 +2845,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 jobs:
   detect-changes:
@@ -2906,7 +2906,7 @@ jobs:
         run: mvn -pl ${{ matrix.service }} -am verify --no-transfer-progress
 
       - name: Build and push image to ghcr.io
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         run: |
           mvn -pl ${{ matrix.service }} compile jib:build \
             --no-transfer-progress \
@@ -2916,7 +2916,7 @@ jobs:
             -Djib.to.auth.password=${{ secrets.GITHUB_TOKEN }}
 ```
 
-> The `jib:build` step runs only on `push` to `main` — not on pull requests — to avoid publishing images from unreviewed code. Unit tests still run on PRs via the `verify` goal.
+> The `jib:build` step runs only on `push` to `master` — not on pull requests — to avoid publishing images from unreviewed code. Unit tests still run on PRs via the `verify` goal.
 
 ### CD workflow — `.github/workflows/cd.yaml`
 
@@ -2929,7 +2929,7 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main]
+    branches: [master]
 
 jobs:
   deploy-staging:
@@ -3024,7 +3024,7 @@ No manually configured repository secrets are needed for the standard CI/CD pipe
 
 ### Branch protection (recommended)
 
-In **Settings → Branches → Branch protection rules** for `main`:
+In **Settings → Branches → Branch protection rules** for `master`:
 
 - ✅ Require status checks to pass — add `build` (CI job) as required check
 - ✅ Require branches to be up to date before merging

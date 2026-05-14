@@ -1,7 +1,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # CD — Staging deployment (ephemeral k3d cluster)
 #
-# Triggered by:  CI workflow completing successfully on the main branch
+# Triggered by:  CI workflow completing successfully on the master branch
 # Purpose:       Deploy freshly published images using the same Helm + operator +
 #                Kustomize approach as the local staging environment (make k8s-up).
 #
@@ -9,12 +9,14 @@
 #   cert-manager      → jetstack/cert-manager Helm chart
 #   Envoy Gateway     → envoyproxy/gateway-helm OCI Helm chart
 #   CloudNativePG     → cnpg/cloudnative-pg Helm chart
+#   Strimzi           → strimzi-kafka-operator OCI Helm chart (kafka namespace)
 #   Keycloak Operator → upstream k8s-resources manifests via Kustomize
 #
 # Infrastructure deployed (matching make k8s-infra, current services only):
 #   cert-manager CAs  → kubectl apply -k k8s/infra/cert-manager
 #   PostgreSQL (CNPG) → kubectl apply -k k8s/infra/postgres
 #   Valkey            → kubectl apply -k k8s/infra/valkey
+#   Kafka (Strimzi)   → kubectl apply -k k8s/infra/kafka  (cluster + topics + KafkaUsers)
 #   Keycloak          → kubectl apply -k k8s/infra/keycloak
 #   Envoy Gateway     → kubectl apply -k k8s/envoy-gateway
 #
@@ -36,7 +38,7 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main]
+    branches: [master]
 
 permissions:
   contents: read
@@ -129,6 +131,14 @@ jobs:
             --values k8s/helm/cnpg-operator-values.yaml \
             --wait
 
+      - name: Install Strimzi Kafka Operator
+        run: |
+          helm upgrade --install strimzi-kafka-operator \
+            oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+            --namespace kafka --create-namespace \
+            --values k8s/helm/strimzi-operator-values.yaml \
+            --wait --timeout 3m
+
       - name: Install Keycloak Operator
         run: |
           kustomize build k8s/infra/keycloak/operator \
@@ -198,6 +208,16 @@ jobs:
           kubectl apply -k k8s/infra/valkey
           kubectl rollout status deployment/valkey -n valkey --timeout=60s
 
+      - name: Deploy Kafka cluster (Strimzi)
+        run: |
+          kubectl apply -k k8s/infra/kafka
+          # Wait for Kafka cluster (KRaft single-node) to be fully Ready
+          kubectl wait --for=condition=Ready kafka/kafka -n kafka --timeout=5m
+          # Wait for KafkaUser CRs to be provisioned by the User Operator
+          # (Strimzi creates a Secret in the kafka namespace with the SCRAM password)
+          kubectl wait --for=condition=Ready kafkauser/cart-service    -n kafka --timeout=2m
+          kubectl wait --for=condition=Ready kafkauser/order-service   -n kafka --timeout=2m
+
       - name: Deploy Keycloak
         run: |
           kubectl apply -k k8s/infra/keycloak
@@ -235,6 +255,16 @@ jobs:
             --docker-password=${{ secrets.GITHUB_TOKEN }} \
             --namespace e-commerce \
             --dry-run=client -o yaml | kubectl apply -f -
+
+          # ── Kafka SCRAM credentials (copy Strimzi-generated secrets) ─────
+          # Strimzi creates a Secret named after the KafkaUser in the kafka namespace.
+          # The Deployment mounts it as KAFKA_PASSWORD via secretKeyRef.
+          kubectl get secret cart-service -n kafka -o json \
+            | jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,
+                      .metadata.creationTimestamp,.metadata.ownerReferences)
+                 | .metadata.name = "cart-service-kafka-secret"
+                 | .metadata.namespace = "e-commerce"' \
+            | kubectl apply -f -
 
       # ── user-service ─────────────────────────────────────────────────────
       - name: Patch user-service image and deploy

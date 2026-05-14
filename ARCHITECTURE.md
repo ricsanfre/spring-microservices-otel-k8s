@@ -884,7 +884,7 @@ CI succeeds on main
 
 #### Branch Protection (Recommended)
 
-In **Settings → Branches → Branch protection rules** for `main`:
+In **Settings → Branches → Branch protection rules** for `master`:
 
 - ✅ Require status checks: `product-service`, `user-service`, `cart-service`, `frontend-service`
 - ✅ Require branches to be up to date before merging
