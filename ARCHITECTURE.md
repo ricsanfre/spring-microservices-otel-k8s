@@ -565,13 +565,13 @@ The target deployment environment is a **k3d** cluster (k3s running inside Docke
 
 ```mermaid
 flowchart TD
-    Dev(["Developer laptop\n(Jib / Maven)"])
+    Dev(["Developer laptop\n(Jib / Maven / Docker)"])
+    GHCR[("ghcr.io\nContainer Registry\npush: CI / make k8s-*-image\npull: k3d cluster (imagePullSecret)")]
     Client(["Browser / curl"])
 
     subgraph LOCAL["Local machine"]
 
         subgraph K3D_ENV["k3d environment"]
-            REG[("k3d registry\ne-commerce-registry\npush: localhost:5000\npull: e-commerce-registry:5000")]
 
             subgraph K3D["k3d cluster — e-commerce (1 server + 2 agents)"]
                 LB["Load Balancer\n:80 → HTTP  /  :443 → HTTPS"]
@@ -624,7 +624,8 @@ flowchart TD
     end
 
     %% ── Image registry ─────────────────────────────────────────────────────
-    Dev -- "mvn jib:build\n→ localhost:5000" --> REG
+    Dev -- "CI push / make k8s-*-image\n(Jib + Docker)" --> GHCR
+    GHCR -- "imagePull (imagePullSecret)\nghcr.io/<owner>/<svc>:latest" --> K3D
 
     %% ── External traffic ────────────────────────────────────────────────────
     Client -- "HTTPS *.local.test" --> LB
@@ -772,7 +773,7 @@ Services call each other using plain Kubernetes Service DNS (`http://service-nam
 
 ---
 
-## CI/CD Pipeline Details
+## CI Pipeline Details
 
 ### CI Workflow
 
@@ -792,7 +793,7 @@ Services call each other using plain Kubernetes Service DNS (`http://service-nam
       │    │  1. mvn test    — unit + @WebMvcTest slice tests (no Docker, fast)
       │    │  2. mvn verify  — + Testcontainers integration tests (Docker available)
       │    │  3. jib:build   — push ghcr.io/{owner}/{svc}:{sha} + latest
-      │    │                   (main push only — skipped on PRs)
+      │    │                   (master push only — skipped on PRs)
       │
       └─► frontend = true   ──► build-frontend
                1. npm ci
@@ -815,8 +816,8 @@ Images are published to `ghcr.io/<owner>/<service>` with two tags:
 
 | Tag | Value | Purpose |
 |---|---|---|
-| `<commit-sha>` | 40-character hex | Immutable — pinned by CD workflow |
-| `latest` | floating | Convenience — always tracks the most recent `main` build |
+| `<commit-sha>` | 40-character hex | Immutable — pin deployments in kustomization overlays |
+| `latest` | floating | Convenience — always tracks the most recent `master` build |
 
 #### Services Covered
 
@@ -825,62 +826,19 @@ Images are published to `ghcr.io/<owner>/<service>` with two tags:
 | `product-service` | Java 25 + Maven + Jib | `ghcr.io/<owner>/product-service` |
 | `user-service` | Java 25 + Maven + Jib | `ghcr.io/<owner>/user-service` |
 | `cart-service` | Java 25 + Maven + Jib | `ghcr.io/<owner>/cart-service` |
+| `order-service` | Java 25 + Maven + Jib | `ghcr.io/<owner>/order-service` |
+| `reviews-service` | Java 25 + Maven + Jib | `ghcr.io/<owner>/reviews-service` |
+| `notification-service` | Java 25 + Maven + Jib | `ghcr.io/<owner>/notification-service` |
 | `frontend-service` | Node.js 22 + Docker multi-stage | `ghcr.io/<owner>/frontend-service` |
 
-> `order-service`, `reviews-service`, and `notification-service` are implemented but not yet added to the CI matrix.
-
 ---
-
-### CD Workflow
-
-Triggered automatically when CI succeeds on `main`. Creates an ephemeral **k3d** cluster inside the GitHub Actions runner, deploys the freshly published images using Kustomize, and validates with actuator health checks.
-
-```
-CI succeeds on main
-      │
-      ▼
- deploy-staging (ephemeral k3d cluster in runner)
-      │
-      ├─ Install k3d + Helm + kustomize
-      ├─ k3d cluster create e-commerce (ports 80 + 443)
-      ├─ Helm install Envoy Gateway
-      │
-      ├─ Deploy minimal backing services in production-matching namespaces:
-      │    postgres-rw  → namespace: postgres  → DNS: postgres-rw.postgres.svc.cluster.local
-      │    valkey       → namespace: valkey    → DNS: valkey.valkey.svc.cluster.local
-      │
-      ├─ Create ghcr-pull-secret for image pulls from ghcr.io
-      │
-      ├─ user-service:
-      │    kustomize edit set image → ghcr.io/<owner>/user-service:<sha>
-      │    kubectl apply -k k8s/apps/user-service/overlays/staging
-      │    kubectl rollout status (120 s timeout)
-      │
-      ├─ cart-service:
-      │    kustomize edit set image → ghcr.io/<owner>/cart-service:<sha>
-      │    kubectl apply -k k8s/apps/cart-service/overlays/staging
-      │    kubectl rollout status (120 s timeout)
-      │
-      ├─ Smoke tests:
-      │    GET /actuator/health → {"status":"UP"}  (user-service :8085)
-      │    GET /actuator/health → {"status":"UP"}  (cart-service :8086)
-      │
-      └─ k3d cluster delete (always — even on failure)
-```
-
-**Why k3d?** The cluster is created fresh for every `main` push — a clean environment with no state leakage between runs.
-
-**Infrastructure simplification:** The full operator stack (CloudNativePG, Strimzi, Keycloak Operator, MongoDB Community) is omitted to keep the staging spin-up fast. Backing services use plain Deployments in the same Kubernetes DNS namespaces as production (`postgres-rw.postgres` and `valkey.valkey`) so the service ConfigMaps require no modification.
-
-**JWT / Keycloak:** Actuator health endpoints do not require JWT authentication. Spring Boot fetches the Keycloak JWKS lazily on the first JWT validation request — services start and pass health checks without a running Keycloak.
 
 #### Permissions and Secrets
 
 | Secret / Permission | Source | Required for |
 |---|---|---|
-| `secrets.GITHUB_TOKEN` | Auto-provided by GitHub Actions | Jib push to `ghcr.io` (CI) + image pull (CD) |
+| `secrets.GITHUB_TOKEN` | Auto-provided by GitHub Actions | Jib push to `ghcr.io` |
 | `permissions.packages: write` | CI `build-java` / `build-frontend` jobs | Authorise token to publish packages |
-| `permissions.packages: read` | CD `deploy-staging` job | Pull images from `ghcr.io` |
 
 #### Branch Protection (Recommended)
 

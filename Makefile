@@ -12,6 +12,7 @@
 
 MAVEN   ?= mvn
 DOMAIN  ?= local.test           # default domain for all ingress hostnames
+GITHUB_OWNER ?= ricsanfre  # Override: GITHUB_OWNER=myorg make k8s-us-image
 KEYCLOAK_OPERATOR_VERSION ?= 26.6.1  # https://github.com/keycloak/keycloak-k8s-resources/releases
 POSTGRES_PASSWORD ?= postgres
 KEYCLOAK_PASSWORD ?= admin
@@ -530,14 +531,18 @@ k8s-infra-valkey: ## Deploy Valkey (Redis-compatible cache) via plain Deployment
 k8s-infra: k8s-namespaces k8s-secrets k8s-infra-cert-manager k8s-infra-envoy-gateway k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey k8s-infra-kafka k8s-infra-keycloak k8s-infra-monitoring k8s-infra-otel-collector ## Deploy all infrastructure resources (cert-manager, postgres, mongodb, valkey, kafka, keycloak, envoy-gateway, monitoring, otel-collector)
 
 k8s-up: k3d-create k8s-infra ## Full staging environment setup (create cluster + install operators + deploy infra)
+# After k8s-up, push images with k8s-*-image targets (GITHUB_OWNER=<your-username>)
+# then deploy with k8s-apps-deploy
 
 # ──────────────────────────────────────────────────────────────────────────────
 # k8s — application deployment
 # ──────────────────────────────────────────────────────────────────────────────
 
-k8s-us-image: us-build ## Build + push user-service image to k3d local registry
+k8s-us-image: us-build ## Build + push user-service image to ghcr.io
+	$(MAVEN) -N install -DskipTests --no-transfer-progress
+	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl user-service jib:build \
-	    -Ddocker.registry=localhost:5000 \
+	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER) \
 	    --no-transfer-progress
 
 k8s-us-deploy: ## Deploy user-service to staging (Kustomize staging overlay)
@@ -546,9 +551,11 @@ k8s-us-deploy: ## Deploy user-service to staging (Kustomize staging overlay)
 k8s-us-delete: ## Remove user-service from staging
 	kubectl delete -k k8s/apps/user-service/overlays/staging --ignore-not-found
 
-k8s-cs-image: cs-build ## Build + push cart-service image to k3d local registry
+k8s-cs-image: cs-build ## Build + push cart-service image to ghcr.io
+	$(MAVEN) -N install -DskipTests --no-transfer-progress
+	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl cart-service jib:build \
-	    -Ddocker.registry=localhost:5000 \
+	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER) \
 	    --no-transfer-progress
 
 k8s-cs-deploy: ## Deploy cart-service to staging (Kustomize staging overlay)
@@ -557,9 +564,11 @@ k8s-cs-deploy: ## Deploy cart-service to staging (Kustomize staging overlay)
 k8s-cs-delete: ## Remove cart-service from staging
 	kubectl delete -k k8s/apps/cart-service/overlays/staging --ignore-not-found
 
-k8s-ps-image: ps-build ## Build + push product-service image to k3d local registry
+k8s-ps-image: ps-build ## Build + push product-service image to ghcr.io
+	$(MAVEN) -N install -DskipTests --no-transfer-progress
+	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl product-service jib:build \
-	    -Ddocker.registry=localhost:5000 \
+	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER) \
 	    --no-transfer-progress
 
 k8s-ps-deploy: ## Deploy product-service to staging (Kustomize staging overlay)
@@ -568,9 +577,11 @@ k8s-ps-deploy: ## Deploy product-service to staging (Kustomize staging overlay)
 k8s-ps-delete: ## Remove product-service from staging
 	kubectl delete -k k8s/apps/product-service/overlays/staging --ignore-not-found
 
-k8s-os-image: os-build ## Build + push order-service image to k3d local registry
+k8s-os-image: os-build ## Build + push order-service image to ghcr.io
+	$(MAVEN) -N install -DskipTests --no-transfer-progress
+	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl order-service jib:build \
-	    -Ddocker.registry=localhost:5000 \
+	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER) \
 	    --no-transfer-progress
 
 k8s-os-deploy: ## Deploy order-service to staging (Kustomize staging overlay)
@@ -579,9 +590,11 @@ k8s-os-deploy: ## Deploy order-service to staging (Kustomize staging overlay)
 k8s-os-delete: ## Remove order-service from staging
 	kubectl delete -k k8s/apps/order-service/overlays/staging --ignore-not-found
 
-k8s-rvs-image: rvs-build ## Build + push reviews-service image to k3d local registry
+k8s-rvs-image: rvs-build ## Build + push reviews-service image to ghcr.io
+	$(MAVEN) -N install -DskipTests --no-transfer-progress
+	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl reviews-service jib:build \
-	    -Ddocker.registry=localhost:5000 \
+	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER) \
 	    --no-transfer-progress
 
 k8s-rvs-deploy: ## Deploy reviews-service to staging (Kustomize staging overlay)
@@ -590,9 +603,11 @@ k8s-rvs-deploy: ## Deploy reviews-service to staging (Kustomize staging overlay)
 k8s-rvs-delete: ## Remove reviews-service from staging
 	kubectl delete -k k8s/apps/reviews-service/overlays/staging --ignore-not-found
 
-k8s-ns-image: ns-build ## Build + push notification-service image to k3d local registry
+k8s-ns-image: ns-build ## Build + push notification-service image to ghcr.io
+	$(MAVEN) -N install -DskipTests --no-transfer-progress
+	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl notification-service jib:build \
-	    -Ddocker.registry=localhost:5000 \
+	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER) \
 	    --no-transfer-progress
 
 k8s-ns-deploy: ## Deploy notification-service to staging (Kustomize staging overlay)
@@ -601,9 +616,9 @@ k8s-ns-deploy: ## Deploy notification-service to staging (Kustomize staging over
 k8s-ns-delete: ## Remove notification-service from staging
 	kubectl delete -k k8s/apps/notification-service/overlays/staging --ignore-not-found
 
-k8s-fe-image: ## Build + push frontend-service image to k3d local registry
-	docker build -t localhost:5000/frontend-service:latest frontend-service/
-	docker push localhost:5000/frontend-service:latest
+k8s-fe-image: ## Build + push frontend-service image to ghcr.io
+	docker build -t ghcr.io/$(GITHUB_OWNER)/frontend-service:latest frontend-service/
+	docker push ghcr.io/$(GITHUB_OWNER)/frontend-service:latest
 
 k8s-fe-deploy: ## Deploy frontend-service to staging (Kustomize staging overlay)
 	kubectl apply -k k8s/apps/frontend-service/overlays/staging

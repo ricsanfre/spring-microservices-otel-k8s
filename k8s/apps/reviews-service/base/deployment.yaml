@@ -19,7 +19,7 @@ spec:
 
       containers:
         - name: reviews-service
-          image: e-commerce-registry:5000/reviews-service:latest
+          image: ghcr.io/ricsanfre/reviews-service:latest
           imagePullPolicy: Always
           ports:
             - name: http
@@ -44,11 +44,18 @@ spec:
                   name: reviews-service-oauth-secret
                   key: REVIEWS_SERVICE_CLIENT_SECRET
 
-          livenessProbe:
+          startupProbe:
             httpGet:
               path: /actuator/health/liveness
               port: 8083
             initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 12
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8083
             periodSeconds: 10
             failureThreshold: 3
 
@@ -56,7 +63,6 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8083
-            initialDelaySeconds: 20
             periodSeconds: 10
             failureThreshold: 3
 

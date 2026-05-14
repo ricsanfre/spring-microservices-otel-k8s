@@ -12,7 +12,10 @@
 #   - Jib pushes OCI images directly to ghcr.io without a Docker daemon (ADR-010)
 #   - Only GITHUB_TOKEN is required — no manually configured secrets
 #
-# Services covered (implemented — have full src/ + tests):
+# Published images (ghcr.io/<owner>/<service>:<sha> + :latest) are pulled by
+# the local k3d staging cluster via the staging Kustomize overlays.
+#
+# Services covered (all implemented — have full src/ + tests):
 #   Java:     product-service, user-service, cart-service, order-service, reviews-service, notification-service
 #   Frontend: frontend-service (Next.js 15, separate job)
 #

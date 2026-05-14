@@ -12,10 +12,6 @@
 resources:
   - ../../base
 
-images:
-  - name: e-commerce-registry:5000/notification-service
-    newTag: "latest"
-
 patches:
   - patch: |
       - op: replace

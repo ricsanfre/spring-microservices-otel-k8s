@@ -11,10 +11,6 @@
 resources:
   - ../../base
 
-images:
-  - name: e-commerce-registry:5000/frontend-service
-    newTag: "latest"
-
 patches:
   - patch: |
       - op: replace

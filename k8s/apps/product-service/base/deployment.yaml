@@ -19,7 +19,7 @@ spec:
 
       containers:
         - name: product-service
-          image: e-commerce-registry:5000/product-service:latest
+          image: ghcr.io/ricsanfre/product-service:latest
           imagePullPolicy: Always
           ports:
             - name: http
@@ -38,11 +38,18 @@ spec:
                   name: product-service-mongodb-secret
                   key: MONGODB_URI
 
-          livenessProbe:
+          startupProbe:
             httpGet:
               path: /actuator/health/liveness
               port: 8081
             initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 12
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
             periodSeconds: 10
             failureThreshold: 3
 
@@ -50,7 +57,6 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8081
-            initialDelaySeconds: 20
             periodSeconds: 10
             failureThreshold: 3
 

@@ -286,7 +286,6 @@ make k3d-create
 
 This creates cluster `e-commerce` (1 control-plane + 2 worker nodes) with:
 - Ports 80/443 mapped to the k3d load-balancer (Envoy Gateway)
-- Local image registry at `localhost:5000`
 - Traefik disabled
 - Host aliases for `app.local.test`, `keycloak.local.test`, `grafana.local.test`
 
@@ -366,13 +365,20 @@ make k8s-infra-otel-collector  # OpenTelemetry Collector (fan-out to Tempo/Loki/
 
 ### 5. Build and Push Service Images
 
-```bash
-# Build user-service image and push to the k3d local registry
-make k8s-us-image
+Images are pulled from `ghcr.io` — CI publishes them automatically on every push to `master`.
+For manual pushes (e.g. testing a local branch), log in to ghcr.io first and use the Makefile targets:
 
-# Build cart-service image and push to the k3d local registry
-make k8s-cs-image
+```bash
+# Log in once (PAT requires write:packages scope)
+echo "<YOUR_PAT>" | docker login ghcr.io -u <your-github-username> --password-stdin
+
+# Build and push a service (set GITHUB_OWNER to your GitHub username/org)
+make k8s-us-image GITHUB_OWNER=<your-github-username>   # user-service
+make k8s-cs-image GITHUB_OWNER=<your-github-username>   # cart-service
 ```
+
+After pushing, update `newTag` in the relevant `k8s/apps/<service>/overlays/staging/kustomization.yaml`
+to pin the deployment to a specific commit SHA, or leave `latest` for the rolling release.
 
 ### 6. Deploy Services
 
@@ -407,16 +413,15 @@ make k8s-up   # k3d-create + k8s-operators + k8s-infra
 
 ---
 
-## CI/CD
+## CI
 
 | Workflow | File | Trigger | Purpose |
 |---|---|---|---|
-| CI | [`.github/workflows/ci.yaml`](.github/workflows/ci.yaml) | Push to `main`, Pull Requests | Change detection → unit tests → integration tests → Jib image publish to `ghcr.io` |
-| CD | [`.github/workflows/cd.yaml`](.github/workflows/cd.yaml) | CI completes on `main` | Deploy to ephemeral k3d cluster; actuator/health smoke tests |
+| CI | [`.github/workflows/ci.yaml`](.github/workflows/ci.yaml) | Push to `master`, Pull Requests | Change detection → unit tests → integration tests → Jib image publish to `ghcr.io` |
 
-**No extra secrets required.** Jib authenticates to `ghcr.io` using the auto-provided `GITHUB_TOKEN`. The CD workflow uses the same token to pull images.
+**No extra secrets required.** Jib authenticates to `ghcr.io` using the auto-provided `GITHUB_TOKEN`.
 
-See [ARCHITECTURE.md — CI/CD Pipeline Details](ARCHITECTURE.md#cicd-pipeline-details) for change-detection flow, test gates, image naming, and CD workflow diagrams.
+See [ARCHITECTURE.md — CI Pipeline Details](ARCHITECTURE.md#ci-pipeline-details) for change-detection flow, test gates, and image naming.
 
 ---
 

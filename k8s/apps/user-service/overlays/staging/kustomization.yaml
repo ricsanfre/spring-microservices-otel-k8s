@@ -8,12 +8,6 @@
 resources:
   - ../../base
 
-# Set the image to use the k3d local registry with an explicit tag.
-# Update the newTag when releasing a new version.
-images:
-  - name: e-commerce-registry:5000/user-service
-    newTag: "latest"
-
 # Staging-specific patches
 patches:
   # Scale to 1 replica on laptop (saves resources)
@@ -25,7 +19,7 @@ patches:
       kind: Deployment
       name: user-service
 
-  # Overwrite imagePullPolicy to Always so the k3d registry is re-checked on each restart
+  # Overwrite imagePullPolicy to Always so ghcr.io is re-checked on each restart
   - patch: |
       - op: replace
         path: /spec/template/spec/containers/0/imagePullPolicy

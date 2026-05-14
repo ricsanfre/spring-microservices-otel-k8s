@@ -20,7 +20,7 @@ spec:
       containers:
         - name: cart-service
           # Image tag is set by the staging overlay via kustomize image transform
-          image: e-commerce-registry:5000/cart-service:latest
+          image: ghcr.io/ricsanfre/cart-service:latest
           imagePullPolicy: Always
           ports:
             - name: http
@@ -42,11 +42,18 @@ spec:
                   name: cart-service-kafka-secret
                   key: password
 
-          livenessProbe:
+          startupProbe:
             httpGet:
               path: /actuator/health/liveness
               port: 8086
             initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 12
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8086
             periodSeconds: 10
             failureThreshold: 3
 
@@ -54,8 +61,7 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8086
-            initialDelaySeconds: 20
-            periodSeconds: 5
+            periodSeconds: 10
             failureThreshold: 3
 
           resources:

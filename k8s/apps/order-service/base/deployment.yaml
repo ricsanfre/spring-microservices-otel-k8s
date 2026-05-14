@@ -19,7 +19,7 @@ spec:
 
       containers:
         - name: order-service
-          image: e-commerce-registry:5000/order-service:latest
+          image: ghcr.io/ricsanfre/order-service:latest
           imagePullPolicy: Always
           ports:
             - name: http
@@ -52,11 +52,18 @@ spec:
                   name: order-service-kafka-secret
                   key: password
 
-          livenessProbe:
+          startupProbe:
             httpGet:
               path: /actuator/health/liveness
               port: 8082
             initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 12
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8082
             periodSeconds: 10
             failureThreshold: 3
 
@@ -64,7 +71,6 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8082
-            initialDelaySeconds: 20
             periodSeconds: 10
             failureThreshold: 3
 
