@@ -48,7 +48,7 @@
         <springdoc.version>3.0.0</springdoc.version>
 
         <!-- OpenAPI Generator (API-first code generation) -->
-        <openapi-generator.version>7.12.0</openapi-generator.version>
+        <openapi-generator.version>7.22.0</openapi-generator.version>
 
         <!-- Jib — OCI image builds without Docker daemon -->
         <jib.version>3.5.1</jib.version>
