@@ -19,7 +19,7 @@ spec:
 
       containers:
         - name: notification-service
-          image: ghcr.io/ricsanfre/micro-sp4-otel/notification-service:latest
+          image: ghcr.io/ricsanfre/spring-microservices-otel-k8s/notification-service:latest
           imagePullPolicy: Always
           ports:
             - name: http

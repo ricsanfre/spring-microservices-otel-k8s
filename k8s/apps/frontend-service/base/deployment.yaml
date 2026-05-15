@@ -20,7 +20,7 @@ spec:
       containers:
         - name: frontend-service
           # Image tag is set by the staging overlay via kustomize image transform
-          image: ghcr.io/ricsanfre/micro-sp4-otel/frontend-service:latest
+          image: ghcr.io/ricsanfre/spring-microservices-otel-k8s/frontend-service:latest
           imagePullPolicy: Always
           ports:
             - name: http

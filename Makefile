@@ -13,7 +13,7 @@
 MAVEN   ?= mvn
 DOMAIN  ?= local.test           # default domain for all ingress hostnames
 GITHUB_OWNER ?= ricsanfre  # Override: GITHUB_OWNER=myorg make k8s-us-image
-GITHUB_REPO  ?= micro-sp4-otel  # Override: GITHUB_REPO=myrepo make k8s-us-image
+GITHUB_REPO  ?= spring-microservices-otel-k8s  # Override: GITHUB_REPO=myrepo make k8s-us-image
 KEYCLOAK_OPERATOR_VERSION ?= 26.6.1  # https://github.com/keycloak/keycloak-k8s-resources/releases
 POSTGRES_PASSWORD ?= postgres
 KEYCLOAK_PASSWORD ?= admin

@@ -31,8 +31,8 @@ metadata:
     strimzi.io/node-pools: enabled
 spec:
   kafka:
-    version: 4.1.2
-    metadataVersion: 4.1-IV0
+    version: 4.2.0
+    metadataVersion: 4.2-IV0
     listeners:
       # TLS listener — used by the Strimzi Entity Operator for internal admin access.
       # Keep even if app services use the scram listener.

@@ -1,3 +1,5 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
 # Staging overlay for user-service
 # Patches the base resources with staging-specific image tags and configuration.
 #
