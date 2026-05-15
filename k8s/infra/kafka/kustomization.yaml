@@ -1,12 +1,14 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# Kafka — Strimzi Kafka cluster + KafkaTopic + KafkaUser CRs + ExternalSecrets
+# Kafka — Strimzi Kafka cluster
 # Namespace: kafka
+#
+# App-domain resources (topics, KafkaUser CRs, SCRAM secrets) live in:
+#   k8s/apps/base/topics.yaml
+#   k8s/apps/base/users.yaml
+#   k8s/apps/base/external-secrets-kafka.yaml
 #
 # Prerequisites: ESO operator + ClusterSecretStore must be installed first
 # so that *-kafka-password secrets exist before KafkaUser CRs are applied.
 resources:
   - cluster.yaml
-  - topics.yaml
-  - users.yaml
-  - external-secrets.yaml

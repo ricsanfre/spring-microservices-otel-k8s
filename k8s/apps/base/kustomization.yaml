@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# E-Commerce — app-domain configuration resources
+#
+# This package owns all resources that are specific to the e-commerce platform
+# but are provisioned inside infrastructure operators:
+#   - Keycloak realm (clients, roles, scopes, users)          → keycloak ns
+#   - Kafka topics (inter-service event streams)              → kafka ns
+#   - Kafka users (SCRAM credentials + ACLs per service)      → kafka ns
+#   - Kafka SCRAM bootstrap secrets (ExternalSecrets)         → kafka ns
+#   - PostgreSQL databases (per-service DB + owner roles)     → postgres ns
+#
+# Prerequisites (must be running before applying this package):
+#   make k8s-infra-eso        — ClusterSecretStore
+#   make k8s-infra-keycloak   — Keycloak operator + Keycloak CR
+#   make k8s-infra-kafka      — Strimzi operator + Kafka cluster
+#   make k8s-infra-postgres   — CNPG operator + PostgreSQL cluster
+#
+# Apply:
+#   kubectl apply -k k8s/apps/base
+# Or via Makefile:
+#   make k8s-ecommerce-config
+resources:
+  - realm-import.yaml
+  - topics.yaml
+  - users.yaml
+  - databases.yaml
+  - external-secrets-kafka.yaml

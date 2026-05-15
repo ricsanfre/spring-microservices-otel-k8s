@@ -54,7 +54,7 @@ REVIEWS_SERVICE_CLIENT_SECRET ?= reviews-service-secret
 		k8s-cert-manager-helm k8s-envoy-gateway-helm k8s-strimzi-operator-helm k8s-cnpg-operator-helm k8s-mongodb-operator-helm k8s-otel-operator-helm \
         k8s-infra k8s-infra-cert-manager k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey \
         k8s-infra-kafka k8s-infra-keycloak k8s-infra-envoy-gateway k8s-infra-monitoring k8s-infra-otel-collector k8s-up \
-        k8s-apps-deploy k8s-apps-delete \
+        k8s-apps-deploy k8s-apps-delete k8s-ecommerce-config k8s-ecommerce-config-delete \
         k8s-us-deploy k8s-us-delete k8s-us-image \
         k8s-ps-deploy k8s-ps-delete k8s-ps-image \
         k8s-cs-deploy k8s-cs-delete k8s-cs-image \
@@ -643,7 +643,13 @@ k8s-fe-deploy: ## Deploy frontend-service to staging (Kustomize staging overlay)
 k8s-fe-delete: ## Remove frontend-service from staging
 	kubectl delete -k k8s/apps/frontend-service/overlays/staging --ignore-not-found
 
-k8s-apps-deploy: ## Deploy all services to staging
+k8s-ecommerce-config: ## Apply e-commerce platform config (Keycloak realm, Kafka topics+users, DB schemas)
+	kubectl apply -k k8s/apps/base
+
+k8s-ecommerce-config-delete: ## Remove e-commerce platform config
+	kubectl delete -k k8s/apps/base --ignore-not-found
+
+k8s-apps-deploy: k8s-ecommerce-config ## Deploy all services to staging (includes e-commerce platform config)
 	kubectl apply -k k8s/apps/user-service/overlays/staging
 	kubectl apply -k k8s/apps/product-service/overlays/staging
 	kubectl apply -k k8s/apps/cart-service/overlays/staging
@@ -660,3 +666,4 @@ k8s-apps-delete: ## Remove all services from staging
 	kubectl delete -k k8s/apps/reviews-service/overlays/staging --ignore-not-found
 	kubectl delete -k k8s/apps/notification-service/overlays/staging --ignore-not-found
 	kubectl delete -k k8s/apps/frontend-service/overlays/staging --ignore-not-found
+	kubectl delete -k k8s/apps/base --ignore-not-found

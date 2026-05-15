@@ -1,0 +1,13 @@
+# CloudNativePG — Keycloak database
+# Must be in the postgres namespace (same namespace as the CNPG Cluster).
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: keycloak-db
+  namespace: postgres
+spec:
+  name: keycloak
+  owner: keycloak_owner
+  cluster:
+    name: postgres

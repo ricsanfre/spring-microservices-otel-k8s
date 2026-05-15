@@ -8,9 +8,9 @@
 #     --namespace kafka --create-namespace \
 #     --values k8s/helm/strimzi-operator-values.yaml
 
-# Watch only the kafka namespace (least privilege)
-watchNamespaces:
-  - kafka
+# Watch all namespaces so KafkaTopic/KafkaUser CRs can be created in any ns
+# (e.g. e-commerce namespace via k8s/apps/base)
+watchAnyNamespace: true
 
 # Single replica for laptop staging
 replicas: 1

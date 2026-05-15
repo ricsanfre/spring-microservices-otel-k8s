@@ -1,0 +1,34 @@
+# CloudNativePG — per-service Database CRs
+# Each service gets its own database owned by a dedicated PostgreSQL role.
+# Role passwords are managed by CNPG managed.roles (see cluster.yaml).
+#
+# Note: keycloak-db lives in k8s/infra/keycloak/database.yaml
+#
+# Apply:
+#   kubectl apply -k k8s/apps/base
+
+# ── user-service database ──────────────────────────────────────────────────
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: users-db
+  namespace: postgres
+spec:
+  name: users
+  owner: users_owner
+  cluster:
+    name: postgres
+
+# ── order-service database ─────────────────────────────────────────────────
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: orders-db
+  namespace: postgres
+spec:
+  name: orders
+  owner: orders_owner
+  cluster:
+    name: postgres
