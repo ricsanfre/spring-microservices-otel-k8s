@@ -521,14 +521,14 @@ In the Kubernetes staging cluster, the **OpenTelemetry Operator** manages a cent
   │  OTLP endpoint: otel-collector.monitoring:4317       │
   └──────────────────────────┬───────────────────────────┘
                              │ OTLP gRPC :4317
-          ┌──────────────────▼──────────────────────────┐
+          ┌──────────────────▼─────────────────────────────────┐
           │   OpenTelemetryCollector  (namespace: monitoring)  │
-          │   managed by opentelemetry-operator          │
-          │                                              │
-          │  receivers:  otlp (gRPC :4317, HTTP :4318)  │
-          │  processors: memory_limiter → batch          │
-          │              → resource/staging              │
-          └────┬────────────────┬──────────────┬─────────┘
+          │   managed by opentelemetry-operator                │
+          │                                                    │
+          │  receivers:  otlp (gRPC :4317, HTTP :4318)         │
+          │  processors: memory_limiter → batch                │
+          │              → resource/staging                    │
+          └────┬────────────────┬──────────────┬───────────────┘
                │ traces         │ logs         │ metrics
                │ OTLP gRPC      │ OTLP HTTP    │ OTLP HTTP
                ▼                ▼              ▼

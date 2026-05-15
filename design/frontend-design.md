@@ -15,10 +15,10 @@ Browser
 ┌──────────────────────────────────────────┐
 │          Next.js 16 (BFF)                │
 │                                          │
-│  Server Components   ─── apiFetch() ──► │─► product-service :8081
-│  Route Handlers (BFF API)               │─► order-service   :8082
-│  Server Actions                         │─► reviews-service :8083
-│  Auth.js v5 proxy                       │─► user-service    :8085
+│  Server Components   ─── apiFetch() ──►  │─► product-service :8081
+│  Route Handlers (BFF API)                │─► order-service   :8082
+│  Server Actions                          │─► reviews-service :8083
+│  Auth.js v5 proxy                        │─► user-service    :8085
 │                                          │─► cart-service    :8086
 └──────────────────────────────────────────┘
               │
