@@ -110,10 +110,34 @@ The CD workflow uses this pattern when deploying to the k3d cluster — it patch
 
 ## Package Visibility
 
-By default, packages pushed by `GITHUB_TOKEN` are **private**. To make them public:
+By default, packages pushed by `GITHUB_TOKEN` are **private**, even in a public repository. A private package causes a `403 Forbidden` when Kubernetes (or anyone else) tries to pull without credentials.
 
-1. Go to **GitHub → Your profile → Packages → \<package-name\>**
-2. **Package settings → Change visibility → Public**
+### Making an image public (UI)
+
+1. Go to `https://github.com/ricsanfre?tab=packages`
+2. Click the package (e.g. `micro-sp4-otel/user-service`)
+3. Click **Package settings** (bottom-right of the package page)
+4. Scroll to **Danger Zone → Change visibility → Public**
+5. Repeat for each service image
+
+### Making an image public (API)
+
+```bash
+# Requires a PAT with write:packages
+curl -X PATCH \
+  -H "Authorization: Bearer <YOUR_PAT>" \
+  -H "Accept: application/vnd.github+json" \
+  https://api.github.com/user/packages/container/<package-name> \
+  -d '{"visibility":"public"}'
+```
+
+### Inherit visibility from the repository
+
+Once a package is linked to the repository (which the Jib CI push does automatically via `GITHUB_TOKEN`), you can configure all packages in one place:
+
+> **github.com/ricsanfre/micro-sp4-otel** → Settings → Packages → **Inherit access from source repository**
+
+This makes every linked package follow the repo's public/private setting — useful so newly pushed service images don't need manual visibility changes.
 
 Or via the API:
 ```bash
