@@ -289,61 +289,8 @@ This creates cluster `e-commerce` (1 control-plane + 2 worker nodes) with:
 - Traefik disabled
 - Host aliases for `app.local.test`, `keycloak.local.test`, `grafana.local.test`
 
-### 2. Install Operators (once per cluster)
 
-```bash
-make k8s-operators
-```
-
-| Operator | Namespace | Method |
-|----------|-----------|--------|
-| cert-manager | `cert-manager` | Helm (`jetstack/cert-manager`) |
-| Envoy Gateway | `envoy-gateway-system` | Helm OCI (`gateway-helm`) |
-| Strimzi Kafka | `kafka` | Helm OCI (`strimzi-kafka-operator`) |
-| CloudNativePG | `cnpg-system` | Helm (`cnpg/cloudnative-pg`) |
-| MongoDB Community | `mongodb` | Helm (`mongodb/community-operator`) |
-| Keycloak Operator | `keycloak` | `kubectl apply` (no Helm chart) |
-| OpenTelemetry Operator | `monitoring` | Helm (`open-telemetry/opentelemetry-operator`) |
-
-### 3. Create Required Secrets
-
-Before deploying infrastructure, create the secrets that are not committed to git:
-
-```bash
-# PostgreSQL superuser (CNPG bootstrap)
-kubectl create secret generic postgres-superuser-secret \
-  --from-literal=username=postgres --from-literal=password=<CHANGE_ME> \
-  --namespace postgres
-
-# Keycloak admin credentials
-kubectl create secret generic keycloak-admin-secret \
-  --from-literal=username=admin --from-literal=password=<CHANGE_ME> \
-  --namespace keycloak
-
-# Keycloak → PostgreSQL credentials
-kubectl create secret generic keycloak-db-secret \
-  --from-literal=username=keycloak_owner --from-literal=password=<CHANGE_ME> \
-  --namespace keycloak
-
-# MongoDB per-service credentials
-kubectl create secret generic mongodb-reviews-secret \
-  --from-literal=password=<CHANGE_ME> --namespace mongodb
-kubectl create secret generic mongodb-notifications-secret \
-  --from-literal=password=<CHANGE_ME> --namespace mongodb
-
-# Grafana admin credentials
-kubectl create secret generic grafana-admin-secret \
-  --from-literal=username=admin --from-literal=password=<CHANGE_ME> \
-  --namespace monitoring
-
-# frontend-service — Auth.js session key + Keycloak BFF client secret
-kubectl create secret generic frontend-service-secret \
-  --from-literal=AUTH_SECRET=$(openssl rand -base64 32) \
-  --from-literal=AUTH_KEYCLOAK_SECRET=<e-commerce-web-client-secret> \
-  --namespace e-commerce
-```
-
-### 4. Deploy Infrastructure Resources
+### 3. Deploy Infrastructure Resources
 
 ```bash
 make k8s-infra
@@ -363,7 +310,7 @@ make k8s-infra-monitoring      # Grafana LGTM stack
 make k8s-infra-otel-collector  # OpenTelemetry Collector (fan-out to Tempo/Loki/Mimir)
 ```
 
-### 5. Build and Push Service Images
+### 4. Build and Push Service Images
 
 Images are pulled from `ghcr.io` — CI publishes them automatically on every push to `master`.
 For manual pushes (e.g. testing a local branch), log in to ghcr.io first and use the Makefile targets:
@@ -377,10 +324,7 @@ make k8s-us-image GITHUB_OWNER=<your-github-username>   # user-service
 make k8s-cs-image GITHUB_OWNER=<your-github-username>   # cart-service
 ```
 
-After pushing, update `newTag` in the relevant `k8s/apps/<service>/overlays/staging/kustomization.yaml`
-to pin the deployment to a specific commit SHA, or leave `latest` for the rolling release.
-
-### 6. Deploy Services
+### 5. Deploy Services
 
 ```bash
 make k8s-apps-deploy
@@ -396,7 +340,7 @@ make k8s-cs-deploy   # cart-service only
 ### One-Shot Full Setup
 
 ```bash
-make k8s-up   # k3d-create + k8s-operators + k8s-infra
+make k8s-up   # k3d-create + k8s-infra + k8s-apps-deploy
 ```
 
 ### Access Points (Staging)

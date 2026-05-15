@@ -787,7 +787,7 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
                 .requestMatchers("/api-docs/**", "/swagger-ui/**").permitAll()
                 .anyRequest().hasAuthority("SCOPE_<service-scope>:read")
             )
@@ -801,6 +801,18 @@ public class SecurityConfig {
 
 Replace `<service-scope>:read` with the primary read scope for the service (e.g. `products:read`, `orders:read`, `users:read`).
 
+> ⚠️ **Always use `/actuator/health/**`, not `/actuator/health`**
+>
+> Kubernetes liveness and readiness probes hit `/actuator/health/liveness` and
+> `/actuator/health/readiness` — sub-paths of `/actuator/health`. An exact match on
+> `/actuator/health` does **not** cover these sub-paths, causing the probes to receive
+> `HTTP 401` and the kubelet to kill the pod before startup completes. Always use the
+> wildcard form:
+>
+> ```java
+> .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
+> ```
+
 > ⚠️ **`anyRequest()` ordering — explicit matchers must come before the catch-all**
 >
 > `anyRequest()` is evaluated last and **wins over `@PreAuthorize`** on the controller method when
@@ -810,7 +822,7 @@ Replace `<service-scope>:read` with the primary read scope for the service (e.g.
 >
 > ```java
 > .authorizeHttpRequests(auth -> auth
->     .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+>     .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
 >     // M2M-only endpoint — requires products:write, not products:read
 >     .requestMatchers(HttpMethod.POST, "/api/v1/products/stock/reserve").hasAuthority("SCOPE_products:write")
 >     .anyRequest().hasAuthority("SCOPE_products:read")   // ← catch-all last
@@ -1839,6 +1851,68 @@ Jib splits the image into layers from most-to-least stable:
 5. Classes (changes most often)
 
 This maximises layer cache reuse in CI and container registries.
+
+### Versioning policy
+
+#### Maven version and `-SNAPSHOT`
+
+All service modules inherit their version from the root `pom.xml`. The convention is:
+
+| Phase | Version format | Example | Meaning |
+|-------|---------------|---------|---------|
+| Active development | `MAJOR.MINOR.PATCH-SNAPSHOT` | `1.0.0-SNAPSHOT` | Mutable; rebuilt and republished freely |
+| Release candidate / production | `MAJOR.MINOR.PATCH` | `1.0.0` | Immutable; never overwritten |
+
+Follow **Semantic Versioning**:
+- `PATCH` — backwards-compatible bug fix
+- `MINOR` — backwards-compatible new feature
+- `MAJOR` — breaking API change
+
+To bump the version across all modules at once:
+
+```bash
+mvn versions:set -DnewVersion=1.1.0-SNAPSHOT
+mvn versions:commit
+```
+
+#### Docker image tags
+
+The Jib plugin maps the Maven version directly to the image tag:
+
+```xml
+<image>${docker.registry}/${project.artifactId}:${project.version}</image>
+```
+
+In addition the CI workflow always pushes a second, pinned tag for every commit to `main`:
+
+| Tag | Source | Use |
+|-----|--------|-----|
+| `1.0.0-SNAPSHOT` | `${project.version}` | Mutable development tag — overwritten on every build |
+| `<git-sha>` | `${{ github.sha }}` | Immutable, pinned to the exact commit — use in Kubernetes `imagePullPolicy: IfNotPresent` |
+| `latest` | CI convention | Floating pointer to the most recent successful main build |
+
+> **Never deploy a `-SNAPSHOT` tag to a production or stable staging environment.** Snapshot images can change daily; if a pod restarts it may pull a different image than the one originally tested. Always pin Kubernetes deployments to the immutable `<git-sha>` tag via a Kustomize image transform in the staging overlay.
+
+#### Promoting a release
+
+1. Strip `-SNAPSHOT` from `pom.xml`:
+   ```bash
+   mvn versions:set -DnewVersion=1.0.0
+   mvn versions:commit
+   ```
+2. Commit, tag, and push — CI builds and pushes `ghcr.io/ricsanfre/spring-microservices-otel-k8s/<service>:1.0.0` and `:latest`.
+3. Update the staging overlay to pin to the release tag:
+   ```yaml
+   # k8s/apps/user-service/overlays/staging/kustomization.yaml
+   images:
+     - name: ghcr.io/ricsanfre/spring-microservices-otel-k8s/user-service
+       newTag: "1.0.0"
+   ```
+4. Bump to the next development cycle:
+   ```bash
+   mvn versions:set -DnewVersion=1.1.0-SNAPSHOT
+   mvn versions:commit
+   ```
 
 ---
 
