@@ -13,6 +13,7 @@ For setup and runtime instructions see [README.md](README.md).
 - [Data Models](#data-models)
 - [Observability](#observability)
 - [Kubernetes Deployment Architecture](#kubernetes-deployment-architecture)
+  - [PostgreSQL — CloudNativePG](#postgresql--cloudnativepg)
 - [CI/CD Pipeline Details](#cicd-pipeline-details)
 - [Architecture Decision Records](#architecture-decision-records)
 
@@ -770,6 +771,101 @@ JWT validation is enforced per `HTTPRoute` via a `SecurityPolicy` pointing to th
 ### Service-to-Service Calls
 
 Services call each other using plain Kubernetes Service DNS (`http://service-name:port`). kube-proxy handles server-side load balancing across pods — no `spring-cloud-starter-kubernetes-client-loadbalancer` or Eureka required, and no RBAC permissions to the Kubernetes API are needed. See [design/adr-002-plain-kubernetes-dns-service-calls.md](design/adr-002-plain-kubernetes-dns-service-calls.md).
+
+---
+
+### PostgreSQL — CloudNativePG
+
+PostgreSQL is managed by the **CloudNativePG (CNPG) operator**. The operator watches Kubernetes Custom Resources and provisions a real PostgreSQL cluster, per-service databases, and application roles — all declaratively.
+
+#### 1. Cluster CR (`k8s/infra/postgres/cluster.yaml`)
+
+A `postgresql.cnpg.io/v1 / Cluster` resource named `postgres` is created in the `postgres` namespace. CNPG provisions 1 primary + 1 replica and automatically creates two stable Kubernetes Services:
+
+| Service DNS | Purpose |
+|---|---|
+| `postgres-rw.postgres.svc.cluster.local:5432` | Read-write — always points to the primary |
+| `postgres-ro.postgres.svc.cluster.local:5432` | Read-only — load-balanced across replicas |
+
+The cluster bootstrap creates a default `app` database; all service-specific databases are created separately via `Database` CRs.
+
+#### 2. Managed Roles — declarative credential management
+
+The `spec.managed.roles` block in the Cluster CR tells CNPG to create a PostgreSQL login role for each service and keep its password in sync with a Kubernetes Secret:
+
+```yaml
+managed:
+  roles:
+    - name: users_owner        # user-service
+      passwordSecret:
+        name: users-db-secret  # Secret in postgres namespace
+    - name: orders_owner       # order-service
+      passwordSecret:
+        name: orders-db-secret
+    - name: keycloak_owner     # Keycloak
+      passwordSecret:
+        name: keycloak-db-secret
+```
+
+The referenced Secrets must exist in the `postgres` namespace **before** the Cluster CR is applied (or in the same `kubectl apply` batch).
+
+#### 3. Database CRs (`k8s/infra/postgres/databases.yaml`)
+
+One `postgresql.cnpg.io/v1 / Database` CR is defined per service. CNPG executes the equivalent of `CREATE DATABASE ... OWNER ...` inside the cluster.
+
+| CR name | PostgreSQL database | Owner role | Consumed by |
+|---|---|---|---|
+| `users-db` | `users` | `users_owner` | `user-service` |
+| `orders-db` | `orders` | `orders_owner` | `order-service` |
+| `keycloak-db` | `keycloak` | `keycloak_owner` | Keycloak |
+
+#### 4. Spring Boot integration — `user-service` as an example
+
+Spring Boot services use environment variable placeholders in `application.yaml`:
+
+```yaml
+# user-service/src/main/resources/application.yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:users}
+    username: ${DB_USER:users}
+    password: ${DB_PASSWORD:users}
+```
+
+In Kubernetes those variables are injected from two sources in the service `Deployment`:
+
+| Source | Values | Where defined |
+|---|---|---|
+| `ConfigMap` (`user-service-config`) | `DB_HOST=postgres-rw.postgres.svc.cluster.local`, `DB_PORT=5432`, `DB_NAME=users` | `k8s/apps/user-service/base/configmap.yaml` |
+| `Secret` (`user-service-db-secret`) | `DB_USER`, `DB_PASSWORD` | Copied from `users-db-secret` (same Secret CNPG uses for the role) |
+
+`DB_HOST` is always set to the CNPG read-write Service so writes always reach the primary.
+
+#### 5. End-to-end data flow
+
+```
+k8s Secret  users-db-secret  (postgres namespace)
+        │
+        ├─► CNPG Cluster managed.roles  →  PostgreSQL role "users_owner" (password synced)
+        │
+        └─► Deployment env  (copied to e-commerce namespace)
+                 │
+                 ▼
+         Spring Boot datasource credentials
+
+CNPG Database CR (users-db)  →  PostgreSQL database "users"  OWNER users_owner
+
+Spring Boot  ──JDBC──►  postgres-rw.postgres.svc.cluster.local:5432/users
+                         (authenticated as users_owner)
+```
+
+#### 6. Schema management — Flyway
+
+CNPG creates the **empty** database. Schema creation and migrations are entirely managed by **Flyway**, which runs inside the Spring Boot process at startup. Migration scripts live in `src/main/resources/db/migration/V{n}__{description}.sql` and execute automatically on first boot and on each upgrade.
+
+#### 7. Secret lifecycle — local setup
+
+All `*-db-secret` Kubernetes Secrets must be created in the `postgres` namespace **before** applying the CNPG CRs, so that managed roles and databases are provisioned with consistent credentials from the very first reconciliation cycle. The required `kubectl create secret` commands are documented as comments at the top of both `cluster.yaml` and `databases.yaml`.
 
 ---
 

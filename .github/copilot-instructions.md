@@ -66,7 +66,6 @@ pom.xml                          ← root BOM: Spring Boot 4.0.5 parent, all ver
 Makefile                         ← dev targets (infra-up, *-build, *-test, *-verify, k8s-*)
 compose.yaml                     ← Docker Compose (profiles: infra, auth, observability)
 .github/workflows/ci.yaml        ← CI: change detection, unit tests, integration tests, Jib → ghcr.io
-.github/workflows/cd.yaml        ← CD: ephemeral k3d staging cluster + smoke tests
 design/development-guidelines.md ← AUTHORITATIVE coding rules — read before implementing
 design/adr-*.md                  ← Architecture decision records
 docker/postgres/init-databases.sh
@@ -155,9 +154,9 @@ JWT RS256 from Keycloak. JWKS: `http://keycloak:8180/realms/e-commerce/protocol/
 
 ---
 
-## CI/CD — GitHub Actions
+## CI — GitHub Actions
 
-Two workflows are implemented in `.github/workflows/`.
+One workflow is implemented in `.github/workflows/`.
 
 ### CI workflow (`.github/workflows/ci.yaml`)
 
@@ -178,40 +177,10 @@ Triggers on `push` and `pull_request` to `main`.
 
 **Jib image naming:** `-Ddocker.registry=ghcr.io/<owner>` overrides the default `localhost:5000` from the root POM `<docker.registry>` property.
 
-### CD workflow (`.github/workflows/cd.yaml`)
+### Adding a new service to CI
 
-Triggers via `workflow_run` on CI completing successfully on `main`.
-
-**Job `deploy-staging`:**
-1. Installs k3d, Helm, kustomize on the runner.
-2. Creates ephemeral k3d cluster with ports `80:80` and `443:443`, Traefik disabled.
-3. Applies `k8s/namespaces.yaml` (all namespaces, matching production).
-4. Installs operators via Helm/Kustomize — same commands as `make k8s-operators`, scoped to current services:
-   - `cert-manager` (jetstack/cert-manager Helm v1.16.2)
-   - `Envoy Gateway` (envoyproxy/gateway-helm OCI Helm v1.4.1)
-   - `CloudNativePG` (cnpg/cloudnative-pg Helm)
-   - `Keycloak Operator` (`kustomize build k8s/infra/keycloak/operator | sed version | kubectl apply`)
-5. Creates all infra secrets in the relevant namespaces with CI-only dummy values **before** kustomize applies (so CNPG managed.roles and Keycloak use consistent passwords from first reconciliation).
-6. Deploys infrastructure using the same `kubectl apply -k k8s/infra/...` commands as `make k8s-infra`:
-   - `k8s/infra/cert-manager` → wait for `local-test-ca-issuer` ClusterIssuer Ready
-   - `k8s/infra/postgres` → wait for CNPG Cluster + `users-db` + `keycloak-db` Database CRs Ready
-   - `k8s/infra/valkey` → wait for rollout
-   - `k8s/infra/keycloak` → wait for Keycloak CR Ready
-   - `k8s/envoy-gateway`
-7. Creates app secrets (`user-service-db-secret`, `ghcr-pull-secret`) in `e-commerce` namespace.
-8. For each service: `kustomize edit set image localhost:5000/<svc>=ghcr.io/<owner>/<svc>:<sha>` + patches `imagePullSecrets` via `kustomize edit add patch`, then `kubectl apply -k`.
-9. Smoke tests: `kubectl port-forward` → `curl /actuator/health` → `grep '"status":"UP"'`. No JWT required (Spring Boot JWKS fetch is lazy).
-10. `k3d cluster delete e-commerce || true` runs on `always()` to clean up.
-
-**Services in CD:** `user-service` (PostgreSQL) and `cart-service` (Valkey). Others added as their K8s manifests are completed.
-
-### Adding a new service to CI/CD
-
-- **CI:** add the service name to the `java-filter` in `detect-changes` (`.github/workflows/ci.yaml`).
-- **CD:** add a deploy step following the Kustomize patch pattern and a smoke-test `curl` call.
-- Both require a complete `k8s/apps/<service>/overlays/staging/kustomization.yaml`.
-
-When creating new services, add `maven-failsafe-plugin` to the service `pom.xml` only if it has `*IT.java` tests.
+- Add the service name to the `java-filter` in `detect-changes` (`.github/workflows/ci.yaml`).
+- Add `maven-failsafe-plugin` to the service `pom.xml` only if it has `*IT.java` tests.
 
 ---
 
