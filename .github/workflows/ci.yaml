@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # Java services: also rebuilds if common/ or root pom.xml changed
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: java-filter
         with:
           filters: |
@@ -85,7 +85,7 @@ jobs:
               - '.github/workflows/ci.yaml'
 
       # Frontend has a different toolchain — detected separately
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: frontend-filter
         with:
           filters: |
@@ -111,7 +111,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Java 25 (Temurin)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '25'
@@ -150,12 +150,12 @@ jobs:
       packages: write   # required to push to ghcr.io
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Set up Node.js 22
-        uses: actions/setup-node@v4
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
           cache-dependency-path: frontend-service/package-lock.json
 
@@ -179,7 +179,7 @@ jobs:
       # ── Publish: Docker multi-stage build (Dockerfile) ────────────────────
       - name: Log in to ghcr.io
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -187,7 +187,7 @@ jobs:
 
       - name: Build and push frontend-service image
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: frontend-service
           push: true

@@ -9,10 +9,10 @@
 # Language runtimes
 java    = "temurin-25"
 maven   = "3.9"
-node    = "22"
+node    = "24"
 
 # Kubernetes tooling (Option B — k3d staging only)
-kubectl   = "latest"
+kubectl   = "1.36"
 helm      = "latest"
 k3d       = "latest"
 kustomize = "latest"
