@@ -108,7 +108,7 @@ jobs:
       packages: write   # required to push to ghcr.io
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Java 25 (Temurin)
         uses: actions/setup-java@v5
