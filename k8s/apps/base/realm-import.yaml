@@ -14,6 +14,50 @@ metadata:
   namespace: keycloak
 spec:
   keycloakCRName: keycloak
+  # Placeholder values are sourced from the keycloak-realm-secrets K8s Secret
+  # (created by ESO from k8s/infra/keycloak/external-secrets.yaml).
+  # In the realm spec below, reference them as ${PLACEHOLDER_NAME}.
+  placeholders:
+    KC_CLIENT_ECOMMERCE_WEB:
+      secret:
+        name: keycloak-realm-secrets
+        key: KC_CLIENT_ECOMMERCE_WEB
+    KC_CLIENT_CART_SERVICE:
+      secret:
+        name: keycloak-realm-secrets
+        key: KC_CLIENT_CART_SERVICE
+    KC_CLIENT_ORDER_SERVICE:
+      secret:
+        name: keycloak-realm-secrets
+        key: KC_CLIENT_ORDER_SERVICE
+    KC_CLIENT_REVIEWS_SERVICE:
+      secret:
+        name: keycloak-realm-secrets
+        key: KC_CLIENT_REVIEWS_SERVICE
+    KC_CLIENT_PRODUCT_SERVICE:
+      secret:
+        name: keycloak-realm-secrets
+        key: KC_CLIENT_PRODUCT_SERVICE
+    KC_CLIENT_USER_SERVICE:
+      secret:
+        name: keycloak-realm-secrets
+        key: KC_CLIENT_USER_SERVICE
+    KC_CLIENT_NOTIFICATION_SERVICE:
+      secret:
+        name: keycloak-realm-secrets
+        key: KC_CLIENT_NOTIFICATION_SERVICE
+    KC_USER_TESTUSER_PASSWORD:
+      secret:
+        name: keycloak-realm-secrets
+        key: KC_USER_TESTUSER_PASSWORD
+    KC_USER_OTHERUSER_PASSWORD:
+      secret:
+        name: keycloak-realm-secrets
+        key: KC_USER_OTHERUSER_PASSWORD
+    KC_USER_ADMINUSER_PASSWORD:
+      secret:
+        name: keycloak-realm-secrets
+        key: KC_USER_ADMINUSER_PASSWORD
   realm:
     realm: e-commerce
     displayName: "E-Commerce Platform"
@@ -330,7 +374,7 @@ spec:
         description: "Confidential BFF client — Next.js server-side OIDC (Auth.js v5)"
         enabled: true
         publicClient: false
-        secret: "e-commerce-web-secret"
+        secret: "${KC_CLIENT_ECOMMERCE_WEB}"
         standardFlowEnabled: true
         implicitFlowEnabled: false
         directAccessGrantsEnabled: false
@@ -367,7 +411,7 @@ spec:
         description: "Confidential client for product-service — resource server + service account"
         enabled: true
         publicClient: false
-        secret: "product-service-secret"
+        secret: "${KC_CLIENT_PRODUCT_SERVICE}"
         standardFlowEnabled: false
         implicitFlowEnabled: false
         directAccessGrantsEnabled: false
@@ -381,7 +425,7 @@ spec:
         description: "Confidential client for order-service — resource server + service account (calls product-service, user-service)"
         enabled: true
         publicClient: false
-        secret: "order-service-secret"
+        secret: "${KC_CLIENT_ORDER_SERVICE}"
         standardFlowEnabled: false
         implicitFlowEnabled: false
         directAccessGrantsEnabled: false
@@ -397,7 +441,7 @@ spec:
         description: "Confidential client for reviews-service — resource server + service account (calls user-service, product-service, order-service)"
         enabled: true
         publicClient: false
-        secret: "reviews-service-secret"
+        secret: "${KC_CLIENT_REVIEWS_SERVICE}"
         standardFlowEnabled: false
         implicitFlowEnabled: false
         directAccessGrantsEnabled: false
@@ -414,7 +458,7 @@ spec:
         description: "Confidential client for user-service — resource server + service account"
         enabled: true
         publicClient: false
-        secret: "user-service-secret"
+        secret: "${KC_CLIENT_USER_SERVICE}"
         standardFlowEnabled: false
         implicitFlowEnabled: false
         directAccessGrantsEnabled: false
@@ -428,7 +472,7 @@ spec:
         description: "Confidential client for notification-service — Kafka consumer resource server (no outbound HTTP calls)"
         enabled: true
         publicClient: false
-        secret: "notification-service-secret"
+        secret: "${KC_CLIENT_NOTIFICATION_SERVICE}"
         standardFlowEnabled: false
         implicitFlowEnabled: false
         directAccessGrantsEnabled: false
@@ -442,7 +486,7 @@ spec:
         description: "Confidential client for cart-service — resource server + service account (calls user-service, order-service)"
         enabled: true
         publicClient: false
-        secret: "cart-service-secret"
+        secret: "${KC_CLIENT_CART_SERVICE}"
         standardFlowEnabled: false
         implicitFlowEnabled: false
         directAccessGrantsEnabled: false
@@ -461,7 +505,7 @@ spec:
         lastName: User
         credentials:
           - type: password
-            value: password
+            value: "${KC_USER_TESTUSER_PASSWORD}"
             temporary: false
         clientRoles:
           e-commerce-web:
@@ -474,7 +518,7 @@ spec:
         lastName: Person
         credentials:
           - type: password
-            value: password
+            value: "${KC_USER_OTHERUSER_PASSWORD}"
             temporary: false
         clientRoles:
           e-commerce-web:
@@ -516,7 +560,7 @@ spec:
         lastName: User
         credentials:
           - type: password
-            value: password
+            value: "${KC_USER_ADMINUSER_PASSWORD}"
             temporary: false
         clientRoles:
           e-commerce-web:
