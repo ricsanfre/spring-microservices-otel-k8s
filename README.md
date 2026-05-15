@@ -23,7 +23,7 @@ For coding standards and implementation patterns see [design/development-guideli
 | **Backend language / runtime** | Java 25 (Temurin) |
 | **Backend framework** | Spring Boot 4.0 |
 | **Build** | Maven 3.9 (multi-module) |
-| **Frontend** | Next.js 15, React 19, TypeScript |
+| **Frontend** | Next.js 16, React 19, TypeScript 6 |
 | **Frontend auth** | Auth.js v5 (next-auth) — OIDC / Authorization Code + PKCE |
 | **IAM** | Keycloak 26 — OAuth2 / OIDC, JWT RS256 |
 | **API gateway** | Envoy Gateway (Kubernetes) |
@@ -51,7 +51,7 @@ For coding standards and implementation patterns see [design/development-guideli
 
 | Service | Database | Responsibility |
 |---------|----------|----------------|
-| `frontend-service` | stateless | Next.js 15 BFF — server-side OIDC session (Auth.js v5); proxies API calls to microservices |
+| `frontend-service` | stateless | Next.js 16 BFF — server-side OIDC session (Auth.js v5); proxies API calls to microservices |
 | `product-service` | MongoDB | Product catalog — CRUD and inventory quantities |
 | `order-service` | PostgreSQL | Order lifecycle management; Kafka producer |
 | `reviews-service` | MongoDB | Product reviews and ratings — validated against order history |
@@ -425,4 +425,4 @@ See [ARCHITECTURE.md — CI Pipeline Details](ARCHITECTURE.md#ci-pipeline-detail
 
 ---
 
-*Built with Java 25 · Spring Boot 4 · Next.js 15 · Auth.js v5 · Apache Kafka · MongoDB · PostgreSQL · Valkey · Keycloak · Envoy Gateway · OpenTelemetry · k3d*
+*Built with Java 25 · Spring Boot 4 · Next.js 16 · Auth.js v5 · Apache Kafka · MongoDB · PostgreSQL · Valkey · Keycloak · Envoy Gateway · OpenTelemetry · k3d*

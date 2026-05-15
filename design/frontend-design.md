@@ -1,6 +1,6 @@
 # Frontend Design — E-Commerce Platform
 
-> **Stack:** Next.js 15 (App Router) · Auth.js v5 · TypeScript · Keycloak (OIDC)  
+> **Stack:** Next.js 16 (App Router) · Auth.js v5 · TypeScript · Keycloak (OIDC)  
 > **Pattern:** Backend-for-Frontend (BFF) — the browser never calls microservices directly
 
 ---
@@ -13,12 +13,12 @@ Browser
   │  HTTPS (cookie-based session — no tokens in browser)
   ▼
 ┌──────────────────────────────────────────┐
-│          Next.js 15 (BFF)                │
+│          Next.js 16 (BFF)                │
 │                                          │
 │  Server Components   ─── apiFetch() ──► │─► product-service :8081
 │  Route Handlers (BFF API)               │─► order-service   :8082
 │  Server Actions                         │─► reviews-service :8083
-│  Auth.js v5 middleware                  │─► user-service    :8085
+│  Auth.js v5 proxy                       │─► user-service    :8085
 │                                          │─► cart-service    :8086
 └──────────────────────────────────────────┘
               │
@@ -161,12 +161,12 @@ If `idToken` is missing from the session (e.g., session was created before the `
 
 ---
 
-## 5. Route Protection (Middleware)
+## 5. Route Protection (Proxy)
 
-`src/middleware.ts` re-exports `auth` from Auth.js as the Next.js middleware:
+`src/proxy.ts` re-exports `auth` from Auth.js as the Next.js proxy (renamed from `middleware` in Next.js 16):
 
 ```typescript
-export { auth as middleware } from "@/auth";
+export { auth as proxy } from "@/auth";
 
 export const config = {
   matcher: ["/((?!api/auth|api/cart|_next/static|_next/image|favicon.ico|login|products).+)"],
@@ -298,7 +298,7 @@ Service base URLs are resolved from environment variables (`PRODUCTS_SERVICE_URL
 
 ### 11.1 Approach
 
-Next.js 15 has a stable instrumentation hook (`src/instrumentation.ts`) that runs once at server startup on the Node.js runtime. The `@vercel/otel` package wires up the OpenTelemetry SDK there with zero boilerplate.
+Next.js 16 has a stable instrumentation hook (`src/instrumentation.ts`) that runs once at server startup on the Node.js runtime. The `@vercel/otel` package wires up the OpenTelemetry SDK there with zero boilerplate.
 
 **What is automatically instrumented (server-side only):**
 - Every incoming HTTP request (pages, Route Handlers, Server Actions) → a root server span
@@ -310,7 +310,7 @@ The `traceparent` header injection is the key integration point: `apiFetch()` an
 
 ### 11.2 Implementation
 
-**`src/instrumentation.ts`** (loaded automatically by Next.js 15):
+**`src/instrumentation.ts`** (loaded automatically by Next.js 16):
 ```typescript
 import { registerOTel } from "@vercel/otel";
 
@@ -352,11 +352,11 @@ frontend-service/
 ├── .env.local.example     ← copy to .env.local; fill AUTH_SECRET + AUTH_KEYCLOAK_SECRET + AUTH_URL
 ├── Dockerfile             ← multi-stage build; output:standalone for k8s
 ├── next.config.ts         ← output:"standalone" enabled
-├── package.json           ← Next.js 15, next-auth 5.0.0-beta (Auth.js v5), React 19; dev port 3001
+├── package.json           ← Next.js 16, next-auth 5.0.0-beta (Auth.js v5), React 19; dev port 3001
 └── src/
     ├── auth.ts            ← Auth.js v5: Keycloak provider, JWT/session callbacks (stores id_token),
     │                         token refresh, id_token forwarded for federated logout only
-    ├── middleware.ts      ← protects all routes (redirects to Keycloak login if no session)
+    ├── proxy.ts           ← protects all routes (redirects to Keycloak login if no session)
     ├── instrumentation.ts ← @vercel/otel bootstrap (runs once at server startup)
     ├── types/
     │   └── next-auth.d.ts ← Session augmented with accessToken, idToken, scope, error fields

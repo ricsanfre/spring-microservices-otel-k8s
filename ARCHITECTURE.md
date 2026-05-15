@@ -33,7 +33,7 @@ flowchart TD
         EG["Envoy Gateway\nKubernetes Gateway API\nJWT validation via SecurityPolicy"]
 
         subgraph SERVICES["Business Services"]
-            FE["frontend-service\nNext.js 15 BFF\nAuth.js v5"]
+            FE["frontend-service\nNext.js 16 BFF\nAuth.js v5"]
             PS["product-service :8081\nMongoDB"]
             OS["order-service :8082\nPostgreSQL"]
             RS["reviews-service :8083\nMongoDB"]
@@ -178,11 +178,11 @@ sequenceDiagram
 
 ### frontend-service · port 3001 (local) / 3000 (container) · stateless
 
-Browser-facing Next.js 15 application implementing the BFF pattern. See [ADR-007](design/adr-007-nextjs-bff-frontend.md) for the full rationale.
+Browser-facing Next.js 16 application implementing the BFF pattern. See [ADR-007](design/adr-007-nextjs-bff-frontend.md) for the full rationale.
 
 | Aspect | Detail |
 |--------|--------|
-| Framework | Next.js 15 (App Router) |
+| Framework | Next.js 16 (App Router) |
 | Auth library | Auth.js v5 |
 | Session storage | Encrypted HttpOnly cookie (JWT never in browser) |
 | Keycloak client | `e-commerce-web` (confidential — `client_secret` in server env only) |
@@ -583,7 +583,7 @@ flowchart TD
                 end
 
                 subgraph NS_APP["e-commerce"]
-                    FE["frontend-service\\nNext.js 15 BFF\\nAuth.js v5"]
+                    FE["frontend-service\\nNext.js 16 BFF\\nAuth.js v5"]
                     US["user-service :8085"]
                     PS["product-service :8081"]
                     OS["order-service :8082"]
