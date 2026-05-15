@@ -57,7 +57,7 @@ services:
       start_period: 10s
 
   mongo:
-    image: mongo:7
+    image: mongo:8
     profiles: [infra]
     ports:
       - "27017:27017"
