@@ -1,16 +1,16 @@
 # Strimzi — KafkaUser CRs (SCRAM-SHA-512 + ACLs)
 # Namespace: kafka
 #
-# Strimzi's User Operator automatically:
-#   1. Generates a random password for each user.
-#   2. Stores it in a Kubernetes Secret named after the KafkaUser (kafka namespace).
-#      Secret keys:  password        — raw password string
-#                    sasl.jaas.config — full JAAS login module string
-#   3. Creates SCRAM-SHA-512 credentials on the Kafka broker.
-#   4. Reconciles ACLs on every spec change.
+# Strimzi's User Operator:
+#   1. Reads the password from the secret referenced by
+#      spec.authentication.password.valueFrom.secretKeyRef (created by ESO).
+#   2. Programs the Kafka broker's SCRAM-SHA-512 credentials with that password.
+#   3. Reconciles ACLs on every spec change.
 #
-# The Secret is created in the 'kafka' namespace.  Copy it to the 'e-commerce'
-# namespace before deploying the corresponding app (see staging overlay comments).
+# Prerequisites: ESO must have created the *-kafka-password secrets in the kafka
+# namespace before these KafkaUser CRs are applied (make k8s-infra-eso first).
+# The same passwords are also written to the e-commerce namespace by ESO so
+# Spring Boot services can authenticate — no manual secret copying required.
 #
 # Apply:
 #   kubectl apply -f k8s/infra/kafka/users.yaml
@@ -27,6 +27,11 @@ metadata:
 spec:
   authentication:
     type: scram-sha-512
+    password:
+      valueFrom:
+        secretKeyRef:
+          name: order-service-kafka-password
+          key: password
   authorization:
     type: simple
     acls:
@@ -55,6 +60,11 @@ metadata:
 spec:
   authentication:
     type: scram-sha-512
+    password:
+      valueFrom:
+        secretKeyRef:
+          name: notification-service-kafka-password
+          key: password
   authorization:
     type: simple
     acls:
@@ -81,6 +91,11 @@ metadata:
 spec:
   authentication:
     type: scram-sha-512
+    password:
+      valueFrom:
+        secretKeyRef:
+          name: cart-service-kafka-password
+          key: password
   authorization:
     type: simple
     acls:

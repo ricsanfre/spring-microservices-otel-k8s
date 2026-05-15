@@ -9,6 +9,7 @@ resources:
   - configmap.yaml
   - deployment.yaml
   - service.yaml
+  - external-secrets.yaml
 
 labels:
   - pairs:

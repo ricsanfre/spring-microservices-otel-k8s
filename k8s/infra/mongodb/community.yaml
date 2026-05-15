@@ -2,21 +2,11 @@
 # Single replica set with two databases (one per service).
 # Namespace: mongodb
 #
+# Prerequisites: credential secrets are created by ESO ExternalSecrets
+# (k8s/infra/eso/external-secrets-mongodb.yaml) — apply k8s/infra/eso first.
+#
 # Apply:
 #   kubectl apply -f k8s/infra/mongodb/community.yaml
----
-# Credentials secret — override before applying:
-#   kubectl create secret generic mongodb-admin-secret \
-#     --from-literal=password=<CHANGE_ME> \
-#     --namespace mongodb --dry-run=client -o yaml | kubectl apply -f -
-apiVersion: v1
-kind: Secret
-metadata:
-  name: mongodb-admin-secret
-  namespace: mongodb
-type: Opaque
-stringData:
-  password: "change-me"
 ---
 apiVersion: mongodbcommunity.mongodb.com/v1
 kind: MongoDBCommunity
@@ -64,32 +54,3 @@ spec:
 
   additionalMongodConfig:
     storage.wiredTiger.engineConfig.journalCompressor: snappy
-
----
-# Per-service credential secrets — override before applying
-apiVersion: v1
-kind: Secret
-metadata:
-  name: mongodb-products-secret
-  namespace: mongodb
-type: Opaque
-stringData:
-  password: "change-me"
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: mongodb-reviews-secret
-  namespace: mongodb
-type: Opaque
-stringData:
-  password: "change-me"
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: mongodb-notifications-secret
-  namespace: mongodb
-type: Opaque
-stringData:
-  password: "change-me"

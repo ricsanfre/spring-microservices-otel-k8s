@@ -40,39 +40,38 @@ Installs via Helm / kubectl:
 | MongoDB Community | `mongodb` | Helm (`mongodb/community-operator`) |
 | Keycloak Operator | `keycloak` | `kubectl apply -k` (no Helm chart) |
 | OpenTelemetry Operator | `monitoring` | Helm (`open-telemetry/opentelemetry-operator`) |
+| External Secrets Operator | `external-secrets` | Helm (`external-secrets/external-secrets`) |
 
 Keycloak Operator version is controlled by `KEYCLOAK_OPERATOR_VERSION` (default `26.6.1`).
 
 ---
 
-### Create required secrets
+### Secrets management (External Secrets Operator)
 
-Secrets are not committed to git. Create them before running `make k8s-infra`:
+All Kubernetes Secrets are managed by **External Secrets Operator (ESO)** using a
+`ClusterSecretStore` backed by the **Fake provider**.  The Fake provider stores
+credential values directly inside `k8s/infra/eso/cluster-secret-store.yaml` — no
+external vault is required for local staging.
+
+**Before the first deploy**, replace every `changeme` placeholder in
+[k8s/infra/eso/cluster-secret-store.yaml](infra/eso/cluster-secret-store.yaml) with
+real values.  Pay special attention to:
+
+| Path in store | Notes |
+|---|---|
+| `/ecommerce/frontend-service.AUTH_SECRET` | Must be a random base64 string: `openssl rand -base64 32` |
+| All `password` fields | Use strong passwords in shared environments |
+
+ESO is installed and ExternalSecrets are applied as the first step of `make k8s-infra`.
+Secrets are available in their target namespaces before any dependent operator CR
+(CNPG, Strimzi, MongoDB Community, Keycloak Operator) is applied.
 
 ```bash
-# PostgreSQL superuser (CNPG bootstrap)
-kubectl create secret generic postgres-superuser-secret \
-  --from-literal=username=postgres --from-literal=password=<CHANGE_ME> \
-  --namespace postgres
+# Install ESO operator + apply ClusterSecretStore + ExternalSecrets manually:
+make k8s-infra-eso
 
-# Keycloak admin + DB credentials
-kubectl create secret generic keycloak-admin-secret \
-  --from-literal=username=admin --from-literal=password=<CHANGE_ME> \
-  --namespace keycloak
-kubectl create secret generic keycloak-db-secret \
-  --from-literal=username=keycloak_owner --from-literal=password=<CHANGE_ME> \
-  --namespace keycloak
-
-# MongoDB per-service credentials
-kubectl create secret generic mongodb-reviews-secret \
-  --from-literal=password=<CHANGE_ME> --namespace mongodb
-kubectl create secret generic mongodb-notifications-secret \
-  --from-literal=password=<CHANGE_ME> --namespace mongodb
-
-# Grafana admin credentials
-kubectl create secret generic grafana-admin-secret \
-  --from-literal=username=admin --from-literal=password=<CHANGE_ME> \
-  --namespace monitoring
+# Verify all ExternalSecrets synced successfully:
+kubectl get externalsecret --all-namespaces
 ```
 
 ---
@@ -86,6 +85,7 @@ make k8s-infra
 Or deploy each component individually:
 
 ```bash
+make k8s-infra-eso             # ESO operator + ClusterSecretStore + all ExternalSecrets
 make k8s-infra-cert-manager    # self-signed CA issuers + *.local.test wildcard cert
 make k8s-infra-postgres        # CNPG PostgreSQL cluster + per-service databases
 make k8s-infra-mongodb         # MongoDB replica set
@@ -154,6 +154,15 @@ k8s/
 │   └── otel-collector/             ← Kustomize app — OpenTelemetryCollector CR
 │       ├── kustomization.yaml
 │       └── collector.yaml              ← OTLP fan-out → Tempo, Loki, Mimir
+├── infra/eso/                          ← Kustomize app — External Secrets Operator resources
+│   ├── kustomization.yaml
+│   ├── cluster-secret-store.yaml       ← ClusterSecretStore (Fake provider — all creds inline)
+│   ├── external-secrets-postgres.yaml  ← ExternalSecrets → postgres namespace
+│   ├── external-secrets-keycloak.yaml  ← ExternalSecrets → keycloak namespace
+│   ├── external-secrets-mongodb.yaml   ← ExternalSecrets → mongodb namespace
+│   ├── external-secrets-kafka.yaml     ← ExternalSecrets → kafka namespace (Strimzi bootstrap)
+│   ├── external-secrets-monitoring.yaml← ExternalSecrets → monitoring namespace
+│   └── external-secrets-ecommerce.yaml ← ExternalSecrets → e-commerce namespace
 ├── envoy-gateway/                      ← Kustomize app — Gateway API resources
 │   ├── kustomization.yaml
 │   ├── gateway-class.yaml

@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# External Secrets Operator — ClusterSecretStore (Fake provider)
+# Cluster-scoped; no namespace needed.
+#
+# ExternalSecrets are co-located with each application's kustomize package:
+#   k8s/infra/postgres/external-secrets.yaml
+#   k8s/infra/keycloak/external-secrets.yaml
+#   k8s/infra/mongodb/external-secrets.yaml
+#   k8s/infra/kafka/external-secrets.yaml
+#   k8s/infra/monitoring/external-secrets.yaml
+#   k8s/apps/<service>/base/external-secrets.yaml
+#
+# Prerequisites: ESO operator must already be installed (make k8s-eso-helm)
+#
+# Apply:
+#   kubectl apply -k k8s/infra/eso
+resources:
+  - cluster-secret-store.yaml

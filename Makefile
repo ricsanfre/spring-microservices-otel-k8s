@@ -50,6 +50,7 @@ REVIEWS_SERVICE_CLIENT_SECRET ?= reviews-service-secret
         k8s-namespaces k8s-keycloak-operator \
 		k8s-postgres-secret k8s-keycloak-secret k8s-mongodb-secrets k8s-grafana-secret k8s-frontend-service-secret \
 		k8s-us-secret k8s-ps-secret k8s-cs-secret k8s-os-secret k8s-rvs-secret k8s-ns-secret k8s-secrets \
+		k8s-eso-helm k8s-infra-eso \
 		k8s-cert-manager-helm k8s-envoy-gateway-helm k8s-strimzi-operator-helm k8s-cnpg-operator-helm k8s-mongodb-operator-helm k8s-otel-operator-helm \
         k8s-infra k8s-infra-cert-manager k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey \
         k8s-infra-kafka k8s-infra-keycloak k8s-infra-envoy-gateway k8s-infra-monitoring k8s-infra-otel-collector k8s-up \
@@ -484,12 +485,25 @@ k8s-keycloak-operator: ## Install Keycloak Operator via Kustomize (version contr
 	    | sed 's|/26\.6\.1/|/$(KEYCLOAK_OPERATOR_VERSION)/|g' \
 	    | kubectl apply -f -
 
+k8s-eso-helm: ## Install External Secrets Operator via Helm
+	@echo "── External Secrets Operator ───────────────────────────────────────────────────────"
+	helm repo add external-secrets https://charts.external-secrets.io --force-update
+	helm upgrade --install external-secrets external-secrets/external-secrets \
+	    --namespace external-secrets --create-namespace \
+	    --version 0.14.0 \
+	    --values k8s/helm/eso-values.yaml \
+	    --wait
+
+k8s-infra-eso: k8s-eso-helm ## Deploy ClusterSecretStore (Fake provider) — ExternalSecrets live with each component
+	kubectl apply -k k8s/infra/eso
+	@echo "ClusterSecretStore applied. ExternalSecrets are deployed together with each infra/app component."
+
 k8s-infra-cert-manager: k8s-cert-manager-helm ## Deploy cert-manager issuers + wildcard TLS certificate
 	kubectl apply -k k8s/infra/cert-manager
 	@echo "Waiting for local-test-ca-issuer to be Ready..."
 	kubectl wait --for=condition=ready clusterissuer/local-test-ca-issuer --timeout=120s
 
-k8s-infra-postgres: k8s-cnpg-operator-helm k8s-postgres-secret## Deploy PostgreSQL cluster via CNPG operator
+k8s-infra-postgres: k8s-cnpg-operator-helm ## Deploy PostgreSQL cluster via CNPG operator
 	kubectl apply -k k8s/infra/postgres
 
 k8s-infra-mongodb: k8s-mongodb-operator-helm ## Deploy MongoDB replica set via Community operator
@@ -505,6 +519,8 @@ k8s-infra-envoy-gateway: k8s-envoy-gateway-helm ## Deploy Envoy Gateway resource
 	kubectl apply -k k8s/envoy-gateway
 
 k8s-infra-monitoring: ## Deploy observability stack: kube-prometheus-stack + Tempo + Loki (monolithic, emptyDir)
+	@echo "── Grafana ExternalSecret (admin credentials) ───────────────────────"
+	kubectl apply -k k8s/infra/monitoring
 	@echo "── kube-prometheus-stack (Prometheus + Grafana) ────────────────────"
 	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
 	helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack \
@@ -529,7 +545,7 @@ k8s-infra-otel-collector: k8s-otel-operator-helm ## Deploy OpenTelemetry Collect
 k8s-infra-valkey: ## Deploy Valkey (Redis-compatible cache) via plain Deployment
 	kubectl apply -k k8s/infra/valkey
 
-k8s-infra: k8s-namespaces k8s-secrets k8s-infra-cert-manager k8s-infra-envoy-gateway k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey k8s-infra-kafka k8s-infra-keycloak k8s-infra-monitoring k8s-infra-otel-collector ## Deploy all infrastructure resources (cert-manager, postgres, mongodb, valkey, kafka, keycloak, envoy-gateway, monitoring, otel-collector)
+k8s-infra: k8s-namespaces k8s-infra-eso k8s-infra-cert-manager k8s-infra-envoy-gateway k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey k8s-infra-kafka k8s-infra-keycloak k8s-infra-monitoring k8s-infra-otel-collector ## Deploy all infrastructure resources (eso, cert-manager, postgres, mongodb, valkey, kafka, keycloak, envoy-gateway, monitoring, otel-collector)
 
 k8s-up: k3d-create k8s-infra ## Full staging environment setup (create cluster + install operators + deploy infra)
 # After k8s-up, push images with k8s-*-image targets (GITHUB_OWNER=<your-username>)

@@ -1,0 +1,42 @@
+# External Secrets Operator — Helm values
+# Chart: external-secrets/external-secrets  (https://charts.external-secrets.io)
+#
+# Install / upgrade:
+#   helm repo add external-secrets https://charts.external-secrets.io --force-update
+#   helm upgrade --install external-secrets external-secrets/external-secrets \
+#     --namespace external-secrets --create-namespace \
+#     --version 0.14.0 \
+#     --values k8s/helm/eso-values.yaml \
+#     --wait
+
+# Install CRDs as part of the Helm release
+installCRDs: true
+
+replicaCount: 1
+
+# Resource limits sized for a laptop staging cluster
+resources:
+  requests:
+    cpu: "50m"
+    memory: "64Mi"
+  limits:
+    cpu: "200m"
+    memory: "128Mi"
+
+webhook:
+  resources:
+    requests:
+      cpu: "25m"
+      memory: "32Mi"
+    limits:
+      cpu: "100m"
+      memory: "64Mi"
+
+certController:
+  resources:
+    requests:
+      cpu: "25m"
+      memory: "32Mi"
+    limits:
+      cpu: "100m"
+      memory: "64Mi"

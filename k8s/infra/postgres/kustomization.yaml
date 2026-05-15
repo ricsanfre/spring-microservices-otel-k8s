@@ -1,12 +1,11 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# PostgreSQL — CNPG Cluster + per-service Database CRs
+# PostgreSQL — CNPG Cluster + per-service Database CRs + ExternalSecrets
 # Namespace: postgres
 #
-# Prerequisites:
-#   kubectl create secret generic postgres-superuser-secret \
-#     --from-literal=username=postgres --from-literal=password=<CHANGE_ME> \
-#     --namespace postgres
+# Prerequisites: ESO operator + ClusterSecretStore must be installed first
+# (make k8s-eso-helm && kubectl apply -k k8s/infra/eso)
 resources:
   - cluster.yaml
   - databases.yaml
+  - external-secrets.yaml
