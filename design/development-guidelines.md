@@ -1933,7 +1933,7 @@ class OrderServiceIntegrationTest {
     @Container
     @ServiceConnection
     static PostgreSQLContainer<?> postgres =
-        new PostgreSQLContainer<>("postgres:16-alpine");
+        new PostgreSQLContainer<>("postgres:18-alpine");
 
     @Autowired TestRestTemplate restTemplate;
 
@@ -1955,7 +1955,7 @@ class ProductServiceIntegrationTest {
 
     @Container
     @ServiceConnection
-    static MongoDBContainer mongo = new MongoDBContainer("mongo:7");
+    static MongoDBContainer mongo = new MongoDBContainer("mongo:8");
 
     @Autowired TestRestTemplate restTemplate;
 

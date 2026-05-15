@@ -37,7 +37,7 @@ services:
 
   # ── Shared databases ────────────────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     profiles: [infra]
     environment:
       POSTGRES_USER: postgres
@@ -47,7 +47,7 @@ services:
       - "5432:5432"
     volumes:
       - ./docker/postgres:/docker-entrypoint-initdb.d:ro   # runs init-databases.sh on first start
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql               # pg18+: data stored in /var/lib/postgresql/18/data
     networks: [e-commerce]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -57,7 +57,7 @@ services:
       start_period: 10s
 
   mongo:
-    image: mongo:7
+    image: mongo:8
     profiles: [infra]
     ports:
       - "27017:27017"
@@ -105,7 +105,7 @@ services:
   #
   # SCRAM users are created by the kafka-init service after the broker is healthy.
   kafka:
-    image: apache/kafka:4.1.2
+    image: apache/kafka:4.2.0
     profiles: [infra]
     ports:
       - "9092:9092"   # APP — SASL_PLAINTEXT for microservices / host JARs
@@ -148,7 +148,7 @@ services:
   # Connects via the INTERNAL (PLAINTEXT) listener — no credentials required.
   # Set *_KAFKA_PASSWORD env vars to override dev-default passwords.
   kafka-init:
-    image: apache/kafka:4.1.2
+    image: apache/kafka:4.2.0
     profiles: [infra]
     depends_on:
       kafka:
@@ -165,7 +165,7 @@ services:
 
   # ── IAM ─────────────────────────────────────────────────────────────────────
   keycloak:
-    image: quay.io/keycloak/keycloak:26.0
+    image: quay.io/keycloak/keycloak:26.6
     profiles: [auth]
     command: start-dev --import-realm
     environment:

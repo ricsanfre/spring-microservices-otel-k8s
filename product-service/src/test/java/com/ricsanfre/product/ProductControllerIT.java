@@ -44,7 +44,7 @@ class ProductControllerIT {
 
     @Container
     @ServiceConnection
-    static MongoDBContainer mongo = new MongoDBContainer("mongo:7");
+    static MongoDBContainer mongo = new MongoDBContainer("mongo:8");
 
     @Autowired
     MockMvc mockMvc;

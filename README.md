@@ -21,16 +21,16 @@ For coding standards and implementation patterns see [design/development-guideli
 | Layer | Technology |
 |-------|-----------|
 | **Backend language / runtime** | Java 25 (Temurin) |
-| **Backend framework** | Spring Boot 4.0 |
+| **Backend framework** | Spring Boot 4.0.6 |
 | **Build** | Maven 3.9 (multi-module) |
 | **Frontend** | Next.js 16, React 19, TypeScript 6 |
 | **Frontend auth** | Auth.js v5 (next-auth) — OIDC / Authorization Code + PKCE |
-| **IAM** | Keycloak 26 — OAuth2 / OIDC, JWT RS256 |
+| **IAM** | Keycloak 26.6 — OAuth2 / OIDC, JWT RS256 |
 | **API gateway** | Envoy Gateway (Kubernetes) |
-| **Relational database** | PostgreSQL 16 (CNPG operator in k8s) |
-| **Document database** | MongoDB 7 (Community operator in k8s) |
+| **Relational database** | PostgreSQL 18 (CNPG operator in k8s) |
+| **Document database** | MongoDB 8 (Community operator in k8s) |
 | **Cache / cart store** | Valkey 8 (Redis-compatible) |
-| **Messaging** | Apache Kafka 4.1 (Strimzi operator in k8s) |
+| **Messaging** | Apache Kafka 4.2 (Strimzi operator in k8s) |
 | **Observability** | OpenTelemetry SDK + Grafana LGTM (Loki · Tempo · Mimir · Grafana) |
 | **Container images** | Jib (Maven plugin) → `ghcr.io` |
 | **Kubernetes distribution** | k3d (k3s in Docker) for local staging |
@@ -108,11 +108,11 @@ For local development all infrastructure runs via Docker Compose. Services run d
 | Container | Image | Host Port | Compose Profile | Description |
 |-----------|-------|-----------|-----------------|-------------|
 | `grafana-lgtm` | `grafana/otel-lgtm:latest` | 3000, 4317, 4318 | `observability` | Observability stack (Loki, Tempo, Prometheus, Grafana) |
-| `postgres` | `postgres:16-alpine` | 5432 | `infra` | Single PostgreSQL instance — one database per service |
-| `mongo` | `mongo:7` | 27017 | `infra` | Single MongoDB instance — one database per service |
+| `postgres` | `postgres:18-alpine` | 5432 | `infra` | Single PostgreSQL instance — one database per service |
+| `mongo` | `mongo:8` | 27017 | `infra` | Single MongoDB instance — one database per service |
 | `valkey` | `valkey/valkey:8-alpine` | 6379 | `infra` | Valkey cache — shopping carts (TTL 7 days) |
-| `kafka` | `apache/kafka:4.1.2` | 9092 | `infra` | Apache Kafka — order events (`order.confirmed.v1`) |
-| `keycloak` | `quay.io/keycloak/keycloak:26.0` | 8180 | `auth` | OAuth2 / OIDC IAM — realm `e-commerce` auto-imported |
+| `kafka` | `apache/kafka:4.2.0` | 9092 | `infra` | Apache Kafka — order events (`order.confirmed.v1`) |
+| `keycloak` | `quay.io/keycloak/keycloak:26.6` | 8180 | `auth` | OAuth2 / OIDC IAM — realm `e-commerce` auto-imported |
 
 > **Profiles:** `infra` starts the shared databases (PostgreSQL + MongoDB + Valkey + Kafka); `auth` starts Keycloak; `observability` starts the Grafana LGTM stack. All three are started together via `make infra-up`.
 
