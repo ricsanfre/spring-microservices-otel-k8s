@@ -131,7 +131,7 @@ Commit the release configurations and push a Git tag. This action triggers the C
 git add .
 git commit -m "chore: release version 1.0.0"
 git tag -a v1.0.0 -m "Release version 1.0.0"
-git push origin main --tags
+git push origin master --tags
 ```
 
 ### Step 3: Update GitOps Overlays (Manual or Renovate-Driven)
