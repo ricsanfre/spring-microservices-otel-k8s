@@ -185,8 +185,8 @@ jobs:
       - name: Extract Next.js Package Version
         id: get_version
         run: |
-          VERSION=\$(node -p "require('./frontend-service/package.json').version")
-          echo "pkg_version=\$VERSION" >> \$GITHUB_OUTPUT
+          VERSION=$(node -p "require('./frontend-service/package.json').version")
+          echo "pkg_version=$VERSION" >> $GITHUB_OUTPUT
 
       # ── Publish: Docker multi-stage build (Dockerfile) ────────────────────
       - name: Log in to ghcr.io
