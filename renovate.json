@@ -1,6 +1,61 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
+  "extends": ["config:recommended"],
+
+  "flux": {
+    "fileMatch": ["^gitops/.*\\.yaml$"]
+  },
+
+  "kubernetes": {
+    "fileMatch": ["^gitops/infrastructure/.*\\.yaml$"]
+  },
+
+  "packageRules": [
+    {
+      "description": "App images — allow only clean SemVer releases; filter out -SNAPSHOT, SHA, and other non-release strings",
+      "matchPackagePatterns": ["^ghcr\\.io/ricsanfre/spring-microservices-otel-k8s/"],
+      "versioning": "semver",
+      "allowedVersions": "/^[0-9]+\\.[0-9]+\\.[0-9]+$/",
+      "automerge": false
+    },
+    {
+      "description": "Skip HelmRelease range constraints (>=x.y.z) — Flux HelmController resolves these natively; Renovate must not touch them",
+      "matchManagers": ["flux"],
+      "matchCurrentVersion": "/^>=/",
+      "enabled": false
+    },
+    {
+      "description": "k3d cluster image — manually managed; Renovate must not open PRs for it",
+      "matchPackageNames": ["rancher/k3s"],
+      "enabled": false
+    },
+    {
+      "description": "Infrastructure Helm charts, OCI source tags, and inline images — no automerge; require manual review before merging",
+      "matchManagers": ["flux", "kubernetes"],
+      "automerge": false
+    }
+  ],
+
+  "customManagers": [
+    {
+      "description": "App image newTag in Kustomize staging overlays (see VERSIONING.md §4)",
+      "customType": "regex",
+      "fileMatch": ["^gitops/apps/.+/overlays/.+/kustomization\\.yaml$"],
+      "matchStrings": [
+        "-\\s+name:\\s+(?<depName>ghcr\\.io/ricsanfre/spring-microservices-otel-k8s/[a-zA-Z0-9-]+)\\s+newTag:\\s+\"(?<currentValue>[^\"]+)\""
+      ],
+      "versioningTemplate": "semver"
+    },
+    {
+      "description": "Keycloak Operator version embedded in GitHub raw manifest URLs",
+      "customType": "regex",
+      "fileMatch": ["^gitops/infrastructure/keycloak/base/operator/kustomization\\.yaml$"],
+      "matchStrings": [
+        "keycloak-k8s-resources/(?<currentValue>\\d+\\.\\d+\\.\\d+)/"
+      ],
+      "depNameTemplate": "keycloak/keycloak-k8s-resources",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver"
+    }
   ]
 }
