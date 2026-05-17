@@ -1,5 +1,5 @@
 {
-  "$schema": "https://renovatebot.com",
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
 
   "flux": {
@@ -15,7 +15,7 @@
       "description": "App images — allow only clean SemVer releases; filter out -SNAPSHOT, SHA, and other non-release strings",
       "matchPackagePatterns": ["^ghcr\\.io/ricsanfre/spring-microservices-otel-k8s/"],
       "versioning": "semver",
-      "allowedVersions": "${currentValue}"
+      "allowedVersions": "!/-/"
     },
     {
       "description": "Skip HelmRelease range constraints (>=x.y.z) — Flux HelmController resolves these natively; Renovate must not touch them",
