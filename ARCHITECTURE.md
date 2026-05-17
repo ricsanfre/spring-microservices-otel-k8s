@@ -691,72 +691,61 @@ flowchart TD
 | `valkey` | Valkey single-instance Deployment (cart cache) |
 | `monitoring` | OTel Operator, OTel Collector, Tempo, Loki, Prometheus + Grafana (kube-prom-stack) |
 
-### `k8s/` Directory Layout
+### `gitops/` Directory Layout
+
+All Kubernetes manifests live in `gitops/` and are continuously reconciled by Flux CD. The cluster entry point is `gitops/clusters/staging/`; changes are deployed by pushing to `master`.
 
 ```
-k8s/
-├── k3d-cluster.yaml                    ← k3d cluster definition (1 server, 2 agents)
-├── namespaces.yaml                     ← all namespaces
-├── helm/                               ← Helm values for each operator
-│   ├── cert-manager-values.yaml
-│   ├── envoy-gateway-values.yaml
-│   ├── strimzi-operator-values.yaml
-│   ├── cnpg-operator-values.yaml
-│   ├── mongodb-operator-values.yaml
-│   ├── keycloak-operator-values.yaml   ← install notes (no Helm chart)
-│   ├── kube-prometheus-stack-values.yaml  ← Prometheus + Grafana (kube-prometheus-stack)
-│   ├── tempo-values.yaml              ← Grafana Tempo monolithic (emptyDir)
-│   ├── loki-values.yaml               ← Grafana Loki monolithic (emptyDir, canary+cache disabled)
-│   └── otel-operator-values.yaml      ← OpenTelemetry Operator
-├── infra/                              ← Kustomize apps — operator-managed CRs
+gitops/
+├── clusters/
+│   └── staging/
+│       ├── flux-instance.yaml              ← FluxInstance CR (Flux Operator bootstrap)
+│       ├── cluster-settings.yaml           ← CLUSTER_DOMAIN=local.test, ENVIRONMENT=staging
+│       ├── k3d-cluster.yaml                ← k3d cluster definition
+│       ├── infra-security.yaml             ← Flux Kustomization: ESO stores
+│       ├── infra-routing.yaml              ← Flux Kustomization: cert-manager + envoy-gateway
+│       ├── infra-monitoring.yaml           ← Flux Kustomization: observability
+│       ├── infra-backends.yaml             ← Flux Kustomization: databases + kafka + keycloak + valkey
+│       └── core-apps.yaml                  ← Flux Kustomization: all app services
+├── infrastructure/
+│   ├── environments/staging/
+│   │   ├── routing/kustomization.yaml      ← aggregates: namespaces + cert-manager + envoy-gateway
+│   │   └── backends/kustomization.yaml     ← aggregates: databases + kafka + keycloak + valkey
+│   ├── namespaces/namespaces.yaml
 │   ├── cert-manager/
-│   │   ├── kustomization.yaml
-│   │   ├── cluster-issuer.yaml         ← self-signed bootstrap issuer + CA ClusterIssuer
-│   │   └── wildcard-certificate.yaml   ← *.local.test wildcard TLS cert
-│   ├── postgres/
-│   │   ├── kustomization.yaml
-│   │   ├── cluster.yaml                ← CNPG Cluster CR
-│   │   └── databases.yaml              ← CNPG Database CRs (one per service)
-│   ├── mongodb/
-│   │   ├── kustomization.yaml
-│   │   └── community.yaml              ← MongoDBCommunity CR
+│   │   ├── base/                           ← HelmRelease + HelmRepository
+│   │   └── overlays/staging/               ← self-signed ClusterIssuer + *.${CLUSTER_DOMAIN} wildcard cert
+│   ├── envoy-gateway/
+│   │   ├── base/                           ← OCIRepository + HelmRelease + GatewayClass
+│   │   └── overlays/staging/               ← Gateway + HTTPRoutes + SecurityPolicy
+│   ├── eso-stores/
+│   │   ├── base/                           ← HelmRelease + HelmRepository
+│   │   └── overlays/staging/               ← Fake ClusterSecretStore
+│   ├── databases/
+│   │   ├── base/                           ← CNPG + MongoDB HelmReleases
+│   │   └── overlays/staging/               ← CNPG Cluster CR + MongoDBCommunity CR + ExternalSecrets
 │   ├── kafka/
-│   │   ├── kustomization.yaml
-│   │   ├── cluster.yaml                ← Strimzi Kafka CR (KRaft mode)
-│   │   └── topics.yaml                 ← KafkaTopic CRs
+│   │   ├── base/                           ← Strimzi HelmRelease
+│   │   └── overlays/staging/               ← Kafka CR (1-node KRaft)
 │   ├── keycloak/
-│   │   ├── kustomization.yaml
-│   │   ├── operator/                   ← Kustomize app — Keycloak Operator (CRDs + Deployment)
-│   │   │   └── kustomization.yaml
-│   │   ├── keycloak.yaml               ← Keycloak CR (HTTP only; strict: false for direct cluster-internal access)
-│   │   ├── realm-import.yaml           ← KeycloakRealmImport CR
-│   │   └── httproute.yaml              ← HTTPRoute keycloak.local.test → keycloak-service:8080
-│   ├── otel-collector/
-│   │   ├── kustomization.yaml
-│   │   └── collector.yaml              ← OpenTelemetryCollector CR (OTLP → Tempo/Loki/Prometheus)
-│   └── valkey/
-│       ├── kustomization.yaml
-│       ├── deployment.yaml             ← single-replica Valkey Deployment (namespace: valkey)
-│       └── service.yaml                ← ClusterIP Service :6379
-├── envoy-gateway/                      ← Kustomize app — Gateway API resources
-│   ├── kustomization.yaml
-│   ├── gateway-class.yaml
-│   ├── gateway.yaml                    ← HTTP redirect + HTTPS TLS termination
-│   ├── httproutes.yaml                 ← HTTPRoute per service (frontend has no SecurityPolicy)
-│   └── security-policy.yaml           ← JWT SecurityPolicy (Keycloak JWKS)
-└── apps/                               ← Kustomize apps — business services
-    ├── frontend-service/
-    │   ├── base/                       ← Deployment, Service, Secret ref (AUTH_SECRET, AUTH_KEYCLOAK_SECRET)
-    │   └── overlays/
-    │       └── staging/               ← image tag patch + AUTH_KEYCLOAK_ISSUER env
-    ├── user-service/
-    │   ├── base/                       ← Deployment, Service, ConfigMap, ServiceAccount, RBAC
-    │   └── overlays/
-    │       └── staging/               ← image tag patch + env-specific config
-    └── cart-service/
-        ├── base/                       ← Deployment, Service, ConfigMap, ServiceAccount
-        └── overlays/
-            └── staging/               ← image tag patch + env-specific config
+│   │   ├── base/                           ← OCIRepository (keycloak-k8s-resources)
+│   │   └── overlays/staging/               ← Keycloak CR + Database CR + HTTPRoute + ExternalSecret
+│   ├── valkey/
+│   │   ├── base/                           ← Deployment + Service
+│   │   └── overlays/staging/               ← staging overlay (no changes from base)
+│   └── observability/
+│       ├── base/                           ← kube-prometheus-stack + OTel HelmReleases
+│       └── overlays/staging/               ← Grafana ExternalSecret + OTel Collector CR
+└── apps/
+    ├── core-config/
+    │   ├── base/                           ← KeycloakRealmImport + KafkaTopic/User CRs + CNPG Database CRs
+    │   └── overlays/staging/
+    ├── user-service/ product-service/ cart-service/ ...
+    │   ├── base/                           ← Deployment + Service + ConfigMap + ServiceAccount + ExternalSecret
+    │   └── overlays/staging/               ← image tag patch + env-specific config
+    └── frontend-service/
+        ├── base/
+        └── overlays/staging/
 ```
 
 ### Envoy Gateway Routing
@@ -766,7 +755,7 @@ Envoy Gateway implements the [Kubernetes Gateway API](https://gateway-api.sigs.k
 - **HTTP (:80)** — redirects all traffic to HTTPS
 - **HTTPS (:443)** — terminates TLS and routes to services in the `e-commerce` namespace
 
-JWT validation is enforced per `HTTPRoute` via a `SecurityPolicy` pointing to the Keycloak JWKS endpoint at `https://keycloak.local.test/realms/e-commerce/protocol/openid-connect/certs`. Each business service has a dedicated `HTTPRoute` matching its `/api/v1/<resource>` prefix.
+JWT validation is enforced per `HTTPRoute` via a `SecurityPolicy` pointing to the Keycloak JWKS endpoint at `https://keycloak.${CLUSTER_DOMAIN}/realms/e-commerce/protocol/openid-connect/certs`. Each business service has a dedicated `HTTPRoute` matching its `/api/v1/<resource>` prefix.
 
 ### Service-to-Service Calls
 
@@ -778,7 +767,7 @@ Services call each other using plain Kubernetes Service DNS (`http://service-nam
 
 PostgreSQL is managed by the **CloudNativePG (CNPG) operator**. The operator watches Kubernetes Custom Resources and provisions a real PostgreSQL cluster, per-service databases, and application roles — all declaratively.
 
-#### 1. Cluster CR (`k8s/infra/postgres/cluster.yaml`)
+#### 1. Cluster CR (`gitops/infrastructure/databases/overlays/staging/`)
 
 A `postgresql.cnpg.io/v1 / Cluster` resource named `postgres` is created in the `postgres` namespace. CNPG provisions 1 primary + 1 replica and automatically creates two stable Kubernetes Services:
 
@@ -809,7 +798,7 @@ managed:
 
 The referenced Secrets must exist in the `postgres` namespace **before** the Cluster CR is applied (or in the same `kubectl apply` batch).
 
-#### 3. Database CRs (`k8s/infra/postgres/databases.yaml`)
+#### 3. Database CRs (`gitops/apps/core-config/base/`)
 
 One `postgresql.cnpg.io/v1 / Database` CR is defined per service. CNPG executes the equivalent of `CREATE DATABASE ... OWNER ...` inside the cluster.
 
@@ -836,7 +825,7 @@ In Kubernetes those variables are injected from two sources in the service `Depl
 
 | Source | Values | Where defined |
 |---|---|---|
-| `ConfigMap` (`user-service-config`) | `DB_HOST=postgres-rw.postgres.svc.cluster.local`, `DB_PORT=5432`, `DB_NAME=users` | `k8s/apps/user-service/base/configmap.yaml` |
+| `ConfigMap` (`user-service-config`) | `DB_HOST=postgres-rw.postgres.svc.cluster.local`, `DB_PORT=5432`, `DB_NAME=users` | `gitops/apps/user-service/base/configmap.yaml` |
 | `Secret` (`user-service-db-secret`) | `DB_USER`, `DB_PASSWORD` | Copied from `users-db-secret` (same Secret CNPG uses for the role) |
 
 `DB_HOST` is always set to the CNPG read-write Service so writes always reach the primary.

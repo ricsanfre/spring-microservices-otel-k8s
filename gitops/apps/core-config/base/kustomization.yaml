@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# core-config base — cross-service resources that are not owned by any single
+# application: Keycloak realm import Job, Kafka Topics, Kafka Users,
+# application database users, and shared ExternalSecrets for Kafka credentials.
+resources:
+  - databases.yaml
+  - external-secrets-kafka.yaml
+  - realm-import.yaml
+  - topics.yaml
+  - users.yaml

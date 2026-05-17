@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-settings
+  namespace: flux-system
+data:
+  # Staging k3d dev cluster — all externally-visible hostnames use *.local.test.
+  # Flux postBuild substitution injects ${CLUSTER_DOMAIN} into every reconciled
+  # manifest that references it (Envoy Gateway HTTPRoutes, cert-manager
+  # Certificate dnsNames, app ConfigMap external URLs, Keycloak redirectUris).
+  CLUSTER_DOMAIN: "local.test"
+  ENVIRONMENT: "staging"

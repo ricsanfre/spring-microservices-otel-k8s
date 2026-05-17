@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# ─────────────────────────────────────────────────────────────────────────────
+# Backends group aggregator — targeted by infra-backends Flux Kustomization
+#
+# Covers: CloudNativePG + MongoDB (databases), Strimzi Kafka, Keycloak,
+#         and Valkey (in-cluster Redis-compatible cache).
+#
+# The infra-backends Flux Kustomization carries dependsOn: infra-security,
+# which guarantees the ESO ClusterSecretStore is ready before any
+# ExternalSecret in these components is evaluated.
+# ─────────────────────────────────────────────────────────────────────────────
+resources:
+  # 1. Databases (CNPG + MongoDB) — needed by Keycloak and application services
+  - ../../../databases/overlays/staging
+  # 2. Kafka — needed by application services
+  - ../../../kafka/overlays/staging
+  # 3. Keycloak — depends on CNPG being ready
+  - ../../../keycloak/overlays/staging
+  # 4. Valkey — in-cluster Redis-compatible cache for cart-service
+  - ../../../valkey/overlays/staging

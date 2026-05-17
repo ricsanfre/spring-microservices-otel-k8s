@@ -1,20 +1,21 @@
 # Technical Proposal: Multi-Namespace GitOps Packaging with Flux CD and External Secrets Operator (ESO)
 
-This document details the architecture and deployment strategy for a Kubernetes application packaged using **Flux CD**, whose infrastructure dependencies (**CloudNativePG, Strimzi Kafka, MongoDB, Keycloak, Cert-Manager, and Envoy Gateway**) are managed via a service-separated infrastructure layer orchestrated through decoupled Flux dependencies.
+This document details the architecture and deployment strategy for a microservices application packaged using **Flux CD**, whose infrastructure dependencies (**CloudNativePG, Strimzi Kafka, MongoDB, Keycloak, Cert-Manager, and Envoy Gateway**) are managed via a service-separated infrastructure layer orchestrated through decoupled Flux dependencies, anonymous read-only HTTPS mirrors, and automated Semantic Versioning (SemVer) pull requests via Renovate Bot.
 
 ---
 
 ## 1. Architectural Principles
 
-* **Total Decoupling:** The application template never embeds raw infrastructure definitions or hardcoded credentials. It consumes endpoints via internal cluster DNS and credentials via injected secrets.
-* **Unified Service-Separated Infrastructure Layer:** All operator controllers and live instances are consolidated into a single `infrastructure/` directory organized by service. This eliminates separate platform layers and matches operator lifecycles directly with the services they manage.
-* **Application-Owned Business Resources:** Custom resources explicitly tied to the application's domain logic (**`KafkaTopic`**, **`KafkaUser`**, and **`KeycloakRealmImport`**) are strictly packaged inside the application layer to ensure an aligned lifecycle.
-* **Tokenless & Commitless GitOps (Flux Operator):** Cluster bootstrapping avoids traditional `flux bootstrap` commands. The control plane utilizes the modern **Flux Operator** and **`FluxInstance` CRD**. Cluster authentication relies natively on cluster-level machine identity (OIDC/SSH Deploy Keys), **completely eliminating GitHub Personal Access Tokens (PATs)** and automated Flux write-back commits.
+* **Total Decoupling:** Applications never embed raw infrastructure or hardcoded credentials; they consume endpoints via internal cluster DNS and keys via injected secrets.
+* **Unified Service-Separated Infrastructure Layer:** All operator controllers and live instances are consolidated inside a single `infrastructure/` directory organized strictly by service. This eliminates separate platform layers and matches operator lifecycles directly with the services they manage.
+* **Application-Owned Business Resources:** Custom resources explicitly tied to the application's domain logic (**`KafkaTopic`**, **`KafkaUser`**, and **`KeycloakRealmImport`**) are packaged inside the application layer to ensure an aligned lifecycle.
+* **Anonymous Read-Only HTTPS GitOps (Flux Operator):** Because the GitOps repository is public, cluster bootstrapping operates under a zero-credential constraint. The control plane utilizes the modern **Flux Operator** and **`FluxInstance` CRD** via an **anonymous HTTPS** connection. This completely removes the requirement for GitHub Personal Access Tokens (PATs), SSH keys, or basic authentication cluster secrets.
 * **Global Cluster Parameterization (Flux Post-Build Substitution):** Key cluster parameters (e.g., `CLUSTER_DOMAIN`, `ENVIRONMENT`) are defined once in a central cluster settings ConfigMap. Flux automatically substitutes these variables dynamically across all manifests using its post-build substitution engine.
-* **Decoupled Multi-Kustomization Pipeline:** To leverage Flux's native dependency engine and parallel execution, the continuous delivery process avoids large, monolithic manifests. Instead, it runs on distinct, specialized Flux `Kustomization` files linked via strict `dependsOn` arrays.
-* **Dual-Layer Kustomize Overlays:** Both infrastructure components and application logic are separated into environment-agnostic `base` layers and environment-specific `overlays` (`staging` and `production`) to maximize DRY compliance.
+* **Decoupled Multi-Kustomization Pipeline:** To leverage Flux's native dependency engine and parallel execution, the continuous delivery process runs on distinct, specialized Flux `Kustomization` files linked via strict `dependsOn` arrays, allowing non-dependent tasks to run concurrently.
+* **Dual-Layer Kustomize Overlays:** Both infrastructure services and application logic use clean `base` and `overlays/` (`staging`, `production`) directory footprints.
 * **Polymorphic Secret Provisioning:** The active environment overlay dictates the secret store backend. Staging provisions an isolated `Fake` provider, while Production securely mounts a **HashiCorp Vault** instance inside the ESO service directory.
-* **Ambient Service Mesh & Edge Routing (Production-Only):** Mutual TLS (mTLS) is strictly enforced in Production via **Istio Ambient Mesh (ztunnel)**. Traffic entering the cluster is managed by **Envoy Gateway**, which acts as the edge Ingress and routes traffic directly into the Ambient mesh. **Cert-Manager** automates public TLS termination at the Envoy edge.
+* **External Image Lifecycle via Renovate (Anti-SNAPSHOT & SemVer Rule):** To enforce immutability without granting write access to the cluster, image updates are managed via **Renovate Bot (Mend)**. Floating tags like `:latest` and active development tags containing `-SNAPSHOT` are prohibited. Renovate tracks `ghcr.io`, filters out volatile pre-releases, and opens structured Pull Requests directly in GitHub using Spring Boot strict Semantic Versioning (`>=1.0.0 <2.0.0`), keeping the cluster secure and declarative.
+* **Ambient Mesh & Edge Routing (Production-Only):** Mutual TLS (mTLS) is strictly enforced in Production via **Istio Ambient Mesh (ztunnel)**. Traffic entering the cluster is managed by **Envoy Gateway** (implementing the Kubernetes Gateway API), which acts as the edge Ingress and routes traffic directly into the Ambient mesh. **Cert-Manager** automates public TLS termination at the Envoy edge.
 * **Unified Telemetry Pipeline (Production-Only):** Observability in Production is standardized on the **OpenTelemetry (OTel) Operator** routing signals (Metrics, Logs, Traces) to a centralized backend stack managed by the **kube-prometheus-stack, Grafana Loki, and Grafana Tempo**.
 
 ---
@@ -22,9 +23,12 @@ This document details the architecture and deployment strategy for a Kubernetes 
 ## 2. GitOps Monorepo Directory Structure
 
 The repository utilizes a modular, component-driven architecture leveraging Kustomize bases and overlays across both service infrastructure and core applications:
-
 ```text
 📂 my-gitops-repo
+├── 📜 renovate.json             # Layer -2: External Dependency & SemVer Automation
+├── 📂 .github/                  # Layer -1: Continuous Integration Matrix
+│   └── 📂 workflows/
+│       └── ci.yaml              # Multi-Service path filter build & push
 ├── 📂 clusters/                 # Layer 0: Flux Operator Management & Variables
 │   ├── 📂 staging/
 │   │   ├── flux-instance.yaml   # Declares the Flux Instance for Staging
@@ -39,8 +43,11 @@ The repository utilizes a modular, component-driven architecture leveraging Kust
 │       ├── infra-backends.yaml  # Flux config for Databases, Kafka & Keycloak
 │       ├── infra-monitoring.yaml# Flux config for kube-prometheus & OTel
 │       └── core-apps.yaml       # Flux config for Business Applications
-│
+|
 ├── 📂 infrastructure/           # Layer 1: Service-Separated Infrastructure & Operators
+│   ├── 📂 environments/         # Coordination manifests for Flux
+│   │   ├── 📂 staging/
+│   │   └── 📂 production/
 │   ├── 📂 cert-manager/         # Cert-Manager Service Component
 │   ├── 📂 ingress-gateway/      # Envoy Gateway Service Component
 │   ├── 📂 eso-stores/           # External Secrets Component
@@ -48,19 +55,14 @@ The repository utilizes a modular, component-driven architecture leveraging Kust
 │   ├── 📂 messaging/            # Strimzi Kafka Component
 │   ├── 📂 keycloak/             # Keycloak Server Component
 │   └── 📂 observability/        # OTel & Prometheus Alerting Component
-│
+|
 └── 📂 apps/                     # Layer 2: Application Overlays Layout
-    └── 📂 core-app/
-        ├── 📂 base/             # Common application manifests & Business Resources
-        │   ├── deployment.yaml
-        │   ├── configmap.yaml   # Uses dynamic \${CLUSTER_DOMAIN} variables
-        │   ├── external-secrets.yaml
-        │   ├── kafka-topics.yaml 
-        │   ├── kafka-user.yaml   
-        │   └── keycloak-realm.yaml 
+    └── 📂 order-service/        # Replicated structure across all matrix microservices
+        ├── 📂 base/
         └── 📂 overlays/
-            ├── 📂 staging/      
-            └── 📂 production/   
+            └── 📂 staging/
+                ├── kustomization.yaml
+                └── network-policies.yaml
 ```
 
 ---
@@ -80,8 +82,8 @@ data:
   ENVIRONMENT: "production"
 ```
 
-### B. Declarative Flux Management via Flux Operator (`clusters/production/flux-instance.yaml`)
-The Flux Instance orchestrates synchronization without requiring developer-owned GitHub write tokens or PATs.
+### B. Declarative Anonymous HTTPS Flux Management (`clusters/production/flux-instance.yaml`)
+The control plane is configured to query the public repository over an anonymous HTTPS endpoint. Since the repository is public, no `secretRef` field is required.
 ```yaml
 apiVersion: fluxcd.controlplane.io/v1alpha1
 kind: FluxInstance
@@ -92,18 +94,14 @@ spec:
   distribution:
     version: "v2.x"
   gitRepository:
-    url: "ssh://git@://github.com"
+    url: "https://github.com" # Public HTTPS endpoint
     ref:
       branch: "main"
-    # References a cluster-level SSH deploy key secret (No individual GitHub PATs needed)
-    secretRef:
-      name: git-deploy-key 
+    # No secretRef needed due to anonymous public read access
 ```
 
 ### C. Parallel & Decoupled Kustomization Pipeline
-Instead of a single infrastructure step, the orchestration uses independent Flux `Kustomization` manifests. This approach allows **non-dependent tasks to run in parallel** (e.g., Monitoring and Ingress boot simultaneously) while enforcing that backend infrastructure blocks until its security prerequisites are healthy.
-
-All resources share the automated `postBuild` substitution from the global `cluster-settings` ConfigMap.
+Non-dependent tasks run concurrently to maximize performance. All resources share the automated `postBuild` substitution from the global `cluster-settings` ConfigMap.
 
 ```yaml
 # clusters/production/infra-routing.yaml
@@ -158,7 +156,6 @@ metadata:
   name: infra-backends
   namespace: flux-system
 spec:
-  # CRITICAL: Wait for ESO stores to exist so DB/Kafka operators can bootstrap secrets safely
   dependsOn:
     - name: infra-security
   interval: 10m
@@ -185,13 +182,12 @@ metadata:
   name: core-apps
   namespace: flux-system
 spec:
-  # CRITICAL: Application layer blocks until ALL infrastructure dependencies pass health checks
   dependsOn:
     - name: infra-backends
     - name: infra-routing
     - name: infra-monitoring
   interval: 5m
-  path: ./apps/core-app/overlays/production
+  path: ./apps/order-service/overlays/production
   prune: true
   postBuild:
     substituteFrom:
@@ -203,7 +199,7 @@ spec:
 
 ## 4. Parameterized Infrastructure Blueprint (Layer 1)
 
-### Ingress Gateway Component (`infrastructure/ingress-gateway/overlays/production/gateway.yaml`)
+### A. Envoy Ingress Gateway Component (`infrastructure/ingress-gateway/overlays/production/gateway.yaml`)
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -218,16 +214,14 @@ spec:
     - name: https
       protocol: HTTPS
       port: 443
-      hostname: "api.\${CLUSTER_DOMAIN}" # Extrapolated dynamically via postBuild engine
+      hostname: "api.\${CLUSTER_DOMAIN}" 
       tls:
         mode: Terminate
         certificateRefs:
-          - kind: Secret
-            name: api-gateway-tls-cert
-```
-
-#### Production Route Mapping (`infrastructure/ingress-gateway/overlays/production/http-routes.yaml`)
-```yaml
+        - kind: Secret
+          name: api-gateway-tls-cert
+---
+# infrastructure/ingress-gateway/overlays/production/http-routes.yaml
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -241,7 +235,7 @@ spec:
     - "api.\${CLUSTER_DOMAIN}"
   rules:
     - matches:
-        - path:
+        - path: 
             type: PathPrefix
             value: /
       backendRefs:
@@ -249,9 +243,7 @@ spec:
           port: 8080
 ```
 
----
-
-### B. ESO Secrets Component (`infrastructure/eso-stores/`)
+### B. ESO Secret Stores Component (`infrastructure/eso-stores/overlays/`)
 
 #### Staging Overlay (`infrastructure/eso-stores/overlays/staging/staging-fake-store.yaml`)
 ```yaml
@@ -290,11 +282,63 @@ spec:
             namespace: "flux-system"
 ```
 
+### C. Cloud Databases Components Blueprint (`infrastructure/databases/base/`)
+```yaml
+# infrastructure/databases/base/cnpg-cluster.yaml
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: prod-database
+  namespace: databases
+spec:
+  instances: 3
+  primaryUpdateStrategy: unsupervised
+  storage:
+    size: 10Gi
 ---
+# infrastructure/databases/base/mongo-cluster.yaml
+apiVersion: ://mongodb.com
+kind: MongoDBCommunity
+metadata:
+  name: prod-mongodb
+  namespace: databases
+spec:
+  members: 3
+  type: ReplicaSet
+  version: "6.0.5"
+  security:
+    authentication:
+      modes: [/SCRAM/]
+```
 
-### C. Observability & Alerting Component (`infrastructure/observability/`)
+### D. Messaging Infrastructure Component (`infrastructure/messaging/base/`)
+```yaml
+# infrastructure/messaging/base/kafka-cluster.yaml
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: my-kafka-cluster
+  namespace: messaging
+spec:
+  kafka:
+    version: 3.4.0
+    replicas: 3
+    listeners:
+      - name: plaintext # TLS is offloaded completely to Istio Ambient Mesh layer
+        port: 9092
+        type: internal
+        tls: false
+    config:
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+  zookeeper:
+    replicas: 3
+```
 
-#### Production Overlay (`infrastructure/observability/overlays/production/otel-collector.yaml`)
+### E. Observability & Alerting Component (`infrastructure/observability/overlays/production/`)
+
+#### OTel Collector Config (`infrastructure/observability/overlays/production/otel-collector.yaml`)
 ```yaml
 apiVersion: opentelemetry.io/v1alpha1
 kind: OpenTelemetryCollector
@@ -339,7 +383,7 @@ spec:
           exporters: [loki]
 ```
 
-#### Production Overlay (`infrastructure/observability/overlays/production/flux-eso-alerts.yaml`)
+#### Prometheus Alerting Rules (`infrastructure/observability/overlays/production/flux-eso-alerts.yaml`)
 ```yaml
 apiVersion: ://coreos.com
 kind: PrometheusRule
@@ -370,13 +414,13 @@ spec:
 
 ---
 
-## 5. Application Overlays Layer with Variables (Layer 2)
+## 6. Application Overlays Layer & Business Custom Resources (Layer 2)
 
-### A. The Core Base (`apps/core-app/base/`)
+### A. The Core Base (`apps/order-service/base/`)
 
 #### Application-Owned Kafka Custom Resources
 ```yaml
-# apps/core-app/base/kafka-topics.yaml
+# apps/order-service/base/kafka-topics.yaml
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaTopic
 metadata:
@@ -391,7 +435,7 @@ spec:
     retention.ms: 604800000
     segment.bytes: 1073741824
 ---
-# apps/core-app/base/kafka-user.yaml
+# apps/order-service/base/kafka-user.yaml
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:
@@ -415,7 +459,7 @@ spec:
 
 #### Application-Owned Keycloak Realm Resource
 ```yaml
-# apps/core-app/base/keycloak-realm.yaml
+# apps/order-service/base/keycloak-realm.yaml
 apiVersion: k8s.keycloak.org/v2alpha1
 kind: KeycloakRealmImport
 metadata:
@@ -435,12 +479,12 @@ spec:
         publicClient: false
         secret: "super-secret-client-credential-key"
         redirectUris:
-          - "https://api.\${CLUSTER_DOMAIN}/*" 
+          - "https://api.\${CLUSTER_DOMAIN}/*"
 ```
 
 #### Foundational Application Skeleton
 ```yaml
-# apps/core-app/base/configmap.yaml
+# apps/order-service/base/configmap.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -451,7 +495,7 @@ data:
   MONGO_URI: "mongodb://my-mongo-cluster-svc.mongodb.svc.cluster.local:27017"
   KEYCLOAK_URL: "http://auth.svc.\${CLUSTER_DOMAIN}:8080"
 ---
-# apps/core-app/base/external-secrets.yaml
+# apps/order-service/base/external-secrets.yaml
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -474,17 +518,17 @@ spec:
         key: my-kafka-user
         property: password
 ---
-# apps/core-app/base/deployment.yaml
+# apps/order-service/base/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: core-application
+  name: order-service
 spec:
   replicas: 1
   template:
     metadata:
       labels:
-        app: core-app
+        app: order-service
     spec:
       serviceAccountName: core-app-sa
       initContainers:
@@ -498,7 +542,7 @@ spec:
           until nc -z my-kafka-cluster-kafka-bootstrap.messaging.svc.cluster.local 9092; do echo "Waiting for Kafka..."; sleep 2; done;
       containers:
       - name: application
-        image: my-registry/my-app:latest
+        image: ghcr.io/my-org/my-gitops-repo/order-service:1.0.0
         envFrom:
         - configMapRef:
             name: app-config
@@ -517,10 +561,52 @@ spec:
 
 ---
 
-### B. Production Application Overlay (`apps/core-app/overlays/production/`)
+### B. Staging Application Overlay Configured for Renovate (`apps/order-service/overlays/staging/`)
 
 ```yaml
-# apps/core-app/overlays/production/kustomization.yaml
+# apps/order-service/overlays/staging/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: my-app-staging
+resources:
+  - ../../base
+  - network-policies.yaml
+
+images:
+  - name: ghcr.io/my-org/my-gitops-repo/order-service
+    newName: ghcr.io/my-org/my-gitops-repo/order-service
+    newTag: 1.2.4 # Renovate parses this string dynamically via target dependency scanning
+```
+
+```yaml
+# apps/order-service/overlays/staging/network-policies.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-to-postgres
+  namespace: databases
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: prod-database
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: my-app-staging
+    ports:
+    - protocol: TCP
+      port: 5432
+```
+
+---
+
+### C. Production Application Overlay (`apps/order-service/overlays/production/`)
+
+```yaml
+# apps/order-service/overlays/production/kustomization.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: my-app-production
@@ -531,7 +617,7 @@ resources:
 patches:
   - target:
       kind: Deployment
-      name: core-application
+      name: order-service
     patch: |-
       - op: replace
         path: /spec/replicas
@@ -554,7 +640,7 @@ patches:
 ```
 
 ```yaml
-# apps/core-app/overlays/production/security-policies.yaml
+# apps/order-service/overlays/production/security-policies.yaml
 apiVersion: security.istio.io/v1beta1
 kind: AuthorizationPolicy
 metadata:
@@ -569,10 +655,9 @@ spec:
   - from:
     - source:
         principals: ["cluster.local/ns/my-app-production/sa/core-app-sa"]
-```
 
 ```yaml
-# apps/core-app/overlays/production/otel-instrumentation.yaml
+# apps/order-service/overlays/production/otel-instrumentation.yaml
 apiVersion: opentelemetry.io/v1alpha1
 kind: Instrumentation
 metadata:
@@ -585,5 +670,44 @@ spec:
     - tracecontext
     - baggage
   java:
-    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-java:latest
+    image: "ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-java:latest"
 ```
+
+---
+
+## 7. Version Control and Tagging Strategy
+
+Project versioning policy, see [VERSIONING.md](../VERSIONING.md) document, defines a strict Semantic Versioning which is enforced across all application images. The `:latest` tag is prohibited in the cluster to ensure immutability and reproducibility. All image updates are managed via Renovate Bot, which scans the `kustomization.yaml` files for image references, applies SemVer rules, and opens structured Pull Requests for version updates.
+
+Snapshot versions containing `-SNAPSHOT` are actively filtered out by Renovate to prevent unstable images from entering the cluster. Only stable releases (e.g., `1.0.0`, `1.2.4`) are allowed, and all updates must adhere to the defined versioning constraints.
+
+## 7. Renovate Bot External Pipeline Engine Configuration
+
+This file lives in the root directory of the monorepo (`renovate.json`). It dictates how Renovate parses Kustomize patterns, implements explicit **Spring Boot Semantic Versioning logic**, and actively filters out `-SNAPSHOT` dependencies from entering the pipeline.
+
+```json
+{
+  "\$schema": "https://renovatebot.com",
+  "extends": [
+    "config:recommended"
+  ],
+  "regexManagers": [
+    {
+      "fileMatch": ["(^|/)kustomization\\.yaml\$"],
+      "matchStrings": [
+        "name: (?<depName>ghcr\\.io/[\\w-]+/[\\w-]+/[\\w-]+)\\s+newName: .*\\s+newTag: (?<currentValue>[\\w.-]+)"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/my-org/my-gitops-repo/order-service"],
+      "allowedVersions": "!/SNAPSHOT/",
+      "versioning": "semver"
+    }
+  ]
+}
+```
+

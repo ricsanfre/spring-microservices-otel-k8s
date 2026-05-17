@@ -1,0 +1,141 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-prom-stack
+  namespace: monitoring
+spec:
+  interval: 1h
+  timeout: 15m
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      # TODO: pin to a specific version once the desired chart version is confirmed
+      version: ">=60.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: flux-system
+      interval: 12h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    grafana:
+      enabled: true
+      replicas: 1
+      admin:
+        existingSecret: grafana-admin-secret
+        userKey: admin-user
+        passwordKey: admin-password
+      grafana.ini:
+        server:
+          root_url: "https://grafana.${CLUSTER_DOMAIN}"
+        feature_toggles:
+          enable: "traceqlSearch traceqlStreaming"
+      persistence:
+        enabled: false
+      sidecar:
+        datasources:
+          defaultDatasourceEnabled: false
+      datasources:
+        datasources.yaml:
+          apiVersion: 1
+          datasources:
+            - name: Prometheus
+              type: prometheus
+              uid: prometheus
+              url: http://kube-prom-stack-kube-prom-prometheus.monitoring.svc.cluster.local:9090
+              isDefault: true
+              editable: true
+              jsonData:
+                httpMethod: POST
+                timeInterval: 60s
+                exemplarTraceIdDestinations:
+                  - name: trace_id
+                    datasourceUid: tempo
+                    urlDisplayLabel: "Trace: ${__value.raw}"
+            - name: Tempo
+              type: tempo
+              uid: tempo
+              url: http://tempo.monitoring.svc.cluster.local:3200
+              editable: true
+              jsonData:
+                tracesToLogsV2:
+                  customQuery: true
+                  datasourceUid: loki
+                  query: '{${__tags}} | trace_id = "${__trace.traceId}"'
+                  tags:
+                    - key: "service.name"
+                      value: "service_name"
+                serviceMap:
+                  datasourceUid: prometheus
+                search:
+                  hide: false
+                nodeGraph:
+                  enabled: true
+                lokiSearch:
+                  datasourceUid: loki
+            - name: Loki
+              type: loki
+              uid: loki
+              url: http://loki.monitoring.svc.cluster.local:3100
+              editable: true
+              jsonData:
+                derivedFields:
+                  - name: trace_id
+                    matcherType: label
+                    matcherRegex: trace_id
+                    url: "${__value.raw}"
+                    datasourceUid: tempo
+                    urlDisplayLabel: "Trace: ${__value.raw}"
+    prometheus:
+      prometheusSpec:
+        additionalArgs:
+          - name: enable-feature
+            value: native-histograms
+        enableOTLPReceiver: true
+        otlp:
+          keepIdentifyingResourceAttributes: true
+          promoteResourceAttributes:
+            - service.instance.id
+            - service.name
+            - service.namespace
+            - service.version
+            - cloud.availability_zone
+            - cloud.region
+            - container.name
+            - deployment.environment
+            - deployment.environment.name
+            - k8s.cluster.name
+            - k8s.container.name
+            - k8s.cronjob.name
+            - k8s.daemonset.name
+            - k8s.deployment.name
+            - k8s.job.name
+            - k8s.namespace.name
+            - k8s.node.name
+            - k8s.pod.name
+            - k8s.replicaset.name
+            - k8s.statefulset.name
+            - host.name
+            - postgresql.database.name
+            - postgresql.schema.name
+            - postgresql.table.name
+            - postgresql.index.name
+            - database
+            - kafka.cluster.alias
+        tsdb:
+          outOfOrderTimeWindow: 10m
+        storageSpec: {}
+        retention: 6h
+    alertmanager:
+      enabled: false
+    nodeExporter:
+      enabled: true
+    kubeStateMetrics:
+      enabled: true
+    prometheusOperator:
+      enabled: true

@@ -1,0 +1,16 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: infra-routing
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./gitops/infrastructure/environments/staging/routing
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  prune: true
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-settings

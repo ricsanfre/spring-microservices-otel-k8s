@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGING applications aggregator
+#
+# Deploys all e-commerce application services plus the cross-service
+# core-config resources (Kafka topics/users, realm import, database users).
+#
+# Apply all apps:
+#   kubectl apply -k gitops/apps
+#
+# Equivalent make target (Phase 1):
+#   make k8s-apps-staging
+# ─────────────────────────────────────────────────────────────────────────────
+resources:
+  # Cross-service config — Keycloak realm, Kafka topics/users, DB users
+  - core-config/overlays/staging
+  # Backend microservices
+  - user-service/overlays/staging
+  - product-service/overlays/staging
+  - cart-service/overlays/staging
+  - order-service/overlays/staging
+  - reviews-service/overlays/staging
+  - notification-service/overlays/staging
+  # Frontend BFF
+  - frontend-service/overlays/staging

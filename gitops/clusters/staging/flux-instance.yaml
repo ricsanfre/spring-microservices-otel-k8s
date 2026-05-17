@@ -1,0 +1,16 @@
+apiVersion: fluxcd.controlplane.io/v1
+kind: FluxInstance
+metadata:
+  name: flux-system
+  namespace: flux-system
+spec:
+  distribution:
+    version: "2.x"
+  sync:
+    # Public HTTPS URL — no secretRef or PAT needed for a public repository
+    url: "https://github.com/ricsanfre/spring-microservices-otel-k8s"
+    branch: "master"
+    path: "./gitops/clusters/staging"
+    # 10-minute poll interval to stay below GitHub anonymous rate limits.
+    # For instant sync without lowering this, configure a Flux Webhook Receiver.
+    interval: "10m"

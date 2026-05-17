@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# cert-manager staging overlay — self-signed ClusterIssuer + wildcard certificate.
+# cert-manager operator must be installed (make k8s-cert-manager-helm) before applying.
+#
+# Apply:
+#   kubectl apply -k gitops/infrastructure/cert-manager/overlays/staging
+namespace: cert-manager
+resources:
+  - ../../base
+  - cluster-issuer.yaml
+  - wildcard-certificate.yaml

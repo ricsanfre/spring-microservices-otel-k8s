@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# databases base — HelmRepositories + HelmReleases for CNPG and MongoDB Community
+# operators, managed by the Flux Helm controller.
+# cnpg-operator-values.yaml and mongodb-operator-values.yaml are superseded by
+# spec.values in the respective helmrelease.yaml files.
+resources:
+  - cnpg-helmrepository.yaml
+  - cnpg-helmrelease.yaml
+  - mongodb-helmrepository.yaml
+  - mongodb-helmrelease.yaml

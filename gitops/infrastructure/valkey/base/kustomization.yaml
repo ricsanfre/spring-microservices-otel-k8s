@@ -1,0 +1,6 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# valkey base — Deployment + Service manifests (no operator, plain resources).
+resources:
+  - deployment.yaml
+  - service.yaml

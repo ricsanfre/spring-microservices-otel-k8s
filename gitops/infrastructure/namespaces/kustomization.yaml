@@ -1,0 +1,6 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# All cluster namespaces — applied first so every subsequent component can
+# target its namespace without needing createNamespace: true.
+resources:
+  - namespaces.yaml

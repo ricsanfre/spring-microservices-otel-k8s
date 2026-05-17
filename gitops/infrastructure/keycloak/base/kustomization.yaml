@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# keycloak base — Keycloak Operator installed from upstream kustomize bundle.
+# No Helm chart exists for the Keycloak Operator; it is installed by applying
+# the versioned manifests from keycloak/keycloak-k8s-resources.
+# Phase 2 will replace operator/ with an OCIRepository + Flux Kustomization source.
+#
+# Install operator (once per cluster):
+#   make k8s-keycloak-operator
+resources:
+  - operator

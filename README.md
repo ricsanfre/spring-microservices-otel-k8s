@@ -257,11 +257,11 @@ make infra-clean   # stop containers AND delete data volumes
 
 ---
 
-## Kubernetes Staging — k3d
+## Kubernetes Staging — k3d (GitOps / Flux)
 
-The staging environment runs a full **k3d** cluster (k3s inside Docker) on your laptop. The cluster definition lives in `k8s/k3d-cluster.yaml`. All services are exposed via the `.local.test` domain, which resolves automatically on the local machine.
+The staging environment runs a full **k3d** cluster (k3s inside Docker) on your laptop. All Kubernetes manifests live in `gitops/` and are continuously reconciled by **Flux CD**. The cluster definition lives in `gitops/clusters/staging/k3d-cluster.yaml`. All services are exposed via the `.local.test` domain, which resolves automatically on the local machine.
 
-See [ARCHITECTURE.md — Kubernetes Deployment Architecture](ARCHITECTURE.md#kubernetes-deployment-architecture) for the cluster diagram and `k8s/` directory layout.
+See [ARCHITECTURE.md — Kubernetes Deployment Architecture](ARCHITECTURE.md#kubernetes-deployment-architecture) for the cluster diagram and `gitops/` directory layout.
 
 ### Prerequisites
 
@@ -274,6 +274,7 @@ All tools except Docker are installed via `mise install` (see [Prerequisites —
 | kubectl | `latest` |
 | helm | `latest` |
 | kustomize | `latest` |
+| flux2 | `latest` |
 | Java 25 (Temurin) | `temurin-25` |
 | Maven 3.9 | `3.9` |
 | Node.js 22 | `22` |
@@ -289,58 +290,45 @@ This creates cluster `e-commerce` (1 control-plane + 2 worker nodes) with:
 - Traefik disabled
 - Host aliases for `app.local.test`, `keycloak.local.test`, `grafana.local.test`
 
+### 2. Bootstrap Flux
 
-### 3. Deploy Infrastructure Resources
-
-```bash
-make k8s-infra
-```
-
-Or deploy each component individually:
+Flux CD is managed by the **Flux Operator**. Bootstrap installs the operator via Helm and then applies a `FluxInstance` CR that points Flux at this repository.
 
 ```bash
-make k8s-infra-cert-manager    # self-signed CA + *.local.test wildcard cert
-make k8s-infra-postgres        # CNPG PostgreSQL cluster + per-service databases
-make k8s-infra-mongodb         # MongoDB replica set
-make k8s-infra-valkey          # Valkey cache Deployment (namespace: valkey)
-make k8s-infra-kafka           # Kafka cluster + topics
-make k8s-infra-keycloak        # Keycloak instance + realm import
-make k8s-infra-envoy-gateway   # GatewayClass, Gateway, HTTPRoutes, SecurityPolicy
-make k8s-infra-monitoring      # Grafana LGTM stack
-make k8s-infra-otel-collector  # OpenTelemetry Collector (fan-out to Tempo/Loki/Mimir)
+make flux-operator-install   # helm install Flux Operator into flux-system
+make flux-bootstrap          # kubectl apply FluxInstance — Flux takes over
+make flux-status             # watch reconciliation progress
 ```
 
-### 4. Build and Push Service Images
+Flux will reconcile all infrastructure and application resources in dependency order:
+
+```
+cluster-settings (ConfigMap)
+├── infra-security   (ESO stores)
+├── infra-routing    (cert-manager + Envoy Gateway)
+├── infra-monitoring (observability stack)
+└── infra-backends   (databases + Kafka + Keycloak + Valkey)
+      └── core-apps  (all business microservices)
+```
+
+### 3. Build and Push Service Images
 
 Images are pulled from `ghcr.io` — CI publishes them automatically on every push to `master`.
-For manual pushes (e.g. testing a local branch), log in to ghcr.io first and use the Makefile targets:
+For manual pushes (e.g. testing a local branch), log in to ghcr.io first and use the Jib Maven targets:
 
 ```bash
 # Log in once (PAT requires write:packages scope)
 echo "<YOUR_PAT>" | docker login ghcr.io -u <your-github-username> --password-stdin
 
-# Build and push a service (set GITHUB_OWNER to your GitHub username/org)
-make k8s-us-image GITHUB_OWNER=<your-github-username>   # user-service
-make k8s-cs-image GITHUB_OWNER=<your-github-username>   # cart-service
-```
-
-### 5. Deploy Services
-
-```bash
-make k8s-apps-deploy
-```
-
-Or deploy an individual service:
-
-```bash
-make k8s-us-deploy   # user-service only
-make k8s-cs-deploy   # cart-service only
+# Build and push a service
+mvn -pl common,user-service -am compile jib:build -Ddocker.registry=ghcr.io/<your-github-username>
+mvn -pl common,cart-service -am compile jib:build -Ddocker.registry=ghcr.io/<your-github-username>
 ```
 
 ### One-Shot Full Setup
 
 ```bash
-make k8s-up   # k3d-create + k8s-infra + k8s-apps-deploy
+make k3d-create && make flux-operator-install && make flux-bootstrap
 ```
 
 ### Access Points (Staging)
@@ -353,7 +341,7 @@ make k8s-up   # k3d-create + k8s-infra + k8s-apps-deploy
 | `https://keycloak.local.test` | Keycloak Admin Console |
 | `https://grafana.local.test` | Grafana Dashboards |
 
-> TLS is terminated at the Envoy Gateway using a self-signed `*.local.test` wildcard certificate issued by cert-manager. Add the CA to your browser trust store to avoid certificate warnings (see `k8s/infra/cert-manager/cluster-issuer.yaml`).
+> TLS is terminated at the Envoy Gateway using a self-signed `*.local.test` wildcard certificate issued by cert-manager. Add the CA to your browser trust store to avoid certificate warnings (see `gitops/infrastructure/cert-manager/overlays/staging/cluster-issuer.yaml`).
 
 ---
 

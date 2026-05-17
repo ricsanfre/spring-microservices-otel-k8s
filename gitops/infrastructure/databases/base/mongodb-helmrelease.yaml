@@ -1,0 +1,28 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: mongodb-operator
+  namespace: mongodb
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: community-operator
+      # TODO: pin to a specific version once the desired chart version is confirmed
+      version: ">=0.10.0"
+      sourceRef:
+        kind: HelmRepository
+        name: mongodb
+        namespace: flux-system
+      interval: 12h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    operator:
+      # Restrict operator to the mongodb namespace
+      watchNamespace: mongodb
+    replicaCount: 1

@@ -41,7 +41,7 @@ e-commerce/
 ├── reviews-service/
 ├── notification-service/
 ├── user-service/
-├── k8s/                           ← Kubernetes manifests
+├── gitops/                        ← Kubernetes manifests (Flux GitOps)
 └── common/                        ← shared DTOs, exceptions, security helpers
 ```
 
@@ -1260,7 +1260,7 @@ Authorization follows deny-by-default (`allow.everyone.if.no.acl.found=false`). 
 
 `auth-exception-retry-interval: 10s` is also set on all consumer listener containers. This prevents the listener from stopping permanently if a `TopicAuthorizationException` occurs (e.g. startup before `kafka-init` completes) — Spring Kafka will retry the subscription every 10 seconds until it succeeds.
 
-**Kubernetes (Strimzi):** Each service has a `KafkaUser` CR in `k8s/infra/kafka/users.yaml`. Strimzi's User Operator generates the SCRAM credentials, stores them in a `kafka`-namespace Secret (key: `password`), and reconciles the ACLs automatically on every spec change. Topics are pre-created via `KafkaTopic` CRs in `k8s/infra/kafka/topics.yaml` — `auto.create.topics.enable` is not set on the Strimzi cluster (defaults to `false` in Strimzi-managed clusters).
+**Kubernetes (Strimzi):** Each service has a `KafkaUser` CR in `gitops/apps/core-config/base/`. Strimzi's User Operator generates the SCRAM credentials, stores them in a `kafka`-namespace Secret (key: `password`), and reconciles the ACLs automatically on every spec change. Topics are pre-created via `KafkaTopic` CRs in `gitops/apps/core-config/base/` — `auto.create.topics.enable` is not set on the Strimzi cluster (defaults to `false` in Strimzi-managed clusters).
 
 #### Copying the Strimzi Secret to the app namespace
 
@@ -1903,7 +1903,7 @@ In addition the CI workflow always pushes a second, pinned tag for every commit 
 2. Commit, tag, and push — CI builds and pushes `ghcr.io/ricsanfre/spring-microservices-otel-k8s/<service>:1.0.0` and `:latest`.
 3. Update the staging overlay to pin to the release tag:
    ```yaml
-   # k8s/apps/user-service/overlays/staging/kustomization.yaml
+   # gitops/apps/user-service/overlays/staging/kustomization.yaml
    images:
      - name: ghcr.io/ricsanfre/spring-microservices-otel-k8s/user-service
        newTag: "1.0.0"
@@ -2539,7 +2539,7 @@ When adding a new microservice, ensure all of the following are in place before 
 - [ ] Controller calls `userIdResolverService.resolveInternalId(JwtUtils.getSubject(auth))` — never uses JWT `sub` as a storage key directly
 
 ### Infrastructure
-- [ ] `ServiceAccount` defined in `k8s/{service}/serviceaccount.yaml`
+- [ ] `ServiceAccount` defined in `gitops/apps/{service}/base/serviceaccount.yaml`
 - [ ] Service-to-service base URLs configured via environment-specific properties (default `http://localhost:{port}` for local dev)
 - [ ] No `spring-cloud-starter-kubernetes-client-loadbalancer` or `lb://` URIs — use plain Kubernetes Service DNS
 
@@ -2687,23 +2687,24 @@ kubectl wait --namespace envoy-gateway-system \
 
 ### Manifests structure
 
+All Kubernetes manifests live in `gitops/` and are continuously reconciled by Flux CD. Push to `master` to deploy. The layout follows a base/overlays pattern per component:
+
 ```
-k8s/
-├── namespace.yaml
-├── envoy-gateway/
-│   ├── gateway.yaml            ← GatewayClass + Gateway
-│   ├── httproutes.yaml         ← HTTPRoute per business service
-│   └── security-policy.yaml   ← JWT SecurityPolicy (Keycloak JWKS)
-├── {service-name}/
-│   ├── deployment.yaml
-│   ├── service.yaml
-│   ├── configmap.yaml
-│   └── serviceaccount.yaml
-└── infra/
-    ├── keycloak/
-    ├── kafka/
-    ├── mongodb/
-    └── postgres/
+gitops/
+├── clusters/staging/           ← Flux Kustomization CRDs (entry point)
+├── infrastructure/
+│   ├── envoy-gateway/
+│   │   ├── base/               ← HelmRelease + GatewayClass
+│   │   └── overlays/staging/   ← Gateway + HTTPRoutes + SecurityPolicy
+│   ├── databases/overlays/staging/
+│   ├── kafka/overlays/staging/
+│   ├── keycloak/overlays/staging/
+│   └── ...
+└── apps/
+    ├── core-config/base/       ← KafkaTopic/User CRs, CNPG Database CRs, Keycloak realm import
+    └── {service-name}/
+        ├── base/               ← Deployment + Service + ConfigMap + ServiceAccount + ExternalSecret
+        └── overlays/staging/   ← image tag patch + env-specific config
 ```
 
 ### Build and import images with Jib
