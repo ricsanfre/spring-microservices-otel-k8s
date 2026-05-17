@@ -2,13 +2,12 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
 
-  "managerConfigurations": {
-    "flux": {
-      "fileMatch": ["^gitops/.*\\.yaml$"]
-    },
-    "kubernetes": {
-      "fileMatch": ["^gitops/infrastructure/.*\\.yaml$"]
-    }
+  "flux": {
+    "fileMatch": ["^gitops/.*\\.yaml$"]
+  },
+
+  "kubernetes": {
+    "fileMatch": ["^gitops/infrastructure/.*\\.yaml$"]
   },
 
   "packageRules": [
@@ -45,6 +44,7 @@
       "matchStrings": [
         "-\\s+name:\\s+(?<depName>ghcr\\.io/ricsanfre/spring-microservices-otel-k8s/[a-zA-Z0-9-]+)\\s+newTag:\\s+\"(?<currentValue>[^\"]+)\""
       ],
+      "datasourceTemplate": "docker",
       "versioningTemplate": "semver"
     },
     {
@@ -60,3 +60,4 @@
     }
   ]
 }
+
