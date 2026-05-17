@@ -318,8 +318,8 @@ us-token-sa: ## Fetch cart-service service account token (users:resolve + orders
 # k3d — cluster lifecycle
 # ──────────────────────────────────────────────────────────────────────────────
 
-k3d-create: ## Create k3d staging cluster (defined in gitops/clusters/staging/k3d-cluster.yaml)
-	k3d cluster create --config gitops/clusters/staging/k3d-cluster.yaml
+k3d-create: ## Create k3d staging cluster (defined in k8s/k3d-cluster.yaml)
+	k3d cluster create --config k8s/k3d-cluster.yaml
 	@echo "Cluster context: k3d-e-commerce"
 	@echo "kube-api: https://kube-api.$(DOMAIN):6445"
 
