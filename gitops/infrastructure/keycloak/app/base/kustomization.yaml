@@ -8,4 +8,5 @@ kind: Kustomization
 # Install operator (once per cluster):
 #   make k8s-keycloak-operator
 resources:
+  - namespace.yaml
   - operator

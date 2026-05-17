@@ -5,6 +5,7 @@ kind: Kustomization
 # cnpg-operator-values.yaml and mongodb-operator-values.yaml are superseded by
 # spec.values in the respective helmrelease.yaml files.
 resources:
+  - namespace.yaml
   - cnpg-helmrepository.yaml
   - cnpg-helmrelease.yaml
   - mongodb-helmrepository.yaml

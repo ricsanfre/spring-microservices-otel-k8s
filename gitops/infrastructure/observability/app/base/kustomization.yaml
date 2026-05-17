@@ -9,6 +9,8 @@ kind: Kustomization
 # The *-values.yaml files in this directory are superseded by spec.values in
 # their respective helmrelease.yaml files.
 resources:
+  - namespace.yaml
+  - monitoring-external-secrets.yaml
   - prometheus-helmrepository.yaml
   - prometheus-helmrelease.yaml
   - otel-helmrepository.yaml

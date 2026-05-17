@@ -4,5 +4,4 @@ kind: Kustomization
 # Included by environment overlays (config/staging, config/production).
 namespace: monitoring
 resources:
-  - monitoring-externalsecrets.yaml
   - collector.yaml

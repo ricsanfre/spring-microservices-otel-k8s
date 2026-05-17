@@ -10,7 +10,7 @@
 
 # Restrict operator to the mongodb namespace
 operator:
-  watchNamespace: mongodb
+  watchNamespace: databases
 
 # Single replica for laptop staging
 replicaCount: 1

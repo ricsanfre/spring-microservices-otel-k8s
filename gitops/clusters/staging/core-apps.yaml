@@ -5,9 +5,11 @@ metadata:
   namespace: flux-system
 spec:
   dependsOn:
-    - name: infra-backends-config
-    - name: infra-routing-config
     - name: infra-monitoring-config
+    - name: infra-databases-config
+    - name: infra-kafka-config
+    - name: infra-valkey-app
+    - name: envoy-gateway-config
   interval: 5m
   path: ./gitops/apps
   sourceRef:

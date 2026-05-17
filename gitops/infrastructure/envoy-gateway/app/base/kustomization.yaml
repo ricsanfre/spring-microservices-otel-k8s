@@ -5,5 +5,6 @@ kind: Kustomization
 # GatewayClass is environment-specific: it requires Gateway API CRDs installed
 # by the HelmRelease above, so it lives in overlays/staging/gateway-class.yaml.
 resources:
+  - namespace.yaml
   - ocirepository.yaml
   - helmrelease.yaml

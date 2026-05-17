@@ -3,5 +3,6 @@ kind: Kustomization
 # kafka base — OCIRepository + HelmRelease for Flux Helm controller.
 # strimzi-operator-values.yaml is superseded by spec.values in helmrelease.yaml.
 resources:
+  - namespace.yaml
   - ocirepository.yaml
   - helmrelease.yaml

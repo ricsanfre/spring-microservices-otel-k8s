@@ -3,5 +3,6 @@ kind: Kustomization
 # ESO base — HelmRepository + HelmRelease for Flux Helm controller.
 # eso-values.yaml is superseded by spec.values in helmrelease.yaml.
 resources:
+  - namespace.yaml
   - helmrepository.yaml
   - helmrelease.yaml
