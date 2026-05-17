@@ -3,19 +3,25 @@
   "extends": ["config:recommended"],
 
   "flux": {
-    "fileMatch": ["^gitops/.*\\.yaml$"]
+    "managerFilePatterns": [
+      "/^gitops/.*\\.yaml$/"
+    ]
   },
 
   "kubernetes": {
-    "fileMatch": ["^gitops/infrastructure/.*\\.yaml$"]
+    "managerFilePatterns": [
+      "/^gitops/infrastructure/.*\\.yaml$/"
+    ]
   },
 
   "packageRules": [
     {
       "description": "App images — allow only clean SemVer releases; filter out -SNAPSHOT, SHA, and other non-release strings",
-      "matchPackagePatterns": ["^ghcr\\.io/ricsanfre/spring-microservices-otel-k8s/"],
       "versioning": "semver",
-      "allowedVersions": "!/-/"
+      "allowedVersions": "!/-/",
+      "matchPackageNames": [
+        "/^ghcr\\.io/ricsanfre/spring-microservices-otel-k8s//"
+      ]
     },
     {
       "description": "Skip HelmRelease range constraints (>=x.y.z) — Flux HelmController resolves these natively; Renovate must not touch them",
@@ -39,7 +45,9 @@
     {
       "description": "App image newTag in Kustomize staging overlays (see VERSIONING.md §4)",
       "customType": "regex",
-      "fileMatch": ["^gitops/apps/.+/overlays/.+/kustomization\\.yaml$"],
+      "managerFilePatterns": [
+        "/^gitops/apps/.+/overlays/.+/kustomization\\.yaml$/"
+      ],
       "matchStrings": [
         "-\\s+name:\\s+(?<depName>ghcr\\.io/ricsanfre/spring-microservices-otel-k8s/[a-zA-Z0-9-]+)\\s+newTag:\\s+\"(?<currentValue>[^\"]+)\""
       ],
@@ -49,7 +57,9 @@
     {
       "description": "Keycloak Operator version embedded in GitHub raw manifest URLs",
       "customType": "regex",
-      "fileMatch": ["^gitops/infrastructure/keycloak/base/operator/kustomization\\.yaml$"],
+      "managerFilePatterns": [
+        "/^gitops/infrastructure/keycloak/base/operator/kustomization\\.yaml$/"
+      ],
       "matchStrings": [
         "keycloak-k8s-resources/(?<currentValue>\\d+\\.\\d+\\.\\d+)/"
       ],
