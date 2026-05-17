@@ -1,0 +1,32 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: infra-backends-config
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: infra-backends-app
+    - name: infra-security-config   # ESO ClusterSecretStore required for ExternalSecrets
+  interval: 10m
+  path: ./gitops/infrastructure/environments/staging/backends/config
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  prune: true
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-settings
+  healthChecks:
+    - apiVersion: postgresql.cnpg.io/v1
+      kind: Cluster
+      name: postgres
+      namespace: postgres
+    - apiVersion: kafka.strimzi.io/v1beta2
+      kind: Kafka
+      name: kafka
+      namespace: kafka
+    - apiVersion: k8s.keycloak.org/v2beta1
+      kind: Keycloak
+      name: keycloak
+      namespace: keycloak

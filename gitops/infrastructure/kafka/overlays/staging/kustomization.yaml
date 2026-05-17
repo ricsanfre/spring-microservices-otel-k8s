@@ -1,10 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 # kafka staging overlay — single-node KRaft cluster (no ZooKeeper).
-# Strimzi operator must be installed (make k8s-strimzi-operator-helm) before applying.
-#
-# Apply:
+# Combines the operator (../../base) with the staging CRs (../../config/staging).
+# Use this overlay for a full local apply:
 #   kubectl apply -k gitops/infrastructure/kafka/overlays/staging
+# Flux uses base/ (via infra-operators) and config/staging/ (via infra-backends) separately.
 resources:
   - ../../base
-  - cluster.yaml
+  - ../../config/staging

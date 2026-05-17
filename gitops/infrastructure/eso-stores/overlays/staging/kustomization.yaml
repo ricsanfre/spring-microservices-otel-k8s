@@ -3,10 +3,10 @@ kind: Kustomization
 # ESO staging overlay — Fake ClusterSecretStore with inline credentials.
 # Suitable for local k3d staging only.  Replace all "changeme" values before
 # deploying to any shared environment.
-# ESO operator must be installed (make k8s-eso-helm) before applying.
-#
-# Apply:
+# Combines the operator (../../base) with the staging CRs (../../config/staging).
+# Use this overlay for a full local apply:
 #   kubectl apply -k gitops/infrastructure/eso-stores/overlays/staging
+# Flux uses base/ (via infra-operators) and config/staging/ (via infra-security) separately.
 resources:
   - ../../base
-  - cluster-secret-store.yaml
+  - ../../config/staging

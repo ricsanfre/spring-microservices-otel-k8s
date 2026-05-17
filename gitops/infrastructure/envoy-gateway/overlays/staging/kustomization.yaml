@@ -1,13 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# envoy-gateway staging overlay — Gateway, HTTPRoutes, SecurityPolicy.
-# Envoy Gateway operator must be installed before applying.
-# cert-manager wildcard certificate must be ready before applying.
-#
-# Apply:
+# envoy-gateway staging overlay — GatewayClass + Gateway + HTTPRoutes + SecurityPolicy.
+# Combines the operator (../../base) with the staging CRs (../../config/staging).
+# Use this overlay for a full local apply:
 #   kubectl apply -k gitops/infrastructure/envoy-gateway/overlays/staging
+# Flux uses base/ (via infra-operators) and config/staging/ (via infra-routing) separately.
 resources:
   - ../../base
-  - gateway.yaml
-  - httproutes.yaml
-  - security-policy.yaml
+  - ../../config/staging

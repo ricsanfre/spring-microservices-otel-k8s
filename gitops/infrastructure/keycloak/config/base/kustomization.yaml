@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Keycloak config base — CRs that require Keycloak Operator CRDs.
+# Included by environment overlays (config/staging, config/production).
+resources:
+  - keycloak.yaml
+  - database.yaml
+  - httproute.yaml
+  - external-secrets.yaml

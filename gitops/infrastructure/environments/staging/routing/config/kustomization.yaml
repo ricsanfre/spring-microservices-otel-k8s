@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# routing/config — Layer 2 for the routing group.
+# Applies cert-manager CRs (ClusterIssuer + wildcard cert) and
+# Envoy Gateway CRs (GatewayClass, Gateway, HTTPRoutes, SecurityPolicy).
+# Requires routing/app operators to be healthy (infra-routing-app healthChecks).
+# Targeted by infra-routing-config Flux Kustomization (dependsOn: infra-routing-app).
+resources:
+  - ../../../../cert-manager/config/overlays/staging
+  - ../../../../envoy-gateway/config/overlays/staging

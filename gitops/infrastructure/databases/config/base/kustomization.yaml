@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Databases config base — CRs that require CNPG and MongoDB Operator CRDs.
+# Included by environment overlays (config/staging, config/production).
+resources:
+  - postgres-cluster.yaml
+  - postgres-externalsecrets.yaml
+  - mongodb-community.yaml
+  - mongodb-externalsecrets.yaml
