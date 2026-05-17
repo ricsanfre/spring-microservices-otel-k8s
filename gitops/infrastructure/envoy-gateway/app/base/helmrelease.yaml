@@ -5,15 +5,11 @@ metadata:
   namespace: envoy-gateway-system
 spec:
   interval: 1h
-  chart:
-    spec:
-      # OCI chart — chart field is '.' (root of the OCI artifact)
-      chart: .
-      sourceRef:
-        kind: OCIRepository
-        name: envoy-gateway
-        namespace: flux-system
-      interval: 12h
+  # OCIRepository must be referenced via chartRef, not spec.chart.spec.sourceRef
+  chartRef:
+    kind: OCIRepository
+    name: envoy-gateway
+    namespace: flux-system
   install:
     remediation:
       retries: 3
