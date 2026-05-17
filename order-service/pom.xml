@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.ricsanfre</groupId>
         <artifactId>e-commerce</artifactId>
-        <version>1.0.0-SNAPSHOT</version>
+        <version>1.0.0</version>
     </parent>
 
     <artifactId>order-service</artifactId>

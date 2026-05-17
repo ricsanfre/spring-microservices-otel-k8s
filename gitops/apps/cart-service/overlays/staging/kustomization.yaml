@@ -17,6 +17,11 @@ kind: Kustomization
 resources:
   - ../../base
 
+images:
+  - name: ghcr.io/ricsanfre/spring-microservices-otel-k8s/cart-service
+    newName: ghcr.io/ricsanfre/spring-microservices-otel-k8s/cart-service
+    newTag: "1.0.0"   # Renovate keeps this field current via PRs
+
 # Staging-specific patches
 patches:
   # Scale to 1 replica on laptop (saves resources)
@@ -24,15 +29,6 @@ patches:
       - op: replace
         path: /spec/replicas
         value: 1
-    target:
-      kind: Deployment
-      name: cart-service
-
-  # Overwrite imagePullPolicy to Always so ghcr.io is re-checked on each restart
-  - patch: |
-      - op: replace
-        path: /spec/template/spec/containers/0/imagePullPolicy
-        value: Always
     target:
       kind: Deployment
       name: cart-service

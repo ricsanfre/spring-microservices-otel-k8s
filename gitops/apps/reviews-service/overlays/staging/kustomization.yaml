@@ -7,19 +7,16 @@ kind: Kustomization
 resources:
   - ../../base
 
+images:
+  - name: ghcr.io/ricsanfre/spring-microservices-otel-k8s/reviews-service
+    newName: ghcr.io/ricsanfre/spring-microservices-otel-k8s/reviews-service
+    newTag: "1.0.0"   # Renovate keeps this field current via PRs
+
 patches:
   - patch: |
       - op: replace
         path: /spec/replicas
         value: 1
-    target:
-      kind: Deployment
-      name: reviews-service
-
-  - patch: |
-      - op: replace
-        path: /spec/template/spec/containers/0/imagePullPolicy
-        value: Always
     target:
       kind: Deployment
       name: reviews-service
