@@ -16,6 +16,7 @@ apiVersion: k8s.keycloak.org/v2beta1
 kind: Keycloak
 metadata:
   name: keycloak
+  namespace: keycloak
 spec:
   instances: 1          # single instance for laptop staging
 
@@ -35,7 +36,7 @@ spec:
 
   db:
     vendor: postgres
-    host: postgres-rw.postgres.svc.cluster.local
+    host: postgres-rw.databases.svc.cluster.local
     port: 5432
     database: keycloak
     usernameSecret:

@@ -1,6 +1,5 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: keycloak
 # Staging environment overlay for config CRs.
 # Includes the base CRs unchanged; add environment-specific patches below when needed.
 # Targeted directly by the corresponding Flux Kustomization (Layer 2, dependsOn: infra-operators).
