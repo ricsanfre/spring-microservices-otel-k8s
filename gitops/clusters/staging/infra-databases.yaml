@@ -47,7 +47,7 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
-  path: ./gitops/apps/valkey/app/overlays/staging
+  path: ./gitops/infrastructure/valkey/app/overlays/staging
   prune: true
   timeout: 10m
   wait: true
