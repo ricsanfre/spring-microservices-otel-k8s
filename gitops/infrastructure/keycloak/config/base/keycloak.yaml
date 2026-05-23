@@ -75,7 +75,7 @@ spec:
     - name: telemetry-metrics-enabled
       value: "true"
     - name: telemetry-metrics-interval
-      value: "30s
+      value: "30s"
 
       # Enable OpenTelemetry logs (requires telemetry-endpoint and features=opentelemetry-logs)
     - name: telemetry-logs-enabled
