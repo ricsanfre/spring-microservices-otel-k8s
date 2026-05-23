@@ -21,6 +21,6 @@ spec:
       retries: 3
   values:
     operator:
-      # Restrict operator to the mongodb namespace
-      watchNamespace: mongodb
+      # Do not restrict operator to one namespace
+      watchNamespace: "*"
     replicaCount: 1
