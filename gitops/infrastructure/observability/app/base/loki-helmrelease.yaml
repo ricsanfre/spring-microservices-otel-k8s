@@ -50,3 +50,16 @@ spec:
       replicas: 0
     backend:
       replicas: 0
+
+    # Disable canary and helm tests — write/read path validation not needed for staging
+    lokiCanary:
+      enabled: false
+
+    test:
+      enabled: false
+
+    # Disable memcached caches — filesystem storage, no distributed caching needed
+    chunksCache:
+      enabled: false
+    resultsCache:
+      enabled: false
