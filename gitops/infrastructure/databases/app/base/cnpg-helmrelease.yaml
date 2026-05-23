@@ -11,7 +11,7 @@ spec:
       version: ">=0.20.0"
       sourceRef:
         kind: HelmRepository
-        namespace: flux-system
+        name: cnpg
       interval: 12h
   install:
     remediation:
