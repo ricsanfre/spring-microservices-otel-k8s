@@ -53,6 +53,27 @@ grafana:
     datasources:
       defaultDatasourceEnabled: false
 
+  # Enable HTTP Route
+  route:
+    main:
+      # -- Enables or disables the route
+      enabled: true
+
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: HTTPRoute
+
+      hostnames:
+        - "grafana.${CLUSTER_DOMAIN}"
+      parentRefs:
+        - name: eg
+          namespace: envoy-gateway-system
+          sectionName: https
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
+  
+
   # Datasources mirroring grafana/docker-otel-lgtm grafana-datasources.yaml
   # URLs updated to point at in-cluster Kubernetes service DNS endpoints.
   datasources:
@@ -71,7 +92,7 @@ grafana:
             exemplarTraceIdDestinations:
               - name: trace_id
                 datasourceUid: tempo
-                urlDisplayLabel: "Trace: ${__value.raw}"
+                urlDisplayLabel: "Trace: $${__value.raw}"
 
         - name: Tempo
           type: tempo
@@ -82,7 +103,7 @@ grafana:
             tracesToLogsV2:
               customQuery: true
               datasourceUid: loki
-              query: '{${__tags}} | trace_id = "${__trace.traceId}"'
+              query: '{$${__tags}} | trace_id = "$${__trace.traceId}"'
               tags:
                 - key: "service.name"
                   value: "service_name"
@@ -105,9 +126,9 @@ grafana:
               - name: trace_id
                 matcherType: label
                 matcherRegex: trace_id
-                url: "${__value.raw}"
+                url: "$${__value.raw}"
                 datasourceUid: tempo
-                urlDisplayLabel: "Trace: ${__value.raw}"
+                urlDisplayLabel: "Trace: $${__value.raw}"
 
 # ── Prometheus ────────────────────────────────────────────────────────────────
 # Configuration mirrors grafana/docker-otel-lgtm prometheus.yaml

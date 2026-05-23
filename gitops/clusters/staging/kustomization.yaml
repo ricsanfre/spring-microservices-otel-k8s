@@ -8,3 +8,4 @@ resources:
   - infra-security.yaml
   - infra-monitoring.yaml
   - infra-kafka.yaml
+  - core-apps.yaml
