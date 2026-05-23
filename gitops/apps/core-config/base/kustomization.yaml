@@ -4,6 +4,7 @@ kind: Kustomization
 # application: Keycloak realm import Job, Kafka Topics, Kafka Users,
 # application database users, and shared ExternalSecrets for Kafka credentials.
 resources:
+  - ns.yaml
   - databases.yaml
   - external-secrets-kafka.yaml
   - realm-import.yaml
