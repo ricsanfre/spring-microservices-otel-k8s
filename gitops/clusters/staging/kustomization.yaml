@@ -4,3 +4,7 @@ resources:
   - cluster-settings.yaml
   - infra-secrets.yaml
   - infra-routing.yaml
+  - infra-databases.yaml
+  - infra-security.yaml
+  - infra-monitoring.yaml
+  - infra-kafka.yaml

@@ -9,7 +9,6 @@ apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
   name: kafka-pool
-  namespace: kafka
   labels:
     strimzi.io/cluster: kafka
 spec:
@@ -24,7 +23,6 @@ apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
   name: kafka
-  namespace: kafka
   annotations:
     # Use KRaft mode (ZooKeeper-free) — requires Strimzi 0.39+
     strimzi.io/kraft: enabled
