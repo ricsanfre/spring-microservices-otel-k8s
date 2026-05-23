@@ -10,6 +10,7 @@ data:
   SERVER_PORT: "8081"
   # Keycloak OIDC
   KEYCLOAK_URL: "https://keycloak.${CLUSTER_DOMAIN}"
+  KEYCLOAK_INTERNAL_URL: "http://keycloak-service.keycloak.svc.cluster.local:8080"
   KEYCLOAK_REALM: "e-commerce"
   # OpenTelemetry Collector
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318"

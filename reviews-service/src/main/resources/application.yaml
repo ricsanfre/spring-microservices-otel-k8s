@@ -11,7 +11,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          jwk-set-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/certs
+          jwk-set-uri: ${KEYCLOAK_INTERNAL_URL:${KEYCLOAK_URL:http://localhost:8180}}/realms/e-commerce/protocol/openid-connect/certs
           issuer-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce
       # Client Credentials — used when calling user-service, product-service, order-service
       client:
@@ -33,11 +33,11 @@ spring:
             scope: orders:read
         provider:
           user-service:
-            token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
+            token-uri: ${KEYCLOAK_INTERNAL_URL:${KEYCLOAK_URL:http://localhost:8180}}/realms/e-commerce/protocol/openid-connect/token
           product-service:
-            token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
+            token-uri: ${KEYCLOAK_INTERNAL_URL:${KEYCLOAK_URL:http://localhost:8180}}/realms/e-commerce/protocol/openid-connect/token
           order-service:
-            token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
+            token-uri: ${KEYCLOAK_INTERNAL_URL:${KEYCLOAK_URL:http://localhost:8180}}/realms/e-commerce/protocol/openid-connect/token
 
   # HTTP service client groups — base URLs for @ImportHttpServices proxies
   http:

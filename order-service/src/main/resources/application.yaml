@@ -21,15 +21,15 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          jwk-set-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/certs
+          jwk-set-uri: ${KEYCLOAK_INTERNAL_URL:${KEYCLOAK_URL:http://localhost:8180}}/realms/e-commerce/protocol/openid-connect/certs
           issuer-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce
       # Client Credentials — used to obtain a service account token when calling user-service
       client:
         provider:
           user-service:
-            token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
+            token-uri: ${KEYCLOAK_INTERNAL_URL:${KEYCLOAK_URL:http://localhost:8180}}/realms/e-commerce/protocol/openid-connect/token
           product-service:
-            token-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/token
+            token-uri: ${KEYCLOAK_INTERNAL_URL:${KEYCLOAK_URL:http://localhost:8180}}/realms/e-commerce/protocol/openid-connect/token
         registration:
           user-service:
             client-id: order-service

@@ -21,7 +21,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          jwk-set-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce/protocol/openid-connect/certs
+          jwk-set-uri: ${KEYCLOAK_INTERNAL_URL:${KEYCLOAK_URL:http://localhost:8180}}/realms/e-commerce/protocol/openid-connect/certs
           issuer-uri: ${KEYCLOAK_URL:http://localhost:8180}/realms/e-commerce
 
   mvc:

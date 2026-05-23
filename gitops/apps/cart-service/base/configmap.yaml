@@ -15,6 +15,7 @@ data:
   CART_TTL_SECONDS: "604800"
   # Keycloak OIDC
   KEYCLOAK_URL: "https://keycloak.${CLUSTER_DOMAIN}"
+  KEYCLOAK_INTERNAL_URL: "http://keycloak-service.keycloak.svc.cluster.local:8080"
   # OpenTelemetry Collector
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318"
   OTEL_SERVICE_NAME: "cart-service"
