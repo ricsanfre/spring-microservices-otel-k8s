@@ -16,6 +16,11 @@
 
   "packageRules": [
     {
+      "description": "Ignore common pom packages. Multi-project repository",
+      "matchPackageNames": ["com.ricsanfre:**"],
+      "enabled": false
+    },
+    {
       "description": "App images — allow only clean SemVer releases; filter out -SNAPSHOT, SHA, and other non-release strings",
       "versioning": "semver",
       "allowedVersions": "!/-/",
