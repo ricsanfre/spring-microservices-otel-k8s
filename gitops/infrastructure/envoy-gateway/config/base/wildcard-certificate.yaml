@@ -6,7 +6,6 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: local-test-wildcard
-  namespace: envoy-gateway-system
 spec:
   secretName: local-test-wildcard-tls
   duration: 8760h      # 1 year

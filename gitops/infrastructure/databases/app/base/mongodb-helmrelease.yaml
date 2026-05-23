@@ -2,7 +2,6 @@ apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: mongodb-operator
-  namespace: mongodb
 spec:
   interval: 1h
   chart:
@@ -13,7 +12,6 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: mongodb
-        namespace: flux-system
       interval: 12h
   install:
     remediation:

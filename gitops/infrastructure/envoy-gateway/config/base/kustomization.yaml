@@ -9,3 +9,4 @@ resources:
   - gateway.yaml
   - httproutes.yaml
   - security-policy.yaml
+  - wildcard-certificate.yaml

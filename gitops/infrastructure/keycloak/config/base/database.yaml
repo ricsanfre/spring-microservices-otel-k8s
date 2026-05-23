@@ -5,7 +5,7 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
   name: keycloak-db
-  namespace: postgres
+  namespace: databases
 spec:
   name: keycloak
   owner: keycloak_owner

@@ -5,4 +5,3 @@ kind: Kustomization
 namespace: cert-manager
 resources:
   - cluster-issuer.yaml
-  - wildcard-certificate.yaml

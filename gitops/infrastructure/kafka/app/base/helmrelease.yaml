@@ -2,14 +2,12 @@ apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: strimzi-kafka-operator
-  namespace: kafka
 spec:
   interval: 1h
   # OCIRepository must be referenced via chartRef, not spec.chart.spec.sourceRef
   chartRef:
     kind: OCIRepository
     name: strimzi
-    namespace: flux-system
   install:
     remediation:
       retries: 3
