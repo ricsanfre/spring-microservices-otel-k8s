@@ -38,6 +38,25 @@ spec:
       sidecar:
         datasources:
           defaultDatasourceEnabled: false
+      # Enable HTTP Route
+      route:
+        main:
+          # -- Enables or disables the route
+          enabled: true
+
+          apiVersion: gateway.networking.k8s.io/v1
+          kind: HTTPRoute
+
+          hostnames:
+            - "grafana.${CLUSTER_DOMAIN}"
+          parentRefs:
+            - name: eg
+              namespace: envoy-gateway-system
+              sectionName: https
+          matches:
+            - path:
+                type: PathPrefix
+                value: /
       datasources:
         datasources.yaml:
           apiVersion: 1
