@@ -374,7 +374,7 @@ spec:
         description: "Confidential BFF client — Next.js server-side OIDC (Auth.js v5)"
         enabled: true
         publicClient: false
-        secret: "${KC_CLIENT_ECOMMERCE_WEB}"
+        secret: "$${KC_CLIENT_ECOMMERCE_WEB}"
         standardFlowEnabled: true
         implicitFlowEnabled: false
         directAccessGrantsEnabled: false
@@ -411,7 +411,7 @@ spec:
         description: "Confidential client for product-service — resource server + service account"
         enabled: true
         publicClient: false
-        secret: "${KC_CLIENT_PRODUCT_SERVICE}"
+        secret: "$${KC_CLIENT_PRODUCT_SERVICE}"
         standardFlowEnabled: false
         implicitFlowEnabled: false
         directAccessGrantsEnabled: false
@@ -425,7 +425,7 @@ spec:
         description: "Confidential client for order-service — resource server + service account (calls product-service, user-service)"
         enabled: true
         publicClient: false
-        secret: "${KC_CLIENT_ORDER_SERVICE}"
+        secret: "$${KC_CLIENT_ORDER_SERVICE}"
         standardFlowEnabled: false
         implicitFlowEnabled: false
         directAccessGrantsEnabled: false
@@ -441,7 +441,7 @@ spec:
         description: "Confidential client for reviews-service — resource server + service account (calls user-service, product-service, order-service)"
         enabled: true
         publicClient: false
-        secret: "${KC_CLIENT_REVIEWS_SERVICE}"
+        secret: "$${KC_CLIENT_REVIEWS_SERVICE}"
         standardFlowEnabled: false
         implicitFlowEnabled: false
         directAccessGrantsEnabled: false
@@ -458,7 +458,7 @@ spec:
         description: "Confidential client for user-service — resource server + service account"
         enabled: true
         publicClient: false
-        secret: "${KC_CLIENT_USER_SERVICE}"
+        secret: "$${KC_CLIENT_USER_SERVICE}"
         standardFlowEnabled: false
         implicitFlowEnabled: false
         directAccessGrantsEnabled: false
@@ -472,7 +472,7 @@ spec:
         description: "Confidential client for notification-service — Kafka consumer resource server (no outbound HTTP calls)"
         enabled: true
         publicClient: false
-        secret: "${KC_CLIENT_NOTIFICATION_SERVICE}"
+        secret: "$${KC_CLIENT_NOTIFICATION_SERVICE}"
         standardFlowEnabled: false
         implicitFlowEnabled: false
         directAccessGrantsEnabled: false
@@ -486,7 +486,7 @@ spec:
         description: "Confidential client for cart-service — resource server + service account (calls user-service, order-service)"
         enabled: true
         publicClient: false
-        secret: "${KC_CLIENT_CART_SERVICE}"
+        secret: "$${KC_CLIENT_CART_SERVICE}"
         standardFlowEnabled: false
         implicitFlowEnabled: false
         directAccessGrantsEnabled: false
@@ -505,7 +505,7 @@ spec:
         lastName: User
         credentials:
           - type: password
-            value: "${KC_USER_TESTUSER_PASSWORD}"
+            value: "$${KC_USER_TESTUSER_PASSWORD}"
             temporary: false
         clientRoles:
           e-commerce-web:
@@ -518,7 +518,7 @@ spec:
         lastName: Person
         credentials:
           - type: password
-            value: "${KC_USER_OTHERUSER_PASSWORD}"
+            value: "$${KC_USER_OTHERUSER_PASSWORD}"
             temporary: false
         clientRoles:
           e-commerce-web:
@@ -560,7 +560,7 @@ spec:
         lastName: User
         credentials:
           - type: password
-            value: "${KC_USER_ADMINUSER_PASSWORD}"
+            value: "$${KC_USER_ADMINUSER_PASSWORD}"
             temporary: false
         clientRoles:
           e-commerce-web:
