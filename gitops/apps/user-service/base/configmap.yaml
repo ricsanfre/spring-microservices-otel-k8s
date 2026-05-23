@@ -11,7 +11,7 @@ data:
   SPRING_PROFILES_ACTIVE: "kubernetes"
   SERVER_PORT: "8085"
   # PostgreSQL (CNPG read-write service)
-  DB_HOST: "postgres-rw.postgres.svc.cluster.local"
+  DB_HOST: "postgres-rw.databases.svc.cluster.local"
   DB_PORT: "5432"
   DB_NAME: "users"
   # Keycloak OIDC

@@ -10,7 +10,7 @@ metadata:
 data:
   SERVER_PORT: "8082"
   # PostgreSQL (CNPG read-write service)
-  DB_HOST: "postgres-rw.postgres.svc.cluster.local"
+  DB_HOST: "postgres-rw.databases.svc.cluster.local"
   DB_PORT: "5432"
   DB_NAME: "orders"
   DB_USER: "orders_owner"

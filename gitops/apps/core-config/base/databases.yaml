@@ -13,7 +13,7 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
   name: users-db
-  namespace: postgres
+  namespace: databases
 spec:
   name: users
   owner: users_owner
@@ -26,7 +26,7 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
   name: orders-db
-  namespace: postgres
+  namespace: databases
 spec:
   name: orders
   owner: orders_owner

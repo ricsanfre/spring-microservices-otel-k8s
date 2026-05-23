@@ -9,7 +9,7 @@ metadata:
 data:
   SERVER_PORT: "8086"
   # Valkey (Redis-compatible) — deployed in the valkey namespace
-  VALKEY_HOST: "valkey.valkey.svc.cluster.local"
+  VALKEY_HOST: "valkey.databases.svc.cluster.local"
   VALKEY_PORT: "6379"
   # Cart TTL (seconds) — 7 days
   CART_TTL_SECONDS: "604800"
