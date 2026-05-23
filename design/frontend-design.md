@@ -43,6 +43,7 @@ Browser
 | Scopes requested | `openid profile email` + all service scopes: `products:read/write`, `orders:read/write`, `reviews:read/write`, `users:read`, `cart:read/write` |
 | Session storage | Encrypted JWT cookie (stateless — no server-side session store) |
 | Custom `/login` page | `pages.signIn = "/login"` |
+| Kubernetes OIDC discovery | When `AUTH_KEYCLOAK_INTERNAL_ISSUER` is set, the `wellKnown` URL is overridden to the internal Keycloak service URL. Auth.js still validates the JWT `iss` claim against `AUTH_KEYCLOAK_ISSUER` (external). See §2.5. |
 
 ### 2.2 JWT Callback — what is stored in the session cookie
 
@@ -68,11 +69,46 @@ session.error        // "RefreshAccessTokenError" when refresh fails
 
 When `Date.now() >= expiresAt * 1000`, the `jwt` callback calls `refreshAccessToken()`:
 
-1. Calls `POST {issuer}/protocol/openid-connect/token` with `grant_type=refresh_token`
+1. Calls `POST {issuer}/protocol/openid-connect/token` with `grant_type=refresh_token`  
+   `issuer` = `AUTH_KEYCLOAK_INTERNAL_ISSUER` when set (Kubernetes), otherwise `AUTH_KEYCLOAK_ISSUER`
 2. On success: replaces `accessToken`, `refreshToken`, `expiresAt` in the cookie
 3. On failure: sets `token.error = "RefreshAccessTokenError"` — the session callback propagates this to `session.error`, which `apiFetch()` uses to reject API calls rather than forwarding a bad token
 
-### 2.5 Lazy User Registration
+### 2.5 Kubernetes — Internal vs External Keycloak URL
+
+Next.js server-side code (Server Components, Route Handlers, token refresh) runs inside the
+Kubernetes pod. External hostnames like `keycloak.local.test` exist only in the host machine's
+`/etc/hosts` and cannot be resolved inside cluster pods. Calling `https://keycloak.local.test`
+server-side fails with `TypeError: fetch failed` (DNS resolution failure or TLS certificate
+error — the cert is signed by `local-test-ca`, which Node.js does not trust by default).
+
+**Solution:** set `AUTH_KEYCLOAK_INTERNAL_ISSUER` to the internal Keycloak service URL
+(`http://keycloak-service.keycloak.svc.cluster.local:8080/realms/e-commerce`). When present,
+it is used for:
+
+- OIDC discovery (`wellKnown` override on the `Keycloak()` provider)
+- Token endpoint in `refreshAccessToken()` (see §2.4)
+- Lazy registration (`USERS_SERVICE_URL` env var, already internal)
+
+`AUTH_KEYCLOAK_ISSUER` (external) is still required and must match the `iss` claim embedded in
+all JWTs. The OIDC discovery document's `issuer` field always equals Keycloak's configured
+external hostname regardless of where the document is fetched from, so Auth.js issuer validation
+passes.
+
+Keycloak must be configured with `hostname.backchannelDynamic: true` (set in the `Keycloak` CR).
+This causes `token_endpoint` and `jwks_uri` in the discovery document to be based on the incoming
+request URL when fetched internally — returning internal URLs that the pod can reach over plain
+HTTP. `authorization_endpoint` remains the external URL (browser-facing; not affected by
+`backchannelDynamic`), so browser redirects to Keycloak continue to work.
+
+> **Why not `hostAliases` in `k3d-cluster.yaml`?**  
+> Enabling `keycloak.local.test` in `hostAliases` resolves the DNS layer but not the TLS layer.
+> Node.js would connect to port 443 and receive a certificate signed by `local-test-ca` — a CA it
+> does not trust. Fixing TLS would require additionally mounting `NODE_EXTRA_CA_CERTS`, making
+> it a two-part change that also requires recreating the k3d cluster. The internal URL approach
+> requires only a ConfigMap update and is portable across all Kubernetes environments.
+
+### 2.6 Lazy User Registration
 
 On first login (when `account` is present in the `jwt` callback), `triggerLazyRegistration()` is called asynchronously (`void`). It makes a `GET /api/v1/users/me` call to `user-service`, which auto-creates a user profile from the JWT claims (`email`, `given_name`, `family_name`, `preferred_username`). This is non-blocking and non-fatal.
 
@@ -280,10 +316,11 @@ Service base URLs are resolved from environment variables (`PRODUCTS_SERVICE_URL
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `AUTH_SECRET` | Auth.js cookie encryption key | — (required) |
-| `AUTH_URL` | Public base URL of the BFF | `http://localhost:3001` |
+| `AUTH_URL` | Public base URL of the BFF (used for OIDC callback URLs and post-logout redirects) | `http://localhost:3001` |
 | `AUTH_KEYCLOAK_ID` | Keycloak client ID | `e-commerce-web` |
 | `AUTH_KEYCLOAK_SECRET` | Keycloak client secret | — (required) |
-| `AUTH_KEYCLOAK_ISSUER` | Keycloak realm URL | — (required) |
+| `AUTH_KEYCLOAK_ISSUER` | Keycloak external realm URL — must match the `iss` claim in JWTs and be reachable by the browser for authorization redirects | — (required) |
+| `AUTH_KEYCLOAK_INTERNAL_ISSUER` | Keycloak internal service URL for server-side OIDC discovery and token exchange (Kubernetes only — see §2.6). Unset for local development. | unset |
 | `PRODUCTS_SERVICE_URL` | product-service base URL | `http://localhost:8081` |
 | `ORDERS_SERVICE_URL` | order-service base URL | `http://localhost:8082` |
 | `REVIEWS_SERVICE_URL` | reviews-service base URL | `http://localhost:8083` |

@@ -4,6 +4,16 @@ import type { JWT } from "next-auth/jwt";
 
 const USERS_SERVICE_URL = process.env.USERS_SERVICE_URL ?? "http://localhost:8085";
 
+// When running inside Kubernetes, use the internal Keycloak service URL for all
+// server-side OIDC calls (discovery, token exchange, JWKS).  Keycloak is
+// configured with backchannelDynamic:true, so endpoints returned in the
+// discovery document are based on the incoming request URL — fetching from the
+// internal URL gives internal token/jwks endpoints while authorization_endpoint
+// remains the external URL (frontend channel, not affected by backchannelDynamic).
+// The JWT iss claim always equals AUTH_KEYCLOAK_ISSUER (the configured hostname),
+// so Auth.js issuer validation passes even when discovery is fetched internally.
+const KEYCLOAK_INTERNAL_ISSUER = process.env.AUTH_KEYCLOAK_INTERNAL_ISSUER;
+
 async function triggerLazyRegistration(accessToken: string): Promise<void> {
   try {
     await fetch(`${USERS_SERVICE_URL}/api/v1/users/me`, {
@@ -27,6 +37,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             "openid profile email users:read orders:read orders:write products:read products:write reviews:read reviews:write cart:read cart:write",
         },
       },
+      // When AUTH_KEYCLOAK_INTERNAL_ISSUER is set (Kubernetes), override the OIDC
+      // discovery URL to the internal service endpoint.  The issuer field in the
+      // discovery document still equals AUTH_KEYCLOAK_ISSUER (Keycloak always
+      // advertises its configured external hostname), so Auth.js issuer validation
+      // passes.  Token exchange and JWKS are served from internal URLs thanks to
+      // Keycloak's backchannelDynamic:true setting.
+      ...(KEYCLOAK_INTERNAL_ISSUER && {
+        wellKnown: `${KEYCLOAK_INTERNAL_ISSUER}/.well-known/openid-configuration`,
+      }),
     }),
   ],
 
@@ -76,7 +95,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 });
 
 async function refreshAccessToken(token: JWT): Promise<JWT> {
-  const issuer = process.env.AUTH_KEYCLOAK_ISSUER!;
+  // Use the internal Keycloak URL when available (same reason as OIDC discovery above).
+  const issuer = KEYCLOAK_INTERNAL_ISSUER ?? process.env.AUTH_KEYCLOAK_ISSUER!;
   const tokenEndpoint = `${issuer}/protocol/openid-connect/token`;
 
   try {

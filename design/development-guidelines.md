@@ -2869,6 +2869,83 @@ spring:
 
 Start services with `-Dspring-boot.run.profiles=local` to activate this profile.
 
+### Frontend / BFF — Server-side URL Isolation
+
+The Next.js BFF makes server-side HTTP calls (from inside the cluster) that are
+distinct from browser-side calls. External hostnames like `https://keycloak.local.test`
+only exist in the host machine's `/etc/hosts` file — they are not resolvable inside
+k3d pods via cluster DNS. Calls to those URLs from within a pod fail with `TypeError: fetch failed`.
+
+There are two naive fixes that each solve only half the problem:
+
+| Fix | Solves DNS? | Solves TLS? | Notes |
+|-----|-------------|-------------|-------|
+| Uncomment `hostAliases` in `k3d-cluster.yaml` (`keycloak.local.test → 172.17.0.1`) | ✅ | ❌ | TLS cert is signed by `local-test-ca`; Node.js does not trust it by default. Still need `NODE_EXTRA_CA_CERTS`. Requires cluster recreation. |
+| Internal service URL (`http://keycloak-service.keycloak.svc.cluster.local:8080`) | ✅ | ✅ (HTTP, no TLS) | Direct in-cluster route. No cluster recreation needed. Portable across all k8s environments. |
+
+**The correct pattern: internal URLs for server-side, external URLs for browser-side.**
+
+For Keycloak, this is achieved via `AUTH_KEYCLOAK_INTERNAL_ISSUER` combined with
+Keycloak's `hostname.backchannelDynamic: true` operator setting. When the OIDC
+discovery document is fetched from the internal URL:
+
+- `issuer` field → always the configured external hostname (`https://keycloak.${CLUSTER_DOMAIN}/realms/e-commerce`) — used for JWT `iss` claim validation, must stay external
+- `authorization_endpoint` → external URL (Keycloak's front-channel, browser-facing; not affected by `backchannelDynamic`) — browser redirects work correctly
+- `token_endpoint` / `jwks_uri` → internal URL (Keycloak derives these from the incoming request when `backchannelDynamic: true`) — server-side token exchange and JWKS validation stay in-cluster
+
+Auth.js compares the `issuer` field from the discovery document against `AUTH_KEYCLOAK_ISSUER`.
+Both equal the external hostname, so issuer validation passes even though discovery was
+fetched internally.
+
+#### ConfigMap entries (frontend-service)
+
+```yaml
+# External hostname — used by Auth.js to validate the JWT iss claim and by
+# browsers for the OAuth2 authorization redirect.
+AUTH_KEYCLOAK_ISSUER: "https://keycloak.${CLUSTER_DOMAIN}/realms/e-commerce"
+
+# Internal service URL — used server-side for OIDC discovery and token exchange.
+# Avoids DNS resolution failure (external hostnames not resolvable inside k3d pods)
+# and TLS issues (self-signed CA not trusted by Node.js without NODE_EXTRA_CA_CERTS).
+AUTH_KEYCLOAK_INTERNAL_ISSUER: "http://keycloak-service.keycloak.svc.cluster.local:8080/realms/e-commerce"
+
+# Microservice base URLs — internal k8s DNS, no TLS, no external routing.
+PRODUCTS_SERVICE_URL: "http://product-service.e-commerce.svc.cluster.local:8081"
+ORDERS_SERVICE_URL:   "http://order-service.e-commerce.svc.cluster.local:8082"
+REVIEWS_SERVICE_URL:  "http://reviews-service.e-commerce.svc.cluster.local:8083"
+USERS_SERVICE_URL:    "http://user-service.e-commerce.svc.cluster.local:8085"
+CART_SERVICE_URL:     "http://cart-service.e-commerce.svc.cluster.local:8086"
+```
+
+#### Auth.js `wellKnown` override (`src/auth.ts`)
+
+When `AUTH_KEYCLOAK_INTERNAL_ISSUER` is set, override the discovery URL on the
+`Keycloak()` provider. `AUTH_KEYCLOAK_ISSUER` continues to be used automatically
+for issuer validation and browser redirect construction.
+
+```typescript
+const KEYCLOAK_INTERNAL_ISSUER = process.env.AUTH_KEYCLOAK_INTERNAL_ISSUER;
+
+Keycloak({
+  authorization: { params: { scope: "openid profile email ..." } },
+  // Fetch OIDC discovery from internal service URL when running in Kubernetes.
+  // Falls back to default behaviour (AUTH_KEYCLOAK_ISSUER) when not set.
+  ...(KEYCLOAK_INTERNAL_ISSUER && {
+    wellKnown: `${KEYCLOAK_INTERNAL_ISSUER}/.well-known/openid-configuration`,
+  }),
+})
+```
+
+The `refreshAccessToken` helper must also use the internal URL:
+
+```typescript
+const issuer = KEYCLOAK_INTERNAL_ISSUER ?? process.env.AUTH_KEYCLOAK_ISSUER!;
+const tokenEndpoint = `${issuer}/protocol/openid-connect/token`;
+```
+
+This pattern is fully backward-compatible: without `AUTH_KEYCLOAK_INTERNAL_ISSUER`
+(local development), Auth.js behaves exactly as before.
+
 ---
 
 ## 19. CI/CD — GitHub Actions
