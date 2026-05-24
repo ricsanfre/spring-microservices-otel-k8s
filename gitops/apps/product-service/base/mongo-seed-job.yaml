@@ -24,6 +24,8 @@ spec:
       initContainers:
         # Wait until MongoDB is reachable before running the seed script.
         # Avoids CrashLoopBackOff when the replica set is still initialising.
+        # Uses mongosh exit-code directly (no pipeline) and connects without
+        # credentials — MongoDB's ping command requires no authentication.
         - name: wait-for-mongodb
           image: mongo:8.0
           command:
@@ -31,17 +33,11 @@ spec:
             - -c
             - |
               echo "Waiting for MongoDB to become ready..."
-              until mongosh "$MONGODB_URI" --eval "db.adminCommand('ping').ok" --quiet 2>/dev/null | grep -q 1; do
+              until mongosh --host mongodb-0.mongodb-svc.databases.svc.cluster.local --port 27017 --eval "db.adminCommand('ping')" --quiet; do
                 echo "  MongoDB not ready yet — retrying in 5s"
                 sleep 5
               done
               echo "MongoDB is ready."
-          env:
-            - name: MONGODB_URI
-              valueFrom:
-                secretKeyRef:
-                  name: product-service-mongodb-secret
-                  key: MONGODB_URI
           resources:
             requests:
               cpu: 50m
