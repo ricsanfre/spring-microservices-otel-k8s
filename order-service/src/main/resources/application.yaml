@@ -82,11 +82,17 @@ spring:
 server:
   port: 8082
 
-# Resilience4j — circuit breaker for user-service calls
+# Resilience4j — circuit breakers for service-to-service HTTP calls
 resilience4j:
   circuitbreaker:
     instances:
       user-service:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        register-health-indicator: true
+      product-service:
         sliding-window-size: 10
         failure-rate-threshold: 50
         wait-duration-in-open-state: 10s
@@ -100,10 +106,14 @@ resilience4j:
         retry-exceptions:
           - java.io.IOException
           - org.springframework.web.client.ResourceAccessException
+      # NOTE: no retry for product-service — reserveStock is not idempotent
   timelimiter:
     instances:
       user-service:
         timeout-duration: 3s
+      # Stock reservation is a transactional DB write; 5 s is the safe minimum
+      product-service:
+        timeout-duration: 5s
 
 # Per ADR-004: Caffeine TTL for sub → internal userId cache (minutes)
 order:

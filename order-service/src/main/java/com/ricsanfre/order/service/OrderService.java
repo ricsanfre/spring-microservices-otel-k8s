@@ -21,6 +21,7 @@ import io.micrometer.tracing.Tracer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
+import org.springframework.cloud.client.circuitbreaker.NoFallbackAvailableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -118,6 +119,9 @@ public class OrderService {
             productServiceClient.reserveStock(new ProductServiceClient.StockReserveRequest(items));
         } catch (HttpClientErrorException.Conflict ex) {
             throw new BusinessRuleException("Insufficient stock for one or more items in order " + id);
+        } catch (NoFallbackAvailableException ex) {
+            throw new BusinessRuleException(
+                    "Product service is temporarily unavailable — please retry confirming order " + id);
         }
 
         order.setStatus(OrderStatus.CONFIRMED);
