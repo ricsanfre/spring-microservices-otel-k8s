@@ -47,22 +47,8 @@ REVIEWS_SERVICE_CLIENT_SECRET ?= reviews-service-secret
         ns-build ns-test ns-verify ns-image \
         ns-run \
         k3d-create k3d-delete k3d-info \
-        k8s-namespaces k8s-keycloak-operator \
-		k8s-postgres-secret k8s-keycloak-secret k8s-mongodb-secrets k8s-grafana-secret k8s-frontend-service-secret \
-		k8s-us-secret k8s-ps-secret k8s-cs-secret k8s-os-secret k8s-rvs-secret k8s-ns-secret k8s-secrets \
-		k8s-eso-helm k8s-infra-eso \
-		k8s-cert-manager-helm k8s-envoy-gateway-helm k8s-strimzi-operator-helm k8s-cnpg-operator-helm k8s-mongodb-operator-helm k8s-otel-operator-helm \
-        k8s-infra k8s-infra-cert-manager k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey \
-        k8s-infra-kafka k8s-infra-keycloak k8s-infra-envoy-gateway k8s-infra-monitoring k8s-infra-otel-collector k8s-up \
         flux-operator-install flux-bootstrap flux-status \
-        k8s-apps-deploy k8s-apps-delete k8s-ecommerce-config k8s-ecommerce-config-delete \
-        k8s-us-deploy k8s-us-delete k8s-us-image \
-        k8s-ps-deploy k8s-ps-delete k8s-ps-image \
-        k8s-cs-deploy k8s-cs-delete k8s-cs-image \
-        k8s-os-deploy k8s-os-delete k8s-os-image \
-        k8s-rvs-deploy k8s-rvs-delete k8s-rvs-image \
-        k8s-ns-deploy k8s-ns-delete k8s-ns-image \
-        k8s-fe-deploy k8s-fe-delete k8s-fe-image
+        ghcr-us-image ghcr-ps-image ghcr-cs-image ghcr-os-image ghcr-rvs-image ghcr-ns-image ghcr-fe-image
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Help
@@ -331,229 +317,9 @@ k3d-info: ## Show k3d cluster status and kubeconfig context
 	@echo ""
 	@kubectl config get-contexts
 
-# ──────────────────────────────────────────────────────────────────────────────
-# k8s — Infra installation  (run once after k3d-create)
-# ──────────────────────────────────────────────────────────────────────────────
-
-k8s-namespaces: ## Create all Kubernetes namespaces
-	kubectl apply -f gitops/infrastructure/namespaces/namespaces.yaml
-
-k8s-postgres-secret: ## Create Kubernetes secret for PostgreSQL credentials (used by CNPG bootstrap)
-	kubectl create secret generic postgres-superuser-secret \
-	--from-literal=username=postgres \
-	--from-literal=password=$(POSTGRES_PASSWORD) \
-	--namespace postgres
-	kubectl create secret generic users-db-secret \
-	--from-literal=username=users_owner \
-	--from-literal=password=$(USERS_DB_PASSWORD) \
-	--namespace postgres
-	kubectl create secret generic orders-db-secret \
-	--from-literal=username=orders_owner \
-	--from-literal=password=$(ORDERS_DB_PASSWORD) \
-	--namespace postgres
-	kubectl create secret generic keycloak-db-secret \
-	--from-literal=username=keycloak_owner \
-	--from-literal=password=$(KEYCLOAK_DB_PASSWORD) \
-	--namespace postgres
-	kubectl create secret generic keycloak-db-secret \
-	--from-literal=username=keycloak_owner \
-	--from-literal=password=$(KEYCLOAK_DB_PASSWORD) \
-	--namespace keycloak
-
-k8s-keycloak-secret: ## Create Kubernetes secret for Keycloak admin credentials (used by Keycloak Operator bootstrap)
-	kubectl create secret generic keycloak-admin-secret \
-	--from-literal=username=admin --from-literal=password=$(KEYCLOAK_PASSWORD) \
-	--namespace keycloak
-
-
-k8s-mongodb-secrets: ## Create Kubernetes secrets for MongoDB credentials (used by Community Operator bootstrap)
-	kubectl create secret generic mongodb-products-secret \
-	--from-literal=password=$(MONGODB_PRODUCTS_PASSWORD) --namespace mongodb
-	kubectl create secret generic mongodb-reviews-secret \
-	--from-literal=password=$(MONGODB_REVIEWS_PASSWORD) --namespace mongodb
-	kubectl create secret generic mongodb-notifications-secret \
-	--from-literal=password=$(MONGODB_NOTIFICATIONS_PASSWORD) --namespace mongodb
-
-k8s-grafana-secret: ## Create Kubernetes secret for Grafana admin credentials (used by kube-prometheus-stack)
-	kubectl create secret generic grafana-admin-secret \
-	--from-literal=admin-user=admin --from-literal=admin-password=$(GRAFANA_PASSWORD) \
-	--namespace monitoring
-
-k8s-frontend-service-secret: ## Create Kubernetes secret for frontend-service (Auth.js session key + Keycloak BFF client secret)
-	kubectl create secret generic frontend-service-secret \
-	--from-literal=AUTH_SECRET=$(openssl rand -base64 32) \
-	--from-literal=AUTH_KEYCLOAK_SECRET=$(FRONTEND_SERVICE_KEYCLOAK_SECRET) \
-	--namespace e-commerce
-
-k8s-us-secret: ## Create Kubernetes secret for user-service DB credentials
-	kubectl create secret generic user-service-db-secret \
-	--from-literal=username=users_owner \
-	--from-literal=password=$(USERS_DB_PASSWORD) \
-	--namespace e-commerce
-
-k8s-ps-secret: ## Create Kubernetes secret for product-service MongoDB URI
-	kubectl create secret generic product-service-mongodb-secret \
-	--from-literal=MONGODB_URI="mongodb://products_owner:$(MONGODB_PRODUCTS_PASSWORD)@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/products?authSource=admin&replicaSet=mongodb" \
-	--namespace e-commerce
-
-k8s-cs-secret: ## Create Kubernetes secrets for cart-service (OAuth2 client + Kafka password from Strimzi)
-	kubectl create secret generic cart-service-oauth-secret \
-	--from-literal=CART_SERVICE_CLIENT_SECRET=$(CART_SERVICE_CLIENT_SECRET) \
-	--namespace e-commerce
-	kubectl create secret generic cart-service-kafka-secret \
-	--from-literal=password="$(shell kubectl get secret cart-service -n kafka -o jsonpath='{.data.password}' | base64 -d)" \
-	--namespace e-commerce
-
-k8s-os-secret: ## Create Kubernetes secrets for order-service (DB password + OAuth2 client + Kafka password from Strimzi)
-	kubectl create secret generic order-service-db-secret \
-	--from-literal=password=$(ORDERS_DB_PASSWORD) \
-	--namespace e-commerce
-	kubectl create secret generic order-service-oauth-secret \
-	--from-literal=ORDER_SERVICE_CLIENT_SECRET=$(ORDER_SERVICE_CLIENT_SECRET) \
-	--namespace e-commerce
-	kubectl create secret generic order-service-kafka-secret \
-	--from-literal=password="$(shell kubectl get secret order-service -n kafka -o jsonpath='{.data.password}' | base64 -d)" \
-	--namespace e-commerce
-
-k8s-rvs-secret: ## Create Kubernetes secrets for reviews-service (MongoDB URI + OAuth2 client)
-	kubectl create secret generic reviews-service-mongodb-secret \
-	--from-literal=MONGODB_URI="mongodb://reviews_owner:$(MONGODB_REVIEWS_PASSWORD)@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/reviews?authSource=admin&replicaSet=mongodb" \
-	--namespace e-commerce
-	kubectl create secret generic reviews-service-oauth-secret \
-	--from-literal=REVIEWS_SERVICE_CLIENT_SECRET=$(REVIEWS_SERVICE_CLIENT_SECRET) \
-	--namespace e-commerce
-
-k8s-ns-secret: ## Create Kubernetes secret for notification-service Kafka password (from Strimzi)
-	kubectl create secret generic notification-service-kafka-secret \
-	--from-literal=password="$(shell kubectl get secret notification-service -n kafka -o jsonpath='{.data.password}' | base64 -d)" \
-	--namespace e-commerce
-
-k8s-secrets: k8s-postgres-secret k8s-keycloak-secret k8s-mongodb-secrets k8s-grafana-secret k8s-frontend-service-secret k8s-us-secret k8s-ps-secret k8s-cs-secret k8s-os-secret k8s-rvs-secret k8s-ns-secret ## Create all Kubernetes secrets
-
-k8s-cert-manager-helm: ## [DEPRECATED — use Flux HelmRelease] Install cert-manager + trust-manager via Helm
-	@echo "── cert-manager ────────────────────────────────────────────────────"
-	helm repo add jetstack https://charts.jetstack.io --force-update
-	helm upgrade --install cert-manager jetstack/cert-manager \
-	    --namespace cert-manager --create-namespace \
-	    --version v1.16.2 \
-	    --values gitops/infrastructure/cert-manager/base/cert-manager-values.yaml \
-	    --wait
-k8s-envoy-gateway-helm: ## [DEPRECATED — use Flux HelmRelease] Install Envoy Gateway via Helm (version controlled by helm chart version v1.4.1)
-	@echo "── Envoy Gateway ───────────────────────────────────────────────────"
-	helm upgrade --install envoy-gateway \
-	    oci://docker.io/envoyproxy/gateway-helm \
-	    --version v1.4.1 \
-	    --namespace envoy-gateway-system --create-namespace \
-	    --values gitops/infrastructure/envoy-gateway/base/envoy-gateway-values.yaml \
-	    --wait
-k8s-strimzi-operator-helm: ## [DEPRECATED — use Flux HelmRelease] Install Strimzi Kafka Operator via Helm (version controlled by strimzi-operator-values.yaml)
-	@echo "── Strimzi Kafka Operator ───────────────────────────────────────────"
-	helm upgrade --install strimzi-kafka-operator \
-	    oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-		--version 1.0.0 \
-	    --namespace kafka --create-namespace \
-	    --values gitops/infrastructure/kafka/base/strimzi-operator-values.yaml \
-	    --wait
-
-k8s-cnpg-operator-helm: ## [DEPRECATED — use Flux HelmRelease] Install CloudNativePG Operator via Helm (version controlled by cnpg-operator-values.yaml)
-	@echo "── CloudNativePG Operator ───────────────────────────────────────────"
-	helm repo add cnpg https://cloudnative-pg.github.io/charts --force-update
-	helm upgrade --install cnpg cnpg/cloudnative-pg \
-	    --namespace cnpg-system --create-namespace \
-	    --values gitops/infrastructure/databases/base/cnpg-operator-values.yaml \
-	    --wait
-
-k8s-mongodb-operator-helm: ## [DEPRECATED — use Flux HelmRelease] Install MongoDB Community Operator via Helm (version controlled by mongodb-operator-values.yaml)
-	@echo "── MongoDB Community Operator ────────────────────────────────────────"
-	helm repo add mongodb https://mongodb.github.io/helm-charts --force-update
-	helm upgrade --install mongodb-operator mongodb/community-operator \
-	    --namespace mongodb --create-namespace \
-	    --values gitops/infrastructure/databases/base/mongodb-operator-values.yaml \
-	    --wait
-
-k8s-otel-operator-helm: ## [DEPRECATED — use Flux HelmRelease] Install OpenTelemetry Operator via Helm (version controlled by otel-operator-values.yaml)
-	@echo "── OpenTelemetry Operator ────────────────────────────────────────────"
-	helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts --force-update
-	helm upgrade --install opentelemetry-operator open-telemetry/opentelemetry-operator \
-	    --namespace monitoring --create-namespace \
-	    --values gitops/infrastructure/observability/base/otel-operator-values.yaml \
-	    --wait
-
-k8s-keycloak-operator: ## [DEPRECATED — use Flux after Phase 3 bootstrap] Install Keycloak Operator via Kustomize (version controlled by KEYCLOAK_OPERATOR_VERSION)
-	@echo "Installing Keycloak Operator v$(KEYCLOAK_OPERATOR_VERSION) via Kustomize"
-	@# Substitute the version into the kustomization.yaml URLs before applying
-	kustomize build gitops/infrastructure/keycloak/base/operator \
-	    | sed 's|/26\.6\.1/|/$(KEYCLOAK_OPERATOR_VERSION)/|g' \
-	    | kubectl apply -f -
-
-k8s-eso-helm: ## [DEPRECATED — use Flux HelmRelease] Install External Secrets Operator via Helm
-	@echo "── External Secrets Operator ───────────────────────────────────────────────────────"
-	helm repo add external-secrets https://charts.external-secrets.io --force-update
-	helm upgrade --install external-secrets external-secrets/external-secrets \
-	    --namespace external-secrets --create-namespace \
-	    --version 0.14.0 \
-	    --values gitops/infrastructure/eso-stores/base/eso-values.yaml \
-	    --wait
-
-k8s-infra-eso: k8s-eso-helm ## Deploy ClusterSecretStore (Fake provider) — ExternalSecrets live with each component
-	kubectl apply -k gitops/infrastructure/eso-stores/overlays/staging
-	@echo "ClusterSecretStore applied. ExternalSecrets are deployed together with each infra/app component."
-
-k8s-infra-cert-manager: k8s-cert-manager-helm ## Deploy cert-manager issuers + wildcard TLS certificate
-	kubectl apply -k gitops/infrastructure/cert-manager/overlays/staging
-	@echo "Waiting for local-test-ca-issuer to be Ready..."
-	kubectl wait --for=condition=ready clusterissuer/local-test-ca-issuer --timeout=120s
-
-k8s-infra-postgres: k8s-cnpg-operator-helm ## Deploy PostgreSQL cluster via CNPG operator
-	kubectl apply -k gitops/infrastructure/databases/overlays/staging
-
-k8s-infra-mongodb: k8s-mongodb-operator-helm ## Deploy MongoDB replica set via Community operator
-	kubectl apply -k gitops/infrastructure/databases/overlays/staging
-
-k8s-infra-kafka: k8s-strimzi-operator-helm ## Deploy Kafka cluster + topics via Strimzi operator
-	kubectl apply -k gitops/infrastructure/kafka/overlays/staging
-
-k8s-infra-keycloak: k8s-keycloak-operator ## Deploy Keycloak instance + realm import via Keycloak operator
-	kubectl apply -k gitops/infrastructure/keycloak/overlays/staging
-
-k8s-infra-envoy-gateway: k8s-envoy-gateway-helm ## Deploy Envoy Gateway resources (GatewayClass, Gateway, HTTPRoutes, SecurityPolicy)
-	kubectl apply -k gitops/infrastructure/envoy-gateway/overlays/staging
-
-k8s-infra-monitoring: ## [DEPRECATED — use Flux HelmReleases] Deploy observability stack: kube-prometheus-stack + Tempo + Loki (monolithic, emptyDir)
-	@echo "── Grafana ExternalSecret (admin credentials) ───────────────────────"
-	kubectl apply -k gitops/infrastructure/observability/overlays/staging
-	@echo "── kube-prometheus-stack (Prometheus + Grafana) ────────────────────"
-	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
-	helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack \
-	    --namespace monitoring --create-namespace \
-	    --values gitops/infrastructure/observability/base/kube-prometheus-stack-values.yaml \
-	    --wait --timeout 10m
-	@echo "── Grafana Tempo (monolithic) ───────────────────────────────────────"
-	helm repo add grafana https://grafana.github.io/helm-charts --force-update
-	helm upgrade --install tempo grafana/tempo \
-	    --namespace monitoring --create-namespace \
-	    --values gitops/infrastructure/observability/base/tempo-values.yaml \
-	    --wait
-	@echo "── Grafana Loki (monolithic) ────────────────────────────────────────"
-	helm upgrade --install loki grafana/loki \
-	    --namespace monitoring --create-namespace \
-	    --values gitops/infrastructure/observability/base/loki-values.yaml \
-	    --wait --timeout 5m
-
-k8s-infra-otel-collector: k8s-otel-operator-helm ## Deploy OpenTelemetry Collector via the OTel Operator
-	kubectl apply -k gitops/infrastructure/observability/overlays/staging
-
-k8s-infra-valkey: ## Deploy Valkey (Redis-compatible cache) via plain Deployment
-	kubectl apply -k gitops/infrastructure/valkey/overlays/staging
-
-k8s-infra: k8s-namespaces k8s-infra-eso k8s-infra-cert-manager k8s-infra-envoy-gateway k8s-infra-postgres k8s-infra-mongodb k8s-infra-valkey k8s-infra-kafka k8s-infra-keycloak k8s-infra-monitoring k8s-infra-otel-collector ## Deploy all infrastructure resources (eso, cert-manager, postgres, mongodb, valkey, kafka, keycloak, envoy-gateway, monitoring, otel-collector)
-
-k8s-up: k3d-create k8s-infra ## Full staging environment setup (create cluster + install operators + deploy infra)
-# After k8s-up, push images with k8s-*-image targets (GITHUB_OWNER=<your-username>)
-# then deploy with k8s-apps-deploy
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Flux CD — GitOps bootstrap (Phase 3)
+# Flux CD — GitOps bootstrap 
 # ──────────────────────────────────────────────────────────────────────────────
 
 flux-operator-install: ## Install Flux Operator via Helm (prerequisite for flux-bootstrap)
@@ -568,118 +334,52 @@ flux-status: ## Show status of all Flux Kustomizations and HelmReleases
 	flux get helmreleases --all-namespaces
 
 # ──────────────────────────────────────────────────────────────────────────────
-# k8s — application deployment
+# Image build and push to GitHub Container Registry (ghcr.io)
 # ──────────────────────────────────────────────────────────────────────────────
 
-k8s-us-image: us-build ## Build + push user-service image to ghcr.io
+ghcr-us-image: us-build ## Build + push user-service image to ghcr.io
 	$(MAVEN) -N install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl user-service jib:build \
 	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO) \
 	    --no-transfer-progress
 
-k8s-us-deploy: ## Deploy user-service to staging (Kustomize staging overlay)
-	kubectl apply -k gitops/apps/user-service/overlays/staging
-
-k8s-us-delete: ## Remove user-service from staging
-	kubectl delete -k gitops/apps/user-service/overlays/staging --ignore-not-found
-
-k8s-cs-image: cs-build ## Build + push cart-service image to ghcr.io
+ghcr-cs-image: cs-build ## Build + push cart-service image to ghcr.io
 	$(MAVEN) -N install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl cart-service jib:build \
 	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO) \
 	    --no-transfer-progress
 
-k8s-cs-deploy: ## Deploy cart-service to staging (Kustomize staging overlay)
-	kubectl apply -k gitops/apps/cart-service/overlays/staging
-
-k8s-cs-delete: ## Remove cart-service from staging
-	kubectl delete -k gitops/apps/cart-service/overlays/staging --ignore-not-found
-
-k8s-ps-image: ps-build ## Build + push product-service image to ghcr.io
+ghcr-ps-image: ps-build ## Build + push product-service image to ghcr.io
 	$(MAVEN) -N install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl product-service jib:build \
 	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO) \
 	    --no-transfer-progress
 
-k8s-ps-deploy: ## Deploy product-service to staging (Kustomize staging overlay)
-	kubectl apply -k gitops/apps/product-service/overlays/staging
-
-k8s-ps-delete: ## Remove product-service from staging
-	kubectl delete -k gitops/apps/product-service/overlays/staging --ignore-not-found
-
-k8s-os-image: os-build ## Build + push order-service image to ghcr.io
+ghcr-os-image: os-build ## Build + push order-service image to ghcr.io
 	$(MAVEN) -N install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl order-service jib:build \
 	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO) \
 	    --no-transfer-progress
 
-k8s-os-deploy: ## Deploy order-service to staging (Kustomize staging overlay)
-	kubectl apply -k gitops/apps/order-service/overlays/staging
-
-k8s-os-delete: ## Remove order-service from staging
-	kubectl delete -k gitops/apps/order-service/overlays/staging --ignore-not-found
-
-k8s-rvs-image: rvs-build ## Build + push reviews-service image to ghcr.io
+ghcr-rvs-image: rvs-build ## Build + push reviews-service image to ghcr.io
 	$(MAVEN) -N install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl reviews-service jib:build \
 	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO) \
 	    --no-transfer-progress
 
-k8s-rvs-deploy: ## Deploy reviews-service to staging (Kustomize staging overlay)
-	kubectl apply -k gitops/apps/reviews-service/overlays/staging
-
-k8s-rvs-delete: ## Remove reviews-service from staging
-	kubectl delete -k gitops/apps/reviews-service/overlays/staging --ignore-not-found
-
-k8s-ns-image: ns-build ## Build + push notification-service image to ghcr.io
+ghcr-ns-image: ns-build ## Build + push notification-service image to ghcr.io
 	$(MAVEN) -N install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl common install -DskipTests --no-transfer-progress
 	$(MAVEN) -pl notification-service jib:build \
 	    -Ddocker.registry=ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO) \
 	    --no-transfer-progress
 
-k8s-ns-deploy: ## Deploy notification-service to staging (Kustomize staging overlay)
-	kubectl apply -k gitops/apps/notification-service/overlays/staging
-
-k8s-ns-delete: ## Remove notification-service from staging
-	kubectl delete -k gitops/apps/notification-service/overlays/staging --ignore-not-found
-
-k8s-fe-image: ## Build + push frontend-service image to ghcr.io
+ghcr-fe-image: ## Build + push frontend-service image to ghcr.io
 	docker build -t ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO)/frontend-service:latest frontend-service/
 	docker push ghcr.io/$(GITHUB_OWNER)/$(GITHUB_REPO)/frontend-service:latest
 
-k8s-fe-deploy: ## Deploy frontend-service to staging (Kustomize staging overlay)
-	kubectl apply -k gitops/apps/frontend-service/overlays/staging
-
-k8s-fe-delete: ## Remove frontend-service from staging
-	kubectl delete -k gitops/apps/frontend-service/overlays/staging --ignore-not-found
-
-k8s-ecommerce-config: ## Apply e-commerce platform config (Keycloak realm, Kafka topics+users, DB schemas)
-	kubectl apply -k gitops/apps/core-config/overlays/staging
-
-k8s-ecommerce-config-delete: ## Remove e-commerce platform config
-	kubectl delete -k gitops/apps/core-config/overlays/staging --ignore-not-found
-
-k8s-apps-deploy: k8s-ecommerce-config ## Deploy all services to staging (includes e-commerce platform config)
-	kubectl apply -k gitops/apps/user-service/overlays/staging
-	kubectl apply -k gitops/apps/product-service/overlays/staging
-	kubectl apply -k gitops/apps/cart-service/overlays/staging
-	kubectl apply -k gitops/apps/order-service/overlays/staging
-	kubectl apply -k gitops/apps/reviews-service/overlays/staging
-	kubectl apply -k gitops/apps/notification-service/overlays/staging
-	kubectl apply -k gitops/apps/frontend-service/overlays/staging
-
-k8s-apps-delete: ## Remove all services from staging
-	kubectl delete -k gitops/apps/user-service/overlays/staging --ignore-not-found
-	kubectl delete -k gitops/apps/product-service/overlays/staging --ignore-not-found
-	kubectl delete -k gitops/apps/cart-service/overlays/staging --ignore-not-found
-	kubectl delete -k gitops/apps/order-service/overlays/staging --ignore-not-found
-	kubectl delete -k gitops/apps/reviews-service/overlays/staging --ignore-not-found
-	kubectl delete -k gitops/apps/notification-service/overlays/staging --ignore-not-found
-	kubectl delete -k gitops/apps/frontend-service/overlays/staging --ignore-not-found
-	kubectl delete -k gitops/apps/core-config/overlays/staging --ignore-not-found
