@@ -34,11 +34,11 @@ hostAliases:
     hostnames:
       - kube-api.local.test
       # ── IAM ────────────────────────────────────────────────────────────────
-      - keycloak.local.test
-      # ── Business services ──────────────────────────────────────────────────
-      - api.local.test          # single ingress hostname for all /api/v1/* routes
+      #- keycloak.local.test
+      # ── Access to e-commerce front-end ────────────────── ──────────────────
+      #- app.local.test          # single ingress hostname for all /api/v1/* routes
       # ── Observability ──────────────────────────────────────────────────────
-      - grafana.local.test
+      # - grafana.local.test
 
 options:
   k3s:
