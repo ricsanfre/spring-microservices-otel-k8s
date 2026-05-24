@@ -1,0 +1,79 @@
+# Job — seeds the products MongoDB collection with sample books.
+#
+# Runs once on initial deployment; idempotent (skips silently if data already
+# exists). Uses mongosh from the official mongo:8.0 image — matches the
+# MongoDB version deployed by the Community Operator.
+#
+# Namespace: e-commerce
+# Credentials: product-service-mongodb-secret (provisioned by external-secrets.yaml)
+# Script: mongo-seed-script ConfigMap (mongo-seed-configmap.yaml)
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongo-products-seed
+  namespace: e-commerce
+spec:
+  # Keep the completed Pod around for 10 minutes so logs can be inspected;
+  # then garbage-collected automatically.
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 4
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        # Wait until MongoDB is reachable before running the seed script.
+        # Avoids CrashLoopBackOff when the replica set is still initialising.
+        - name: wait-for-mongodb
+          image: mongo:8.0
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for MongoDB to become ready..."
+              until mongosh "$MONGODB_URI" --eval "db.adminCommand('ping').ok" --quiet 2>/dev/null | grep -q 1; do
+                echo "  MongoDB not ready yet — retrying in 5s"
+                sleep 5
+              done
+              echo "MongoDB is ready."
+          env:
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: product-service-mongodb-secret
+                  key: MONGODB_URI
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+      containers:
+        - name: mongosh
+          image: mongo:8.0
+          command:
+            - sh
+            - -c
+            - mongosh "$MONGODB_URI" /scripts/init-products.js
+          env:
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: product-service-mongodb-secret
+                  key: MONGODB_URI
+          volumeMounts:
+            - name: seed-script
+              mountPath: /scripts
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: seed-script
+          configMap:
+            name: mongo-seed-script

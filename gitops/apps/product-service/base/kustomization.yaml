@@ -7,6 +7,8 @@ resources:
   - deployment.yaml
   - service.yaml
   - external-secrets.yaml
+  - mongo-seed-configmap.yaml
+  - mongo-seed-job.yaml
 
 labels:
   - pairs:
