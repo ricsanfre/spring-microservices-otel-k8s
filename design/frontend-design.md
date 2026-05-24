@@ -43,7 +43,7 @@ Browser
 | Scopes requested | `openid profile email` + all service scopes: `products:read/write`, `orders:read/write`, `reviews:read/write`, `users:read`, `cart:read/write` |
 | Session storage | Encrypted JWT cookie (stateless — no server-side session store) |
 | Custom `/login` page | `pages.signIn = "/login"` |
-| Kubernetes OIDC discovery | When `AUTH_KEYCLOAK_INTERNAL_ISSUER` is set, the `wellKnown` URL is overridden to the internal Keycloak service URL. Auth.js still validates the JWT `iss` claim against `AUTH_KEYCLOAK_ISSUER` (external). See §2.5. |
+| Kubernetes OIDC endpoints | When `AUTH_KEYCLOAK_INTERNAL_ISSUER` is set, the token and userinfo endpoints use the internal Keycloak service URL (server-side calls stay in-cluster). OIDC discovery is bypassed entirely — no server-side request to the external hostname. Auth.js still validates the JWT `iss` claim against `AUTH_KEYCLOAK_ISSUER` (external). See §2.5. |
 
 ### 2.2 JWT Callback — what is stored in the session cookie
 
@@ -84,22 +84,30 @@ error — the cert is signed by `local-test-ca`, which Node.js does not trust by
 
 **Solution:** set `AUTH_KEYCLOAK_INTERNAL_ISSUER` to the internal Keycloak service URL
 (`http://keycloak-service.keycloak.svc.cluster.local:8080/realms/e-commerce`). When present,
-it is used for:
+it is used for all server-side Keycloak calls:
 
-- OIDC discovery (`wellKnown` override on the `Keycloak()` provider)
+- Token endpoint during authorization code exchange (`oauth4webapi` back-channel call)
+- Userinfo endpoint after code exchange
 - Token endpoint in `refreshAccessToken()` (see §2.4)
-- Lazy registration (`USERS_SERVICE_URL` env var, already internal)
 
 `AUTH_KEYCLOAK_ISSUER` (external) is still required and must match the `iss` claim embedded in
-all JWTs. The OIDC discovery document's `issuer` field always equals Keycloak's configured
-external hostname regardless of where the document is fetched from, so Auth.js issuer validation
-passes.
+all JWTs. It is also used as the base for the `authorization_endpoint` — the browser is
+redirected to the external Keycloak URL to authenticate.
 
-Keycloak must be configured with `hostname.backchannelDynamic: true` (set in the `Keycloak` CR).
-This causes `token_endpoint` and `jwks_uri` in the discovery document to be based on the incoming
-request URL when fetched internally — returning internal URLs that the pod can reach over plain
-HTTP. `authorization_endpoint` remains the external URL (browser-facing; not affected by
-`backchannelDynamic`), so browser redirects to Keycloak continue to work.
+#### How OIDC discovery is avoided
+
+`oauth4webapi` (the library used internally by Auth.js) skips the `discoveryRequest()` call
+when all three of `authorization.url`, `token`, and `userinfo` are set to real
+(non-`authjs.dev`) URLs on the provider. The `Keycloak()` provider is configured with explicit
+endpoint URLs so that **no server-side request is ever made to the external Keycloak hostname**:
+
+- `authorization.url` — external URL (browser redirect; must be reachable by the user's browser)
+- `token` / `userinfo` — `KEYCLOAK_INTERNAL_ISSUER` (falls back to external in local dev)
+
+This bypasses OIDC discovery entirely. The `iss` claim in the returned ID token is validated
+against `provider.issuer` (`AUTH_KEYCLOAK_ISSUER`), which matches because Keycloak always
+embeds the configured external hostname in `iss` regardless of which URL the token was
+requested from.
 
 > **Why not `hostAliases` in `k3d-cluster.yaml`?**  
 > Enabling `keycloak.local.test` in `hostAliases` resolves the DNS layer but not the TLS layer.
@@ -320,7 +328,7 @@ Service base URLs are resolved from environment variables (`PRODUCTS_SERVICE_URL
 | `AUTH_KEYCLOAK_ID` | Keycloak client ID | `e-commerce-web` |
 | `AUTH_KEYCLOAK_SECRET` | Keycloak client secret | — (required) |
 | `AUTH_KEYCLOAK_ISSUER` | Keycloak external realm URL — must match the `iss` claim in JWTs and be reachable by the browser for authorization redirects | — (required) |
-| `AUTH_KEYCLOAK_INTERNAL_ISSUER` | Keycloak internal service URL for server-side OIDC discovery and token exchange (Kubernetes only — see §2.6). Unset for local development. | unset |
+| `AUTH_KEYCLOAK_INTERNAL_ISSUER` | Keycloak internal service URL for server-side token exchange and token refresh (Kubernetes only — see §2.5). Bypasses OIDC discovery. Unset for local development. | unset |
 | `PRODUCTS_SERVICE_URL` | product-service base URL | `http://localhost:8081` |
 | `ORDERS_SERVICE_URL` | order-service base URL | `http://localhost:8082` |
 | `REVIEWS_SERVICE_URL` | reviews-service base URL | `http://localhost:8083` |

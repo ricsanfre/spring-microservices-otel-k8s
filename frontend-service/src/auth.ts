@@ -1,53 +1,33 @@
 import NextAuth from "next-auth";
 import Keycloak from "next-auth/providers/keycloak";
-import { customFetch } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 
 const USERS_SERVICE_URL = process.env.USERS_SERVICE_URL ?? "http://localhost:8085";
 
-// When running inside Kubernetes, all server-side OIDC requests (discovery,
-// token exchange, JWKS) must use the internal Keycloak service URL to avoid
-// DNS / TLS failures inside the pod.
+// Keycloak URL strategy — two different base URLs serve different purposes:
 //
-// Auth.js (oauth4webapi) always derives the discovery URL from provider.issuer
-// and ignores the `wellKnown` option.  The correct interception point is
-// `customFetch`, which oauth4webapi calls for every request it makes.
+//   AUTH_KEYCLOAK_ISSUER (external, e.g. https://keycloak.local.test/realms/e-commerce)
+//     • Must match the "iss" claim in every JWT issued by Keycloak.
+//     • Used for: provider.issuer (iss claim validation), authorization endpoint
+//       (browser redirect — user must be able to reach this URL).
 //
-// Strategy: rewrite the origin of any request that starts with the external
-// Keycloak hostname to the internal cluster-DNS address.  Everything else is
-// passed through unchanged.
+//   AUTH_KEYCLOAK_INTERNAL_ISSUER (internal, e.g. http://keycloak-service.keycloak.svc.cluster.local:8080/realms/e-commerce)
+//     • Used for server-side back-channel calls that never leave the cluster.
+//     • Used for: token endpoint (code exchange), userinfo endpoint, token refresh.
+//     • Absent in local dev — falls back to AUTH_KEYCLOAK_ISSUER.
 //
-// Why issuer validation still passes:
-//   The discovery doc's "issuer" field is always Keycloak's configured external
-//   hostname (AUTH_KEYCLOAK_ISSUER).  oauth4webapi checks that this matches the
-//   issuer URL passed to discoveryRequest() — which is also AUTH_KEYCLOAK_ISSUER
-//   — so the check passes even though the HTTP request was rewritten internally.
+// Why this works without OIDC discovery:
+//   Auth.js (oauth4webapi) skips the discoveryRequest() call in both
+//   authorization-url.js and callback.js when all three of authorization.url,
+//   token, and userinfo are set to real (non-authjs.dev) URLs.  No network
+//   call to the external Keycloak hostname is ever made server-side.
 //
-// Why authorization_endpoint keeps working in the browser:
-//   With backchannelDynamic:true, Keycloak always returns the external URL for
-//   authorization_endpoint (browser-facing). The rewrite only hits server-side
-//   fetches made by oauth4webapi; the browser redirect is unaffected.
-const KEYCLOAK_INTERNAL_ISSUER = process.env.AUTH_KEYCLOAK_INTERNAL_ISSUER;
-
-// Build a custom fetch that rewrites external→internal for oauth4webapi calls.
-// Only active when AUTH_KEYCLOAK_INTERNAL_ISSUER is configured (Kubernetes).
-const keycloakFetch = KEYCLOAK_INTERNAL_ISSUER
-  ? async (...args: Parameters<typeof fetch>): Promise<Response> => {
-      const [input, init] = args;
-      const externalBase = new URL(process.env.AUTH_KEYCLOAK_ISSUER!).origin;
-      const internalBase = new URL(KEYCLOAK_INTERNAL_ISSUER!).origin;
-      const urlStr =
-        input instanceof URL
-          ? input.href
-          : input instanceof Request
-            ? input.url
-            : String(input);
-      if (urlStr.startsWith(externalBase)) {
-        return fetch(urlStr.replace(externalBase, internalBase), init);
-      }
-      return fetch(...args);
-    }
-  : undefined;
+// Why backchannelDynamic:true is NOT needed for this approach:
+//   We bypass discovery entirely and point each endpoint explicitly, so the
+//   discovery document's endpoint rewrites are irrelevant here.
+const KEYCLOAK_EXTERNAL_ISSUER = process.env.AUTH_KEYCLOAK_ISSUER!;
+const KEYCLOAK_INTERNAL_ISSUER =
+  process.env.AUTH_KEYCLOAK_INTERNAL_ISSUER ?? KEYCLOAK_EXTERNAL_ISSUER;
 
 async function triggerLazyRegistration(accessToken: string): Promise<void> {
   try {
@@ -63,18 +43,26 @@ async function triggerLazyRegistration(accessToken: string): Promise<void> {
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     Keycloak({
-      // Auth.js v5 auto-reads AUTH_KEYCLOAK_ID / AUTH_KEYCLOAK_SECRET / AUTH_KEYCLOAK_ISSUER
-      // from the environment — no need to pass them explicitly.
-      // Request all optional scopes the BFF needs so they appear in the access_token.
+      // Auth.js v5 auto-reads AUTH_KEYCLOAK_ID / AUTH_KEYCLOAK_SECRET from env.
+      // issuer is read from AUTH_KEYCLOAK_ISSUER automatically — it is the
+      // external URL and must match the JWT "iss" claim.
+
+      // authorization: explicit URL (not just params) is required so that
+      // oauth4webapi skips OIDC discovery in the sign-in step.
+      // The browser is redirected here — must be the external (Envoy) URL.
       authorization: {
+        url: `${KEYCLOAK_EXTERNAL_ISSUER}/protocol/openid-connect/auth`,
         params: {
           scope:
             "openid profile email users:read orders:read orders:write products:read products:write reviews:read reviews:write cart:read cart:write",
         },
       },
-      // Intercept oauth4webapi requests to rewrite external→internal Keycloak URL.
-      // Active only in Kubernetes (AUTH_KEYCLOAK_INTERNAL_ISSUER is set).
-      ...(keycloakFetch && { [customFetch]: keycloakFetch }),
+
+      // token + userinfo: setting both to real URLs tells oauth4webapi to skip
+      // OIDC discovery in the callback step and use these endpoints directly.
+      // Internal URL is used so these server-side calls never leave the cluster.
+      token: `${KEYCLOAK_INTERNAL_ISSUER}/protocol/openid-connect/token`,
+      userinfo: `${KEYCLOAK_INTERNAL_ISSUER}/protocol/openid-connect/userinfo`,
     }),
   ],
 
@@ -124,9 +112,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 });
 
 async function refreshAccessToken(token: JWT): Promise<JWT> {
-  // Use the internal Keycloak URL when available (same reason as OIDC discovery above).
-  const issuer = KEYCLOAK_INTERNAL_ISSUER ?? process.env.AUTH_KEYCLOAK_ISSUER!;
-  const tokenEndpoint = `${issuer}/protocol/openid-connect/token`;
+  // Use the internal Keycloak URL (falls back to external in local dev).
+  const tokenEndpoint = `${KEYCLOAK_INTERNAL_ISSUER}/protocol/openid-connect/token`;
 
   try {
     const response = await fetch(tokenEndpoint, {
