@@ -36,3 +36,6 @@ data:
   REVIEWS_SERVICE_URL: "http://reviews-service.e-commerce.svc.cluster.local:8083"
   USERS_SERVICE_URL: "http://user-service.e-commerce.svc.cluster.local:8085"
   CART_SERVICE_URL: "http://cart-service.e-commerce.svc.cluster.local:8086"
+  # OpenTelemetry — traces exported via OTLP HTTP to the collector
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318"
+  OTEL_SERVICE_NAME: "frontend-service"
