@@ -13,6 +13,10 @@ kind: Job
 metadata:
   name: mongo-products-seed
   namespace: e-commerce
+  annotations:
+    # Allow Flux to delete + recreate this Job when spec.template changes
+    # (pod template fields are immutable on existing Jobs).
+    kustomize.toolkit.fluxcd.io/force: "true"
 spec:
   # Keep the completed Pod around for 10 minutes so logs can be inspected;
   # then garbage-collected automatically.
