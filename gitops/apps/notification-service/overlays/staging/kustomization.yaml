@@ -17,7 +17,7 @@ resources:
 images:
   - name: ghcr.io/ricsanfre/spring-microservices-otel-k8s/notification-service
     newName: ghcr.io/ricsanfre/spring-microservices-otel-k8s/notification-service
-    newTag: "1.0.0"   # Renovate keeps this field current via PRs
+    newTag: "1.0.1"   # Renovate keeps this field current via PRs
 
 patches:
   - patch: |
