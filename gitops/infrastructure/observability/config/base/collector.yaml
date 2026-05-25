@@ -83,7 +83,7 @@ spec:
 
       # Metrics → Prometheus OTLP receiver (kube-prometheus-stack Helm release)
       otlphttp/prometheus:
-        endpoint: http://kube-prom-stack-kube-prom-prometheus.monitoring.svc.cluster.local:9090/api/v1/otlp
+        endpoint: http://kube-prom-stack-kube-prome-prometheus.monitoring.svc.cluster.local:9090/api/v1/otlp
 
     # ── Pipelines ────────────────────────────────────────────────────────────
     service:
