@@ -47,13 +47,13 @@ spec:
       # Back-pressure guard — drop data rather than OOM the pod
       memory_limiter:
         check_interval: 1s
-        limit_percentage: 75
-        spike_limit_percentage: 15
+        limit_percentage: 80
+        spike_limit_percentage: 20
 
       # Batch before exporting — reduces downstream request count
       batch:
-        send_batch_size: 10000
-        timeout: 10s
+        send_batch_size: 2000
+        timeout: 2s
 
       # Enrich every signal with the deployment environment
       resource/staging:
