@@ -34,6 +34,9 @@ spec:
     strict: false
     backchannelDynamic: true
 
+  proxy:
+    headers: xforwarded
+
   db:
     vendor: postgres
     host: postgres-rw.databases.svc.cluster.local
@@ -53,31 +56,27 @@ spec:
 
   startOptimized: false
   additionalOptions:
-    # Were behind a proxy (Envoy Gateway) that terminates TLS, so we need to trust the x-forwarded headers for correct URL generation and OIDC discovery document.
-    - name: proxy-headers
-      value: xforwarded
     # Enables the telemetry feature
     - name: features
       value: "opentelemetry,opentelemetry-metrics,opentelemetry-logs"
+
     # OTEL endpoint
     - name: telemetry-endpoint
       value: "http://otel-collector.monitoring.svc.cluster.local:4317"
     - name: telemetry-protocol
       value: "grpc"
 
-      # Enable OpenTelemetry tracing (requires telemetry-endpoint and features=opentelemetry)
+    # Enable OpenTelemetry tracing (requires telemetry-endpoint and features=opentelemetry)
     - name: telemetry-tracing-enabled
       value: "true"
 
-      # Enable OpenTelemetry metrics (requires telemetry-endpoint and features=opentelemetry-metrics)
-    - name: metrics-enabled
-      value: "true"
+    # Enable OpenTelemetry metrics (requires telemetry-endpoint and features=opentelemetry-metrics)
     - name: telemetry-metrics-enabled
       value: "true"
     - name: telemetry-metrics-interval
       value: "30s"
 
-      # Enable OpenTelemetry logs (requires telemetry-endpoint and features=opentelemetry-logs)
+    # Enable OpenTelemetry logs (requires telemetry-endpoint and features=opentelemetry-logs)
     - name: telemetry-logs-enabled
       value: "true"
     - name: telemetry-logs-level
@@ -86,4 +85,3 @@ spec:
     # Enable health endpoint at /health (disabled by default since it adds some overhead; enable when using OpenTelemetry Collector or Kubernetes health checks)
     - name: health-enabled
       value: "true"
-
