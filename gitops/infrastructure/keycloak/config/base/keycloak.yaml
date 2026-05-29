@@ -56,9 +56,14 @@ spec:
 
   startOptimized: false
   additionalOptions:
-    # Enables the telemetry feature
+
+    # Enable OpenTelemetry features (requires Keycloak 21+ and features=opentelemetry):
+    - name: metrics-enabled
+      value: "true"
+
+    # Enabling features using required API version syntax (since Keycloak 21+):
     - name: features
-      value: "opentelemetry,opentelemetry-metrics,opentelemetry-logs"
+      value: "opentelemetry,opentelemetry-metrics:v1,opentelemetry-logs"
 
     # OTEL endpoint
     - name: telemetry-endpoint
