@@ -61,9 +61,12 @@ spec:
     - name: metrics-enabled
       value: "true"
 
+    # Open Telemetry metrics is experimental feauture. Not fully supported by Quarkus yet
+    # See: https://github.com/keycloak/keycloak/issues/45159
     # Enabling features using required API version syntax (since Keycloak 21+):
     - name: features
-      value: "opentelemetry,opentelemetry-metrics:v1,opentelemetry-logs"
+      value: "opentelemetry,opentelemetry-logs"
+    #  value: "opentelemetry,opentelemetry-logs,opentelemetry-metrics" # Enable metrics when it becomes stable in future releases
 
     # OTEL endpoint
     - name: telemetry-endpoint
@@ -71,15 +74,15 @@ spec:
     - name: telemetry-protocol
       value: "grpc"
 
+    # Enable OpenTelemetry metrics (requires telemetry-endpoint and features=opentelemetry-metrics)
+    # - name: telemetry-metrics-enabled
+    #   value: "true"
+    # - name: telemetry-metrics-interval
+    #   value: "30s"
+
     # Enable OpenTelemetry tracing (requires telemetry-endpoint and features=opentelemetry)
     - name: telemetry-tracing-enabled
       value: "true"
-
-    # Enable OpenTelemetry metrics (requires telemetry-endpoint and features=opentelemetry-metrics)
-    - name: telemetry-metrics-enabled
-      value: "true"
-    - name: telemetry-metrics-interval
-      value: "30s"
 
     # Enable OpenTelemetry logs (requires telemetry-endpoint and features=opentelemetry-logs)
     - name: telemetry-logs-enabled
