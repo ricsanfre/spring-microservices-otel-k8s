@@ -31,7 +31,7 @@ spec:
   #                        get correct backchannel URLs without going through Envoy Gateway
   hostname:
     hostname: https://keycloak.${CLUSTER_DOMAIN}
-    strict: false
+    strict: true
     backchannelDynamic: true
 
   proxy:
@@ -54,42 +54,29 @@ spec:
     user:
       secret: keycloak-admin-secret
 
-  startOptimized: false
   additionalOptions:
-
-    # Enable OpenTelemetry features (requires Keycloak 21+ and features=opentelemetry):
-    - name: metrics-enabled
-      value: "true"
-
-    # Open Telemetry metrics is experimental feauture. Not fully supported by Quarkus yet
-    # See: https://github.com/keycloak/keycloak/issues/45159
-    # Enabling features using required API version syntax (since Keycloak 21+):
-    - name: features
-      value: "opentelemetry,opentelemetry-logs"
-    #  value: "opentelemetry,opentelemetry-logs,opentelemetry-metrics" # Enable metrics when it becomes stable in future releases
-
-    # OTEL endpoint
+      # OpenTelemetry configuration for Keycloak metrics and tracing
+      # Endpoint global para el colector OTel
     - name: telemetry-endpoint
-      value: "http://otel-collector.monitoring.svc.cluster.local:4317"
+      value: "http://cluster.local"
+      # Service name to identify Keycloak in the OpenTelemetry Collector and backend (e.g. for metrics aggregation and tracing service maps)
+    - name: telemetry-service-name
+      value: "keycloak"
+     # El protocolo por defecto es grpc, pero puedes especificarlo si lo requieres
     - name: telemetry-protocol
       value: "grpc"
-
-    # Enable OpenTelemetry metrics (requires telemetry-endpoint and features=opentelemetry-metrics)
-    # - name: telemetry-metrics-enabled
-    #   value: "true"
-    # - name: telemetry-metrics-interval
-    #   value: "30s"
-
-    # Enable OpenTelemetry tracing (requires telemetry-endpoint and features=opentelemetry)
-    - name: telemetry-tracing-enabled
+      # Enable metrics
+    - name: metrics-enabled
       value: "true"
-
-    # Enable OpenTelemetry logs (requires telemetry-endpoint and features=opentelemetry-logs)
-    - name: telemetry-logs-enabled
+      # Enable cache metrics histograms
+    - name: cache-metrics-histograms-enabled
       value: "true"
-    - name: telemetry-logs-level
-      value: "INFO"
-
-    # Enable health endpoint at /health (disabled by default since it adds some overhead; enable when using OpenTelemetry Collector or Kubernetes health checks)
+      # Enable HTTP metrics histograms
+    - name: http-metrics-histograms-enabled
+      value: "true"
+      # Enable event metrics for users
+    - name: event-metrics-user-enabled
+      value: "true"
+      # Enable health endpoint at /health (disabled by default since it adds some overhead; enable when using OpenTelemetry Collector or Kubernetes health checks)
     - name: health-enabled
       value: "true"
