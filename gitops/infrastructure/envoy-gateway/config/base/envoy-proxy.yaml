@@ -54,15 +54,11 @@ spec:
           - name: otel-collector
             namespace: monitoring
             port: 4317
-        openTelemetry:
-          resourceAttributes:
-            service.name: envoy-gateway-proxy
-            service.namespace: envoy-gateway-system
     metrics:
       prometheus:
         compression:
           type: Gzip
-      sinks:
+      providers:
         - type: OpenTelemetry
           openTelemetry:
             backendRefs:
