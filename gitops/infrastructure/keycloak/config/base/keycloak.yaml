@@ -58,13 +58,13 @@ spec:
       # OpenTelemetry configuration for Keycloak metrics and tracing
       # Endpoint global para el colector OTel
     - name: telemetry-endpoint
-      value: "otel-collector.monitoring.svc.cluster.local"
+      value: "http://otel-collector.monitoring.svc.cluster.local"
       # Service name to identify Keycloak in the OpenTelemetry Collector and backend (e.g. for metrics aggregation and tracing service maps)
     - name: telemetry-service-name
       value: "keycloak"
      # Specify the protocol for telemetry export (default is grpc, but can be set to http/protobuf if your collector does not support gRPC)
-    - name: telemetry-protocol
-      value: "grpc"
+     # - name: telemetry-protocol
+     #   value: "grpc"
       # Enable metrics
     - name: tracing-enabled
       value: "true"
