@@ -5,6 +5,7 @@ kind: Kustomization
 # but share the same base definitions.
 # Included by environment overlays (config/staging, config/production).
 resources:
+  - envoy-proxy.yaml
   - gateway-class.yaml
   - gateway.yaml
   - httproutes.yaml

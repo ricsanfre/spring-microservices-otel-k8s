@@ -15,8 +15,22 @@ spec:
     remediation:
       retries: 3
   values:
-    deployment:
-      replicas: 1
-    envoyGateway:
-      gateway:
-        controllerName: gateway.envoyproxy.io/gatewayclass-controller
+    config:
+      envoyGateway:
+        provider:
+          type: Kubernetes
+          kubernetes:
+            deploy:
+              # Ensures the Gateway is deployed in the namespace where the resource is created.
+              # rather than the default envoy-gateway-system.
+              type: GatewayNamespace
+        telemetry:
+          metrics:
+            sinks:
+              - type: OpenTelemetry
+                openTelemetry:
+                  host: otel-collector.monitoring.svc.cluster.local
+                  port: 4317
+                  protocol: grpc
+                  exportInterval: 60s
+                  exportTimeout: 30s
