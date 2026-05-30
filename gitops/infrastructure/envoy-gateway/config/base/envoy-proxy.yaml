@@ -58,7 +58,7 @@ spec:
       prometheus:
         compression:
           type: Gzip
-      providers:
+      sinks:
         - type: OpenTelemetry
           openTelemetry:
             backendRefs:
