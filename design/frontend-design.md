@@ -347,7 +347,7 @@ Next.js 16 has a stable instrumentation hook (`src/instrumentation.ts`) that run
 
 **What is automatically instrumented (server-side only):**
 - Every incoming HTTP request (pages, Route Handlers, Server Actions) → a root server span
-- Every outbound `fetch()` call → a child span with `traceparent` header injected
+- Every outbound `fetch()` call → a child span with `traceparent` header injected **only for URLs matching `propagateContextUrls`** (see §11.2)
 
 The `traceparent` header injection is the key integration point: `apiFetch()` and `publicFetch()` in `src/lib/api.ts` use the global `fetch`, so the OTel-patched version automatically propagates the W3C trace context to all microservices. In Tempo you see the full end-to-end trace: `GET /products` (frontend) → `GET /api/v1/products` (product-service) → JPA/MongoDB span.
 
@@ -360,13 +360,43 @@ The `traceparent` header injection is the key integration point: `apiFetch()` an
 import { registerOTel } from "@vercel/otel";
 
 export function register() {
+  // Build propagateContextUrls dynamically from environment variables so the
+  // list works correctly in both Docker (localhost:*) and Kubernetes (svc DNS).
+  const allowedUrls: (string | RegExp)[] = [];
+  Object.keys(process.env).forEach((key) => {
+    if (key.endsWith('_URL') || key.endsWith('_ISSUER') || key.includes('_SERVICE_')) {
+      const urlValue = process.env[key];
+      if (urlValue && (urlValue.startsWith('http://') || urlValue.startsWith('https://'))) {
+        try {
+          const escapedHost = new URL(urlValue).host.replace(/\./g, '\\.');
+          allowedUrls.push(new RegExp(`^https?://${escapedHost}.*`));
+        } catch { /* ignore non-URL values */ }
+      }
+    }
+  });
+
   registerOTel({
     serviceName: process.env.OTEL_SERVICE_NAME ?? "frontend-service",
+    instrumentationConfig: {
+      fetch: {
+        propagateContextUrls: allowedUrls,
+      },
+    },
   });
 }
 ```
 
 `registerOTel` reads `OTEL_EXPORTER_OTLP_ENDPOINT` from the environment and configures an OTLP HTTP exporter — the same convention used by all Spring Boot services.
+
+#### Why `propagateContextUrls` is required
+
+When `instrumentationConfig.fetch.propagateContextUrls` is **omitted**, `@vercel/otel` injects the `traceparent` header into **all** outgoing `fetch()` calls. This works in Docker Compose where service hostnames are stable, but in Kubernetes the frontend pod resolves services by cluster-internal DNS names (`*.svc.cluster.local`) that differ from the localhost ports used in development. Without an explicit list, context propagation is silently skipped for any URL that the OTel SDK does not recognise as a "same-origin" call.
+
+Once `propagateContextUrls` is set, the SDK injects trace context **only** for URLs matching an entry in the list. Every backend URL used in `fetch()` calls (microservices and Keycloak) must therefore be represented.
+
+#### Why `_ISSUER` variables are included in the filter
+
+Auth.js makes server-side `fetch()` calls to Keycloak for the token exchange and token refresh steps. These calls use `AUTH_KEYCLOAK_ISSUER` (or `AUTH_KEYCLOAK_INTERNAL_ISSUER` in Kubernetes — see §2.5) as the base URL. Neither variable ends with `_URL`, so a filter restricted to `_URL` suffixes would silently exclude Keycloak from context propagation, meaning the `/api/auth/[...nextauth]` spans would be disconnected from the main trace. The filter therefore also includes variables ending with `_ISSUER`.
 
 ### 11.3 Configuration
 

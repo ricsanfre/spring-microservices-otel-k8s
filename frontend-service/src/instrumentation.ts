@@ -22,10 +22,10 @@ export function register() {
 
   const allowedUrls: (string | RegExp)[] = [];
 
-  // 1. Get automatically all environment variables that match our criteria (e.g., ending with _URL or containing _SERVICE_)
+  // 1. Get automatically all environment variables that match our criteria (e.g., ending with _URL, _ISSUER or containing _SERVICE_)
    Object.keys(process.env).forEach((key) => {
-    // Filter only the variables that interest you (e.g., those ending with _URL or containing _SERVICE_URL)
-    if (key.endsWith('_URL') || key.includes('_SERVICE_')) {
+    // Filter only the variables that interest you (e.g., those ending with _URL, _ISSUER or containing _SERVICE_URL)
+    if (key.endsWith('_URL') || key.endsWith('_ISSUER') || key.includes('_SERVICE_')) {
       const urlValue = process.env[key];
 
       if (urlValue && (urlValue.startsWith('http://') || urlValue.startsWith('https://'))) {
