@@ -58,7 +58,7 @@ spec:
       # OpenTelemetry configuration for Keycloak metrics and tracing
       # Endpoint global para el colector OTel
     - name: telemetry-endpoint
-      value: "http://otel-collector.monitoring.svc.cluster.local"
+      value: "http://otel-collector.monitoring.svc.cluster.local:4317"
       # Service name to identify Keycloak in the OpenTelemetry Collector and backend (e.g. for metrics aggregation and tracing service maps)
     - name: telemetry-service-name
       value: "keycloak"
