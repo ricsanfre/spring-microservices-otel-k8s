@@ -172,6 +172,16 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       KC_HEALTH_ENABLED: "true"   # exposes /health/ready on management port 9000
+
+     # 📊 NATIVE KEYCLOAK OBSERVABILITY SWITCHES
+      KC_TRACING_ENABLED: "true"
+      KC_TRACING_SAMPLER_RATIO: "1.0"
+      # 🎯 TARGET COUPLING (Maps directly to Keycloak's built-in OTel exporter)
+      KC_TELEMETRY_ENDPOINT: "http://grafana-lgtm:4317"
+      
+      # 🏷️ GLOBAL OTEL PIPELINE CONFIGURATION
+      OTEL_SERVICE_NAME: "keycloak"
+
     ports:
       - "8180:8080"    # host port 8180 matches KEYCLOAK_URL default
     volumes:
