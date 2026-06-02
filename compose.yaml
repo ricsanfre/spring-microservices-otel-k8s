@@ -73,16 +73,24 @@ services:
       start_period: 20s
 
   valkey:
-    image: valkey/valkey:8-alpine
+    image: valkey/valkey:9-alpine
     profiles: [infra]
     ports:
       - "6379:6379"
     volumes:
       - valkey-data:/data
+      - ./docker/valkey/valkey-entrypoint.sh:/valkey-entrypoint.sh:ro
     networks: [e-commerce]
-    command: ["valkey-server", "--save", "60", "1", "--loglevel", "warning"]
+    # Entrypoint script generates the ACL file from env vars then starts the server.
+    # Passwords are set via env vars — override in a .env file or CI/CD secrets.
+    entrypoint: ["/bin/sh", "/valkey-entrypoint.sh"]
+    environment:
+      CART_SERVICE_VALKEY_PASSWORD: ${CART_SERVICE_VALKEY_PASSWORD:-cart-service-secret}
+      VALKEY_ADMIN_PASSWORD: ${VALKEY_ADMIN_PASSWORD:-admin-secret}
     healthcheck:
-      test: ["CMD-SHELL", "valkey-cli ping | grep -q PONG"]
+      # default and health users are both restricted to PING only.
+      # The health user is used here to keep the probe explicit.
+      test: ["CMD-SHELL", "valkey-cli --user health ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5

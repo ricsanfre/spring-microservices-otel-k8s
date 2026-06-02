@@ -1,0 +1,38 @@
+---
+# Valkey startup scripts — mounted read-only into the Valkey Pod at /scripts/.
+# The entrypoint script generates the ACL file from environment variables
+# so that passwords can be injected from Kubernetes Secrets at runtime.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: valkey-scripts
+  namespace: valkey
+  labels:
+    app.kubernetes.io/name: valkey
+    app.kubernetes.io/part-of: e-commerce
+data:
+  valkey-entrypoint.sh: |
+    #!/bin/sh
+    # Generates /tmp/valkey-acl.conf from env vars, then exec-replaces with valkey-server.
+    # See docker/valkey/valkey-entrypoint.sh for the canonical source with full comments.
+    set -eu
+
+    CART_SERVICE_PW="${CART_SERVICE_VALKEY_PASSWORD:?CART_SERVICE_VALKEY_PASSWORD must be set}"
+    ADMIN_PW="${VALKEY_ADMIN_PASSWORD:?VALKEY_ADMIN_PASSWORD must be set}"
+
+    ACL_FILE="/tmp/valkey-acl.conf"
+
+    {
+      printf 'user default reset on nopass +ping\n'
+      printf 'user health reset on nopass resetchannels +ping\n'
+      printf 'user admin reset on >%s ~* &* +@all\n' \
+        "${ADMIN_PW}"
+      printf 'user cart-service reset on >%s ~e-commerce:cart:* resetchannels +@read +@write +@connection\n' \
+        "${CART_SERVICE_PW}"
+    } > "${ACL_FILE}"
+
+    echo "[valkey-init] ACL file written."
+    exec valkey-server \
+      --aclfile "${ACL_FILE}" \
+      --save 60 1 \
+      --loglevel warning

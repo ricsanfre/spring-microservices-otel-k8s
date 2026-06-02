@@ -110,7 +110,7 @@ For local development all infrastructure runs via Docker Compose. Services run d
 | `grafana-lgtm` | `grafana/otel-lgtm:latest` | 3000, 4317, 4318 | `observability` | Observability stack (Loki, Tempo, Prometheus, Grafana) |
 | `postgres` | `postgres:18-alpine` | 5432 | `infra` | Single PostgreSQL instance — one database per service |
 | `mongo` | `mongo:8` | 27017 | `infra` | Single MongoDB instance — one database per service |
-| `valkey` | `valkey/valkey:8-alpine` | 6379 | `infra` | Valkey cache — shopping carts (TTL 7 days) |
+| `valkey` | `valkey/valkey:9-alpine` | 6379 | `infra` | Valkey cache — shopping carts (TTL 7 days) |
 | `kafka` | `apache/kafka:4.2.0` | 9092 | `infra` | Apache Kafka — order events (`order.confirmed.v1`) |
 | `keycloak` | `quay.io/keycloak/keycloak:26.6` | 8180 | `auth` | OAuth2 / OIDC IAM — realm `e-commerce` auto-imported |
 

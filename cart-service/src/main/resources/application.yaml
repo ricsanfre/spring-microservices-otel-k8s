@@ -6,6 +6,8 @@ spring:
     redis:
       host: ${VALKEY_HOST:localhost}
       port: ${VALKEY_PORT:6379}
+      username: ${VALKEY_USERNAME:cart-service}
+      password: ${VALKEY_PASSWORD:cart-service-secret}
 
   security:
     oauth2:

@@ -11,6 +11,7 @@ data:
   # Valkey (Redis-compatible) — deployed in the valkey namespace
   VALKEY_HOST: "valkey.databases.svc.cluster.local"
   VALKEY_PORT: "6379"
+  VALKEY_USERNAME: "cart-service"
   # Cart TTL (seconds) — 7 days
   CART_TTL_SECONDS: "604800"
   # Keycloak OIDC

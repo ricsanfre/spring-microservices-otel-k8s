@@ -2264,7 +2264,8 @@ spring:
     redis:
       host: ${VALKEY_HOST:localhost}
       port: ${VALKEY_PORT:6379}
-      # password: ${VALKEY_PASSWORD:}    # uncomment if auth is enabled
+      username: ${VALKEY_USERNAME:<service-name>}   # ACL user (see §16 ACL Authentication)
+      password: ${VALKEY_PASSWORD:changeme}          # injected from ExternalSecret in K8s
       timeout: 2000ms
       lettuce:
         pool:
@@ -2276,6 +2277,46 @@ spring:
 
 > **Local dev defaults** point at `localhost:6379` (the Docker Compose Valkey container on the `infra` profile).
 > In Kubernetes, `VALKEY_HOST` is overridden via the service's `ConfigMap` to `valkey.valkey.svc.cluster.local`.
+> `VALKEY_USERNAME` is set in the service's `ConfigMap`; `VALKEY_PASSWORD` is injected from an `ExternalSecret`.
+
+### ACL Authentication
+
+The single shared Valkey instance enforces **ACL-based multi-tenancy**: every microservice connects as its own dedicated ACL user and is restricted to its own key namespace. This prevents one service from reading or writing another service's data even if both share the same Valkey pod.
+
+#### ACL users
+
+| User | Password | Key pattern | Commands | Purpose |
+|------|----------|-------------|----------|---------|
+| `default` | `nopass` | — | `+ping` only | Lettuce HELLO handshake probe; no data access |
+| `health` | `nopass` | — | `+ping` only | Docker / Kubernetes liveness probes |
+| `admin` | secret | `~*` | `+@all` | Operational access (ACL LIST, DEBUG, etc.) |
+| `<service>` | secret | `~e-commerce:<service>:*` | `+@read +@write +@connection` | One user per microservice |
+
+The `default` user is intentionally kept **on** with `nopass` and only `+ping` permission. Lettuce sends a bare `HELLO 2` probe before authenticating; if `default` were `off`, the probe would return `NOAUTH` and the connection would fail before credentials are sent.
+
+#### ACL file generation (Docker Compose)
+
+The `docker/valkey/valkey-entrypoint.sh` script generates `/tmp/valkey-acl.conf` from environment variables at startup:
+
+```sh
+printf 'user default reset on nopass +ping\n'
+printf 'user health reset on nopass resetchannels +ping\n'
+printf 'user admin reset on >%s ~* &* +@all\n'           "${VALKEY_ADMIN_PASSWORD}"
+printf 'user cart-service reset on >%s ~e-commerce:cart:* resetchannels +@read +@write +@connection\n' \
+       "${CART_SERVICE_VALKEY_PASSWORD}"
+```
+
+To add a new service, add a line following the same pattern and expose the password via the `valkey` service's environment block in `compose.yaml`.
+
+#### Kubernetes secrets
+
+Valkey passwords are stored in the `ClusterSecretStore` under `/valkey/<service>` and `/valkey/admin`. The Valkey `ExternalSecret` provisions a `valkey-passwords` Secret in the `valkey` namespace; each service's `ExternalSecret` provisions a separate Secret (e.g. `cart-service-valkey-secret`) in the `e-commerce` namespace with only its own password.
+
+#### Spring Boot auto-configuration and Lettuce HELLO
+
+Spring Boot's Redis auto-configuration reads `spring.data.redis.username` and `spring.data.redis.password` and sets them on `RedisStandaloneConfiguration`. Lettuce then embeds both credentials in the `HELLO 2 AUTH <user> <pass>` handshake so the connection is authenticated as the service's ACL user from the very first command.
+
+**No manual `LettuceConnectionFactory` bean is needed** — the auto-configured factory works correctly as long as both `username` and `password` properties are set.
 
 ### Three caching tiers
 
@@ -2395,13 +2436,13 @@ public ProductResponse update(String id, UpdateProductRequest request) { ... }
 
 ### Key naming convention
 
-Keys **must** follow the pattern `{service}:{entity}:{id}` to prevent collisions when multiple services share a single Valkey instance:
+Keys **must** follow the pattern `{project}:{service}:{entity}:{id}`. The project prefix is load-bearing: it is also the ACL key namespace (`~e-commerce:{service}:*`), so a service that uses the correct prefix is automatically restricted to its own keys by Valkey ACL enforcement.
 
 | Service | Entity | Key pattern | Example |
 |---------|--------|-------------|----------|
-| `cart-service` | shopping cart | `cart:{userId}` | `cart:550e8400-e29b-41d4-a716-446655440001` |
+| `cart-service` | shopping cart | `e-commerce:cart:{userId}` | `e-commerce:cart:550e8400-e29b-41d4-a716-446655440001` |
 
-Define key prefixes as `private static final String` constants inside the repository class, never as inline strings. Always set a TTL on every write — **never store data without an expiry** to prevent unbounded memory growth.
+Define key prefixes as `private static final String KEY_PREFIX = "e-commerce:<service>:"` constants inside the repository class, never as inline strings. Always set a TTL on every write — **never store data without an expiry** to prevent unbounded memory growth.
 
 > Use `@Cacheable` only for **idempotent, read-heavy** data. Avoid caching mutable data that requires complex cache invalidation logic — the complexity outweighs the benefit.
 
@@ -2473,15 +2514,21 @@ class CartServiceIntegrationTest {
 }
 ```
 
-> **`@ServiceConnection` with Valkey:** Spring Boot's built-in `@ServiceConnection` support covers `RedisContainer` from `org.testcontainers:testcontainers-redis`. For `valkey/valkey`, use `GenericContainer` with `withExposedPorts(6379)` and manually set `spring.data.redis.host` and `spring.data.redis.port` via `@DynamicPropertySource`:
+> **`@ServiceConnection` with Valkey:** Spring Boot's built-in `@ServiceConnection` support covers `RedisContainer` from `org.testcontainers:testcontainers-redis`. For `valkey/valkey`, use `GenericContainer` with `withExposedPorts(6379)` and manually set properties via `@DynamicPropertySource`:
 >
 > ```java
 > @DynamicPropertySource
 > static void redisProperties(DynamicPropertyRegistry registry) {
 >     registry.add("spring.data.redis.host", valkey::getHost);
 >     registry.add("spring.data.redis.port", () -> valkey.getMappedPort(6379));
+>     // Plain test container has no ACL — clear credentials so Lettuce connects
+>     // as the default unauthenticated user (nopass).
+>     registry.add("spring.data.redis.username", () -> "");
+>     registry.add("spring.data.redis.password", () -> "");
 > }
 > ```
+>
+> The `username` and `password` overrides are required because `application.yaml` always carries ACL credentials for production use. Without clearing them in tests, Lettuce sends `HELLO 2 AUTH <service> <password>` to the plain container, which returns `WRONGPASS` and the context fails to start.
 
 When adding a new microservice, ensure all of the following are in place before merging:
 

@@ -41,6 +41,12 @@ spec:
                 secretKeyRef:
                   name: cart-service-kafka-secret
                   key: password
+            # Valkey ACL password for the cart-service user.
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cart-service-valkey-secret
+                  key: VALKEY_PASSWORD
 
           startupProbe:
             httpGet:

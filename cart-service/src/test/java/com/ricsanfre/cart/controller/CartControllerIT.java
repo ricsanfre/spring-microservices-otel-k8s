@@ -59,6 +59,10 @@ class CartControllerIT {
     static void redisProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.data.redis.host", valkey::getHost);
         registry.add("spring.data.redis.port", () -> valkey.getMappedPort(6379));
+        // Plain container has no ACL — clear credentials so the factory connects
+        // as the default unauthenticated user (nopass).
+        registry.add("spring.data.redis.username", () -> "");
+        registry.add("spring.data.redis.password", () -> "");
     }
 
     // ── Mocked external dependencies ─────────────────────────────────────────

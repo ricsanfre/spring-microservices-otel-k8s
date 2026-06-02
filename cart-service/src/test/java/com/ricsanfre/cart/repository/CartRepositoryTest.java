@@ -41,7 +41,7 @@ class CartRepositoryTest {
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private static final String USER_ID = "00000000-0000-0000-0000-000000000001";
-    private static final String KEY = "cart:" + USER_ID;
+    private static final String KEY = "e-commerce:cart:" + USER_ID;
 
     @BeforeEach
     void setUp() {

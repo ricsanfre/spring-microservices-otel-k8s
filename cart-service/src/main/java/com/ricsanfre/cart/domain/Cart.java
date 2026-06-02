@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Cart stored in Valkey as JSON under key {@code cart:{userId}}.
+ * Cart stored in Valkey as JSON under key {@code e-commerce:cart:{userId}}.
  * TTL is refreshed on every write (7 days).
  */
 @Data

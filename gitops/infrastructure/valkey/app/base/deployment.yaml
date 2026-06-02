@@ -26,14 +26,20 @@ spec:
     spec:
       containers:
         - name: valkey
-          image: valkey/valkey:8-alpine
-          args:
-            - valkey-server
-            - "--save"
-            - "60"
-            - "1"
-            - "--loglevel"
-            - "warning"
+          image: valkey/valkey:9-alpine
+          # Entrypoint script generates ACL file from env vars then starts the server.
+          command: ["/bin/sh", "/scripts/valkey-entrypoint.sh"]
+          env:
+            - name: CART_SERVICE_VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: valkey-passwords
+                  key: CART_SERVICE_VALKEY_PASSWORD
+            - name: VALKEY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: valkey-passwords
+                  key: VALKEY_ADMIN_PASSWORD
           ports:
             - name: redis
               containerPort: 6379
@@ -48,16 +54,23 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
           livenessProbe:
             exec:
-              command: ["valkey-cli", "ping"]
+              # health user: nopass, +ping only — no secret needed in the probe command.
+              command: ["valkey-cli", "--user", "health", "ping"]
             initialDelaySeconds: 10
             periodSeconds: 10
           readinessProbe:
             exec:
-              command: ["valkey-cli", "ping"]
+              command: ["valkey-cli", "--user", "health", "ping"]
             initialDelaySeconds: 5
             periodSeconds: 5
       volumes:
         - name: data
           emptyDir: {}   # stateless for staging; swap for PVC in production
+        - name: scripts
+          configMap:
+            name: valkey-scripts
