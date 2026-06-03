@@ -62,6 +62,19 @@ spec:
             key: deployment.environment
             value: staging
 
+      # Transform the log attributes to Loki resource labels safely
+      transform/loki:
+        error_mode: ignore # Prevent a corrupt log from stopping the pipeline
+        log_statements:
+          - context: log
+            statements:
+              # Add a fixed source label
+              - set(resource.attributes["exporter"], "OTLP")
+              # Move k8s.namespace.name to the resource ONLY if it exists in the log to avoid null errors
+              - set(resource.attributes["k8s.namespace.name"], attributes["k8s.namespace.name"]) where attributes["k8s.namespace.name"] != nil
+              - delete_key(attributes, "k8s.namespace.name") where attributes["k8s.namespace.name"] != nil
+
+
     # ── Exporters ────────────────────────────────────────────────────────────
     exporters:
       # Traces → Tempo monolithic (grafana/tempo Helm release)
@@ -71,15 +84,9 @@ spec:
           insecure: true
 
       # Logs → Loki monolithic (grafana/loki Helm release, gateway disabled)
-      # Resource attributes service.name / service.instance.id are mapped to
-      # Loki stream labels job / instance automatically.
-      loki:
-        endpoint: http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
-        default_labels_enabled:
-          exporter: false
-          job: true
-          instance: true
-          level: true
+      # NOTE: Exporter `loki` is deprecated fom release 0.153.0
+      otlphttp/loki:
+        endpoint: http://loki.monitoring.svc.cluster.local:3100/otlp
 
       # Metrics → Prometheus OTLP receiver (kube-prometheus-stack Helm release)
       otlphttp/prometheus:
@@ -95,8 +102,8 @@ spec:
 
         logs:
           receivers: [otlp]
-          processors: [memory_limiter, batch, resource/staging]
-          exporters: [loki]
+          processors: [memory_limiter, batch, resource/staging, transform/loki]
+          exporters: [otlphttp/loki]
 
         metrics:
           receivers: [otlp]
