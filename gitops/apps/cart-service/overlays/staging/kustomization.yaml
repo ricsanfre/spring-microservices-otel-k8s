@@ -20,7 +20,7 @@ resources:
 images:
   - name: ghcr.io/ricsanfre/spring-microservices-otel-k8s/cart-service
     newName: ghcr.io/ricsanfre/spring-microservices-otel-k8s/cart-service
-    newTag: "1.0.3"   # Renovate keeps this field current via PRs
+    newTag: "1.0.4"   # Renovate keeps this field current via PRs
 
 # Staging-specific patches
 patches:
