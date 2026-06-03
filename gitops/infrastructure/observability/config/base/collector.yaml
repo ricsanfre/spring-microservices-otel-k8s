@@ -62,7 +62,9 @@ spec:
             key: deployment.environment
             value: staging
 
+      # Loki is optimized for high-cardinality labels, but these must be Resource attributes, not Log attributes. This processor safely transforms the relevant Kubernetes attributes for Loki without risking data loss from null errors. By moving the namespace and other k8s metadata to the Resource level, you enable Loki to index them as stream labels, which drastically improves query performance in Grafana. 
       # Transform the log attributes to Loki resource labels safely
+      # loki create index for resource attributes, so need to move k8s attributes from log to resource
       transform/loki:
         error_mode: ignore # Prevent a corrupt log from stopping the pipeline
         log_statements:

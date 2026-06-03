@@ -1,1 +1,2 @@
 com.ricsanfre.product.config.MongoAuditingConfig
+com.ricsanfre.product.config.MongoObservationConfig

@@ -28,8 +28,11 @@ management:
     sampling:
       probability: 1.0
   observations:
-    mongodb:
-      enabled: true               # MongoDB command-level spans in Tempo
+    enable:
+      spring.data.mongodb.command: true
+  # MongoDB command-level spans are enabled via MongoObservationConfig (manual wiring);
+  # Spring Boot 4.x has no MongoObservationAutoConfiguration, so the
+  # management.observations.mongodb.enabled property has no effect.
   otlp:
     metrics:
       export:

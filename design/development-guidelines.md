@@ -1505,6 +1505,56 @@ Use the existing [otel-demo](../otel-demo) module as the reference implementatio
 - Redis/Valkey (`spring-boot-starter-data-redis` + Lettuce — uses Micrometer observations by default)
 - Spring `@Scheduled` methods
 
+### MongoDB tracing in Spring Boot 4 (required manual wiring)
+
+Spring Boot 4.0.x does not provide a MongoDB observation auto-configuration. To emit MongoDB spans in Tempo, each MongoDB service must register both:
+
+- `MongoObservationCommandListener`
+- `ContextProviderFactory.create(observationRegistry)` as Mongo driver context provider
+
+Without the context provider bridge, Mongo command spans may be missing or detached from the parent HTTP span.
+
+#### Required Java config
+
+```java
+@AutoConfiguration
+@AutoConfigureBefore(MongoAutoConfiguration.class)
+public class MongoObservationConfig {
+
+    @Bean
+    MongoClientSettingsBuilderCustomizer mongoObservationCommandListenerCustomizer(
+            ObservationRegistry observationRegistry) {
+        return clientSettingsBuilder -> clientSettingsBuilder
+                .contextProvider(ContextProviderFactory.create(observationRegistry))
+                .addCommandListener(new MongoObservationCommandListener(observationRegistry));
+    }
+}
+```
+
+Register the class in:
+
+`src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`
+
+Example line:
+
+```text
+com.ricsanfre.product.config.MongoObservationConfig
+```
+
+#### Optional explicit enable flag
+
+The observation name emitted by Spring Data MongoDB is `spring.data.mongodb.command`.
+Observations are generally enabled by default, but you may pin it explicitly to protect against environment overrides:
+
+```yaml
+management:
+  observations:
+    enable:
+      spring.data.mongodb.command: true
+```
+
+Important: `management.observations.mongodb.enabled` is not a valid Spring Boot 4 Mongo tracing switch and has no effect.
+
 ### Business metrics — MeterRegistry pattern
 
 Inject `io.micrometer.core.instrument.MeterRegistry` via `@RequiredArgsConstructor` into any service class that emits business events. Use the builder API — **never** call `new Counter(...)` directly.
@@ -2558,7 +2608,7 @@ When adding a new microservice, ensure all of the following are in place before 
 - [ ] `Tracer` injected in service classes that resolve user identity or wrap multi-step flows; use `tracer.currentSpan()` with null-check for tagging, `tracer.nextSpan()` for child spans (see §11 Custom spans)
 - [ ] `user.id` span tag and `MDC.put("user.id", ...)` set after user resolution; `MDC.remove` in `finally` (see §11 User identity propagation)
 - [ ] `CaffeineCacheMetrics.monitor(...)` called in `cacheManager` bean with `.recordStats()` on the native cache (services using ADR-004 resolver — see §11 Caffeine cache metrics)
-- [ ] `management.observations.mongodb.enabled: true` set for MongoDB-backed services (see §11 Database spans)
+- [ ] MongoDB tracing wired with `MongoObservationCommandListener` + `ContextProviderFactory.create(observationRegistry)` and registered in `AutoConfiguration.imports` (see §11 MongoDB tracing in Spring Boot 4)
 - [ ] Every public service method has a `log.debug` entry line and a `log.info` completion line on mutating paths (see §11 Structured logging)
 
 ### Build & Container
