@@ -23,7 +23,7 @@ public class OrderConfirmedEventConsumer {
     @KafkaListener(topics = "order.confirmed.v1", groupId = "notification-group")
     public void onOrderConfirmed(OrderConfirmedEvent event) {
         log.info(
-                "ORDER CONFIRMED — orderId={} userId={} totalAmount={} itemCount={} confirmedAt={}",
+                "operation=notification.consume_order_confirmed outcome=start orderId={} userId={} totalAmount={} itemCount={} confirmedAt={}",
                 event.orderId(),
                 event.userId(),
                 event.totalAmount(),
@@ -36,14 +36,16 @@ public class OrderConfirmedEventConsumer {
 
     private void sendNotification(OrderConfirmedEvent event) {
         try {
-            log.info("Notification sent to userId={}: your order {} for ${} has been confirmed.",
-                    event.userId(), event.orderId(), event.totalAmount());
+            log.info("operation=notification.send outcome=success type=ORDER_CONFIRMATION orderId={} userId={} totalAmount={}",
+                event.orderId(), event.userId(), event.totalAmount());
             Counter.builder("notifications.sent")
                     .tag("type", "ORDER_CONFIRMATION")
                     .tag("status", "success")
                     .register(meterRegistry)
                     .increment();
         } catch (Exception e) {
+            log.warn("operation=notification.send outcome=failure type=ORDER_CONFIRMATION orderId={} userId={} reason={}",
+                event.orderId(), event.userId(), e.toString());
             Counter.builder("notifications.sent")
                     .tag("type", "ORDER_CONFIRMATION")
                     .tag("status", "failure")

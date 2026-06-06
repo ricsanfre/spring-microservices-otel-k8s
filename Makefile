@@ -33,6 +33,7 @@ REVIEWS_SERVICE_CLIENT_SECRET ?= reviews-service-secret
 .PHONY: help \
         infra-up infra-down infra-clean infra-logs infra-ps \
         infra-min-up infra-min-down infra-min-clean infra-min-logs infra-min-ps \
+		obs-correlation-check obs-correlation-runtime-check obs-correlation-e2e-check \
         us-build us-test us-verify us-image \
         us-run us-dev \
         us-token us-token-sa \
@@ -98,6 +99,15 @@ infra-min-logs: ## Tail minimal infra container logs (Ctrl-C to stop)
 
 infra-min-ps: ## Show minimal infra container status
 	docker compose $(INFRA_MIN_PROFILES) ps
+
+obs-correlation-check: ## Validate Grafana trace<->logs correlation wiring config
+	./scripts/observability/check-correlation-config.sh
+
+obs-correlation-runtime-check: ## Validate runtime Grafana datasource correlation wiring (requires running Grafana)
+	./scripts/observability/runtime-correlation-smoke.sh
+
+obs-correlation-e2e-check: ## End-to-end trace/log correlation check (requires Keycloak + user-service + Grafana)
+	./scripts/observability/e2e-correlation-smoke.sh
 
 # ──────────────────────────────────────────────────────────────────────────────
 # user-service — build & test

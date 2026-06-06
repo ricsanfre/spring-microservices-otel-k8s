@@ -1,408 +1,255 @@
-# Observability Improvement Plan — OpenTelemetry
+# Observability Improvement Plan - OpenTelemetry + Grafana Correlation
 
-**Date:** 2026-05-09  
-**Status:** Approved — implementation in progress  
-**Scope:** All six backend services (product-service, user-service, cart-service, order-service, reviews-service, notification-service)
+**Last updated:** 2026-06-03  
+**Status:** Active plan (AS-IS revalidated against current codebase)
 
 ---
 
 ## Table of Contents
 
-1. [AS-IS — Current State](#1-as-is--current-state)
-2. [TO-BE — Target State](#2-to-be--target-state)
-3. [Gap Analysis](#3-gap-analysis)
-4. [Implementation Plan](#4-implementation-plan)
-5. [Signal Reference — Metrics Catalogue](#5-signal-reference--metrics-catalogue)
-6. [Signal Reference — Custom Spans Catalogue](#6-signal-reference--custom-spans-catalogue)
+1. [Historical Gap Analysis (Original Plan, Status Updated)](#1-historical-gap-analysis-original-plan-status-updated)
+2. [AS-IS - Current State (Revalidated)](#2-as-is---current-state-revalidated)
+3. [TO-BE - Target State (Trace<->Logs Focus)](#3-to-be---target-state-tracelogs-focus)
+4. [Remaining Gaps (Current)](#4-remaining-gaps-current)
+5. [Implementation Plan (Phased)](#5-implementation-plan-phased)
+6. [Acceptance Criteria](#6-acceptance-criteria)
+7. [Operational Queries and Debug Workflow](#7-operational-queries-and-debug-workflow)
 
 ---
 
-## 1. AS-IS — Current State
+## 1. Historical Gap Analysis (Original Plan, Status Updated)
 
-### 1.1 Infrastructure
+This section keeps the initial gap list from the previous version of this document and updates each item with current execution status and evidence of how it was implemented.
 
-All six services export to a unified **Grafana LGTM** stack running in Docker Compose under the `observability` profile:
+| Original gap (from initial plan) | Current status | How it has been done |
+|---|---|---|
+| Missing MongoDB observation config in reviews-service | Done | Added manual MongoDB observation wiring via `MongoObservationConfig` and enabled Mongo command observations with `management.observations.enable.spring.data.mongodb.command: true` in reviews-service and product-service. |
+| No business metrics | Done | Added `MeterRegistry`-based counters/histograms in service layer across services (orders, cart checkout funnel, product creation/search, reviews, users, notifications). |
+| No user identity on spans/logs | Done (major business flows) | Added user context propagation using `Tracer` span tags (for example `user.id`) and MDC population/removal (`MDC.put` + `finally MDC.remove`) in key service methods. |
+| No Caffeine cache metrics for user resolver cache | Done | Replaced generic cache manager usage with native Caffeine caches + `recordStats` + `CaffeineCacheMetrics.monitor(..., "user.id.resolution")` in cart/order/reviews HTTP client config. |
+| No custom spans for checkout | Done | Implemented phase-level spans in `CartService.checkout`: `checkout.validate`, `checkout.reserve`, `checkout.confirm` (plus parent `cart.checkout`) with tags for user/order/result context. |
+| No custom span for sub->userId resolution | Done | Added explicit `user.resolve.idp_subject` spans in resolver services using `Tracer.nextSpan()`. |
+| Unstructured log conventions | In progress | Standardized `operation=<...> outcome=<...>` logs are implemented in cart/order/reviews/user/notification write paths; remaining work is to complete and enforce the same convention in all remaining business paths (notably product-service and cross-cutting error paths). |
 
-| Component | Port | Role |
-|-----------|------|------|
-| Grafana | 3000 | Unified UI (dashboards, explore) |
-| Loki | — | Log aggregation |
-| Tempo | — | Distributed tracing |
-| Prometheus | — | Metrics scraping |
-| OTLP collector | 4317 (gRPC) / 4318 (HTTP) | Ingest endpoint |
+## 2. AS-IS - Current State (Revalidated)
 
-### 1.2 Per-Service Baseline Setup
+### 2.1 Infrastructure and signal pipeline
 
-Every service has **identical** boilerplate:
+The platform exports all three OTel signals (traces, metrics, logs):
 
-| Component | Location | Status |
-|-----------|----------|--------|
-| `spring-boot-starter-opentelemetry` | `pom.xml` | ✅ All 6 services |
-| `opentelemetry-logback-appender-1.0:2.21.0-alpha` | `pom.xml` | ✅ All 6 services |
-| `InstallOpenTelemetryAppender` | `otel/InstallOpenTelemetryAppender.java` | ✅ All 6 services |
-| `logback-spring.xml` (CONSOLE + OTEL appenders) | `src/main/resources/` | ✅ All 6 services |
-| `management.tracing.sampling.probability: 1.0` | `application.yaml` | ✅ All 6 services |
-| OTLP metrics + traces + logs export | `application.yaml` | ✅ All 6 services |
-| Actuator endpoints exposed (health, info, metrics, prometheus) | `application.yaml` | ✅ All 6 services |
+- **Local Docker Compose:** `grafana/otel-lgtm` (`:3000`, `:4317`, `:4318`)
+- **Kubernetes staging:** OTel Collector fan-out to Tempo + Loki + Prometheus/Grafana
 
-### 1.3 Automatic (Zero-Code) Instrumentation in Place
+### 2.2 Baseline instrumentation status
 
-The following signals are collected with no custom code:
+The following baseline is present in all six backend services (`product`, `reviews`, `order`, `cart`, `user`, `notification`):
 
-| Signal | Mechanism | Services |
-|--------|-----------|----------|
-| Inbound HTTP request latency + status | Spring MVC auto-observation | All 6 |
-| Outbound HTTP call latency + status | `RestClient` auto-observation | cart, order, reviews (user-service calls) |
-| Redis / Valkey command latency | Lettuce Micrometer observation | cart |
-| PostgreSQL query spans | `datasource-micrometer-spring-boot` — activates automatically when jar + `ObservationRegistry` are present; no `enabled` flag needed | user, order |
-| MongoDB command spans | `MongoObservationCommandListener` — requires explicit `management.observations.mongodb.enabled: true` in YAML | product only |
-| Kafka producer spans | `spring.kafka.template.observation-enabled: true` | order |
-| Kafka consumer spans | `spring.kafka.listener.observation-enabled: true` | notification, cart |
-| Distributed trace context propagation (W3C TraceContext) | OTLP auto | All cross-service calls |
+- `spring-boot-starter-opentelemetry`
+- `opentelemetry-logback-appender-1.0`
+- `InstallOpenTelemetryAppender`
+- `logback-spring.xml` with `CONSOLE` + `OTEL` appenders
+- OTLP endpoints configured for traces, metrics, and logs
+- `management.tracing.sampling.probability: 1.0`
 
-> **JDBC properties note:** `datasource-micrometer-spring-boot` uses the prefix `jdbc` (not `management.*`).
-> The properties that matter are `jdbc.includes` (which trace types: `QUERY`, `CONNECTION`, `FETCH`, `KEYS` — all enabled by default)
-> and `jdbc.datasource-proxy.include-parameter-values` (bind parameter values in spans — **off by default**, keep off in production due to PII risk;
-> enable only on a `local` profile for debugging).
+### 2.3 Automatic instrumentation status
 
-### 1.4 What Is NOT Collected Today
+| Signal | Status | Notes |
+|---|---|---|
+| HTTP server spans | Implemented | Spring MVC auto-observation |
+| HTTP client spans | Implemented | RestClient calls instrumented |
+| PostgreSQL spans | Implemented where applicable | user-service and order-service |
+| MongoDB command spans | Implemented | product-service and reviews-service use `MongoObservationConfig` + `management.observations.enable.spring.data.mongodb.command: true` |
+| Kafka producer spans | Implemented | order-service (`template.observation-enabled: true`) |
+| Kafka consumer spans | Implemented | cart-service and notification-service (`listener.observation-enabled: true`) |
 
-- ❌ **No business metrics** — no counters for orders created, reviews submitted, cart checkouts, etc.
-- ❌ **No custom spans** — all traces stop at the controller boundary; internal service method durations are invisible.
-- ❌ **No user identity on spans/logs** — traces in Tempo cannot be filtered by the end-user who triggered them.
-- ❌ **No Caffeine cache metrics** — hit/miss ratio for the sub→userId resolver cache is invisible.
-- ❌ **No structured log field conventions** — log messages use ad-hoc string formats; Loki cannot filter by `order.id`, `user.id`, etc.
-- ❌ **reviews-service MongoDB observation** — the `management.observations.mongodb.enabled: true` property is absent (present in product-service but missing in reviews-service).
+### 2.4 Business metrics and custom observability
 
----
+Most items previously listed as gaps are now implemented.
 
-## 2. TO-BE — Target State
+| Capability | Current status |
+|---|---|
+| Business counters/histograms | Implemented across services (`orders.created`, `order.value.amount`, `cart.items.added`, `cart.checkout.*`, `products.created`, `product.search.results`, `reviews.submitted`, `review.rating`, `users.registered`, `notifications.sent`) |
+| Caffeine cache metrics for user resolution | Implemented in cart-service, order-service, reviews-service (`user.id.resolution`) |
+| User ID on span + MDC | Implemented in major user-facing flows (order/cart/reviews/user services) |
+| Custom spans | Implemented for checkout and order confirmation critical paths (`cart.checkout`, `checkout.validate`, `checkout.reserve`, `checkout.confirm`, `order.confirm`, `order.confirm.reserve_stock`, `order.confirm.persist_status`, `order.confirm.publish_event`, `user.resolve.idp_subject`) |
 
-### 2.1 Three-Signal Completeness
+### 2.5 Grafana trace-to-logs and logs-to-traces status
 
-Every service emits all three OTel signal types with **both automatic and business-level data**:
+For Kubernetes monitoring values, Grafana datasources are provisioned with correlation wiring:
 
-```
-Traces  → Tempo    : HTTP spans + DB spans + custom domain spans + user.id attribute
-Metrics → Prometheus: JVM + HTTP + DB + Kafka + business counters/histograms
-Logs    → Loki     : Structured fields (order.id, user.id, product.id) + OTel correlation IDs
-```
+- Tempo `tracesToLogsV2` query uses `trace_id`
+- Loki `derivedFields` maps `trace_id` to Tempo datasource
 
-### 2.2 Business Metrics (TO-BE per service)
+This means trace<->logs linking is configured in staging manifests. For local Compose, linkage depends on `grafana/otel-lgtm` built-in defaults and should be explicitly validated in runtime checks.
 
-| Service | Key Metrics |
-|---------|-------------|
-| **order-service** | `orders.created` (counter, tag: status), `orders.status.changed` (counter, tags: from/to), `order.value.amount` (histogram) |
-| **cart-service** | `cart.items.added` (counter), `cart.checkout.initiated` (counter), `cart.checkout.confirmed` (counter, tag: result), `user.id.resolution.cache.*` (Caffeine) |
-| **product-service** | `products.created` (counter, tag: category), `product.search.results` (distribution summary) |
-| **reviews-service** | `reviews.submitted` (counter), `review.rating` (distribution summary 1–5) |
-| **user-service** | `users.registered` (counter), `users.idp.resolved` (counter, tag: cache=hit/miss) |
-| **notification-service** | `notifications.sent` (counter, tags: type, status) |
+### 2.6 Remaining AS-IS weaknesses
 
-### 2.3 Custom Spans (TO-BE per service)
+Current weaknesses are mostly about **consistency and operability**, not missing base plumbing:
 
-Critical multi-step business flows gain child spans so Tempo shows per-step latency:
+1. Structured log conventions are partially standardized; broad coverage exists in cart/order/reviews/user/notification write paths, but full platform-wide consistency is still pending.
+2. Custom spans are implemented for checkout and order confirmation; remaining work is to extend similar phase-level spans to additional high-value flows beyond these two critical paths.
+3. Correlation behavior is not continuously verified by CI smoke tests.
+4. Local (Compose) Grafana correlation behavior is not declared as code in this repository.
 
-| Service | Custom Span Name | Parent |
-|---------|-----------------|--------|
-| **cart-service** | `checkout.validate` | `POST /api/v1/checkout/initiate` |
-| **cart-service** | `checkout.reserve` | `POST /api/v1/checkout/initiate` |
-| **cart-service** | `checkout.confirm` | `POST /api/v1/checkout/confirm` |
-| **order-service** | `order.persist` | Kafka consumer span |
-| **user-service** | `user.resolve.idp_subject` (tag: cache.hit) | HTTP span |
+### 2.7 Current Custom Span Catalog
 
-### 2.4 User Identity Propagation (TO-BE)
-
-After the sub→userId resolution, inject the internal UUID into:
-1. **Span attribute** `user.id` — enables per-user trace search in Tempo.
-2. **MDC field** `user.id` — forwarded by the OTel logback appender as a log record attribute; Loki can then filter all logs for a given user.
-
-### 2.5 Caffeine Cache Metrics (TO-BE)
-
-The sub→userId resolution cache in cart-service (and any future service using ADR-004) exposes:
-- `cache.gets{cache=user.id.resolution, result=hit}`
-- `cache.gets{cache=user.id.resolution, result=miss}`
-- `cache.evictions{cache=user.id.resolution}`
-
-### 2.6 MongoDB Observation Coverage (TO-BE)
-
-reviews-service gains `management.observations.mongodb.enabled: true`, matching product-service. Every MongoDB-backed service then emits DB command spans visible in Tempo.
-
-### 2.7 Structured Log Conventions (TO-BE)
-
-All `@Slf4j` log calls at `INFO`/`WARN`/`ERROR` for key domain events use consistent parameterised fields:
-
-| Field | Type | Example value |
-|-------|------|---------------|
-| `order.id` | UUID string | `"3fa85f64-5717-4562-b3fc-2c963f66afa6"` |
-| `user.id` | UUID string | `"550e8400-e29b-41d4-a716-446655440001"` |
-| `product.id` | UUID/String | `"prod-abc123"` |
-| `cart.id` | UUID string | same as user.id |
-| `notification.type` | string | `"ORDER_CONFIRMATION"` |
-| `failure.reason` | string | exception message or code |
+| Span name | Service | Trigger point | Key tags |
+|---|---|---|---|
+| `cart.checkout` | cart-service | `CartService.checkout` parent flow span | `user.id` |
+| `checkout.validate` | cart-service | cart validation + item mapping before order call | `cart.item.count` |
+| `checkout.reserve` | cart-service | order creation call to order-service | `order.id` |
+| `checkout.confirm` | cart-service | checkout completion/failure branch | `order.id`, `result` |
+| `order.confirm` | order-service | `OrderService.confirmOrder` parent flow span | `order.id`, `user.id` |
+| `order.confirm.reserve_stock` | order-service | stock reservation call to product-service | `order.id`, `result` |
+| `order.confirm.persist_status` | order-service | status transition persist (`PENDING` -> `CONFIRMED`) | `order.id`, `from_status`, `to_status` |
+| `order.confirm.publish_event` | order-service | Kafka publish `order.confirmed.v1` | `order.id`, `result` |
+| `user.resolve.idp_subject` | cart/order/reviews services | internal user resolution from JWT `sub` | `cache.hit`, `user.id` |
 
 ---
 
-## 3. Gap Analysis
+## 3. TO-BE - Target State (Trace<->Logs Focus)
 
-| Gap | Severity | Affected Service(s) | Fix Size |
-|-----|----------|---------------------|----------|
-| Missing MongoDB observation config | 🔴 High | reviews-service | 1 line YAML |
-| No business metrics | 🔴 High | All 6 | Medium — MeterRegistry injection per service |
-| No user.id span attribute | 🟠 Medium | cart, order, reviews, user | Small — HandlerInterceptor or ObservationHandler |
-| No Caffeine cache metrics | 🟡 Low | cart (+ future services) | 2 lines YAML + 1 line Java |
-| No custom spans for checkout | 🟡 Low | cart-service | Small — Tracer injection in service layer |
-| No custom spans for order pipeline | 🟡 Low | order-service | Small — Tracer injection in consumer |
-| Unstructured log messages | 🟡 Low | All 6 | Editorial — applied incrementally |
-| No custom span for sub→userId resolution | 🟡 Low | user (+ callers) | Small |
+### 3.1 Main objective
 
----
+Make Grafana debugging reliable and fast by ensuring any incident can be navigated in both directions:
 
-## 4. Implementation Plan
+- **Trace -> Logs:** from a Tempo span to only the relevant Loki log lines.
+- **Logs -> Trace:** from an error log line to the exact Tempo trace.
 
-Ordered by business value / risk:
+### 3.2 Correlation contract (platform-wide)
 
----
+Define and enforce a single logging and tracing contract:
 
-### Step 1 — Fix reviews-service MongoDB Observation Gap
+#### Required log fields (all services, all key INFO/WARN/ERROR events)
 
-**File:** `reviews-service/src/main/resources/application.yaml`
+- `trace_id`
+- `span_id`
+- `service.name`
+- `operation`
+- `outcome` (`success` / `failure`)
+- `error.type` (when applicable)
+- `error.message` (when applicable)
 
-Add under the `management` block:
+#### Required domain context fields (when known)
 
-```yaml
-management:
-  observations:
-    mongodb:
-      enabled: true
-```
+- `user.id`
+- `orderId`
+- `cartId`
+- `productId`
+- `reviewId`
 
-**Validates:** Tempo shows `db.mongodb.find`, `db.mongodb.insert`, etc. spans for reviews-service queries.
+### 3.3 Labeling policy for Loki
 
----
+- Keep low-cardinality fields as labels (for filtering performance).
+- Keep high-cardinality identifiers (`user.id`, `orderId`, etc.) as structured fields, not labels.
 
-### Step 2 — Caffeine Cache Metrics (cart-service)
+### 3.4 Span model target
 
-**File:** `cart-service/src/main/resources/application.yaml`
+Refine custom spans for critical workflows:
 
-Enable stats recording in the Caffeine spec:
+- `checkout.validate`
+- `checkout.reserve`
+- `checkout.confirm`
+- keep `user.resolve.idp_subject` with clear tags (`cache.hit`, `user.id`)
 
-```yaml
-spring:
-  cache:
-    caffeine:
-      spec: maximumSize=1000,expireAfterWrite=10m,recordStats
-```
+### 3.5 Operations target
 
-**File:** `cart-service/src/main/java/com/ricsanfre/cart/config/HttpClientConfig.java`
-
-Register the cache with Micrometer after it is created:
-
-```java
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.binder.cache.CaffeineCacheMetrics;
-import com.github.benmanes.caffeine.cache.Cache;
-
-// Inject MeterRegistry and the Cache bean, then:
-CaffeineCacheMetrics.monitor(meterRegistry, cache, "user.id.resolution");
-```
-
-**Validates:** `cache.gets{cache=user.id.resolution, result=hit|miss}` appears in Prometheus.
+- Saved Grafana Explore queries for common debugging paths.
+- Correlation dashboard for error triage (errors, slow traces, direct links).
+- CI smoke check for trace-log linkage regression.
 
 ---
 
-### Step 3 — Business Metrics — order-service
+## 4. Remaining Gaps (Current)
 
-**File:** `order-service/src/main/java/com/ricsanfre/order/service/OrderService.java`
+| Gap | Severity | Scope | Comment |
+|---|---|---|---|
+| Inconsistent structured log field naming | Medium | Remaining non-standardized paths | Main remaining blocker for uniform Loki filtering |
+| No CI validation for trace<->logs linkage | High | Platform-wide | Correlation can silently regress |
+| Local Grafana datasource linkage not codified in repo | Medium | Local dev | Drift risk across environments |
+| Uneven MDC/trace field coverage outside key flows | Medium | Some service paths | Improves completeness for edge/debug cases |
 
-Inject `MeterRegistry` via constructor. After a successful `order.save()`:
+---
 
-```java
-// Counter
-Counter.builder("orders.created")
-    .tag("status", order.getStatus().name())
-    .register(meterRegistry)
-    .increment();
+## 5. Implementation Plan (Phased)
 
-// Histogram (revenue tracking)
-DistributionSummary.builder("order.value.amount")
-    .baseUnit("currency_units")
-    .register(meterRegistry)
-    .record(order.getTotalAmount().doubleValue());
-```
+### Phase 0 - Baseline verification and inventory (1 day)
 
-After a status transition:
+1. Run a standard synthetic flow: browse product -> add to cart -> checkout -> review.
+2. Capture one known `trace_id` and verify:
+   - Tempo -> Loki navigation works.
+   - Loki -> Tempo navigation works.
+3. Record current false positives/empty-result cases.
 
-```java
-Counter.builder("orders.status.changed")
-    .tag("from", previousStatus.name())
-    .tag("to", newStatus.name())
-    .register(meterRegistry)
-    .increment();
+### Phase 1 - Correlation contract rollout (2-4 days)
+
+1. Standardize key log field names and message pattern in service-layer mutating operations.
+2. Ensure all important failure paths emit `outcome=failure` and exception context.
+3. Keep MDC lifecycle strict (`put` + `finally remove`) where user context is set.
+
+### Phase 2 - Span granularity upgrade (1-2 days)
+
+1. Split cart checkout into phase spans:
+   - `checkout.validate`
+   - `checkout.reserve`
+   - `checkout.confirm`
+2. Ensure each span carries useful tags (`user.id`, `order.id`, `result`).
+
+### Phase 3 - Grafana provisioning hardening (1-2 days)
+
+1. Keep Kubernetes datasource settings as the source of truth.
+2. Add explicit validation for local Compose behavior and document the expected datasource/link configuration.
+3. Ensure Tempo `tracesToLogsV2` query and Loki `derivedFields` stay aligned on `trace_id`.
+4. Run runtime datasource smoke check against Grafana API: `make obs-correlation-runtime-check`.
+
+### Phase 4 - Quality gates and runbook (1-2 days)
+
+1. Add CI smoke validation that asserts one request produces correlated traces and logs.
+2. Add a short runbook for on-call flow:
+   - Start from error log -> open trace -> pivot back to logs by tags.
+3. Add a compact Grafana dashboard for correlation-first debugging.
+4. Run end-to-end synthetic correlation check (when user-service is running): `make obs-correlation-e2e-check`.
+
+---
+
+## 6. Acceptance Criteria
+
+The plan is complete when all criteria below pass:
+
+1. For a synthetic request, both navigation paths work reliably:
+   - Tempo span -> Loki logs
+   - Loki log (`trace_id`) -> Tempo trace
+2. Runtime Grafana datasource validation passes locally (`make obs-correlation-runtime-check`).
+3. At least 95% of ERROR logs include `trace_id` and `span_id`.
+4. Key mutating operations across services emit standardized operation/outcome fields.
+5. Checkout traces show phase-level spans (`validate/reserve/confirm`) with meaningful tags.
+6. CI catches broken correlation wiring before merge.
+7. End-to-end synthetic check can be executed successfully in local dev (`make obs-correlation-e2e-check`) with required services running.
+
+---
+
+## 7. Operational Queries and Debug Workflow
+
+### 7.1 Recommended Loki queries
+
+```logql
+{service_name="order-service"} | trace_id="<trace_id>"
 ```
 
-**Validates:** Grafana can render revenue over time (`rate(order_value_amount_sum[5m]) / rate(order_value_amount_count[5m])`).
-
----
-
-### Step 4 — Business Metrics — cart-service
-
-**File:** `cart-service/src/main/java/com/ricsanfre/cart/service/CartService.java`
-
-```java
-Counter.builder("cart.items.added")
-    .register(meterRegistry).increment();
-
-Counter.builder("cart.checkout.initiated")
-    .register(meterRegistry).increment();
-
-// In confirm flow:
-Counter.builder("cart.checkout.confirmed")
-    .tag("result", success ? "success" : "failure")
-    .register(meterRegistry).increment();
+```logql
+{service_name="cart-service"} | user.id="<user_uuid>" | outcome="failure"
 ```
 
-**Validates:** Checkout funnel is visible in Grafana: `add → initiate → confirm` conversion rate.
+### 7.2 Recommended Tempo search filters
 
----
+- `service.name = cart-service`
+- `span.user.id = <user_uuid>`
+- `status = error`
 
-### Step 5 — Business Metrics — product-service, reviews-service, user-service, notification-service
+### 7.3 Standard incident path
 
-Apply the same `MeterRegistry` injection pattern to each service's relevant service-layer class:
-
-| Service | Class | Metric |
-|---------|-------|--------|
-| product-service | `ProductService` | `products.created{category}`, `product.search.results` |
-| reviews-service | `ReviewService` | `reviews.submitted`, `review.rating` (DistributionSummary 1–5) |
-| user-service | `UserService` | `users.registered`, `users.idp.resolved{cache=hit|miss}` |
-| notification-service | `NotificationService` | `notifications.sent{type, status}` |
-
----
-
-### Step 6 — User Identity on Spans and Logs
-
-Create a shared `HandlerInterceptor` (or Spring MVC `ObservationConvention`) that fires after the `UserIdResolverService` resolves the internal UUID. Add to each service that performs user resolution (cart, order, reviews, user):
-
-**In the service layer, after resolution:**
-
-```java
-import io.micrometer.tracing.Span;
-import io.micrometer.tracing.Tracer;
-import org.slf4j.MDC;
-
-// Inject Tracer via @RequiredArgsConstructor
-Span currentSpan = tracer.currentSpan();
-if (currentSpan != null) {
-    currentSpan.tag("user.id", resolvedUserId.toString());
-}
-MDC.put("user.id", resolvedUserId.toString());
-// ... proceed with business logic ...
-MDC.remove("user.id"); // clean up in finally block
-```
-
-Use `io.micrometer.tracing.Tracer` (Micrometer Tracing) — already on the classpath via `spring-boot-starter-opentelemetry`. Do **not** import the raw OTel SDK `Tracer`.
-
-**Validates:** In Tempo, querying `{span.user.id="<uuid>"}` returns all spans for that user's session. In Loki, `{user.id="<uuid>"}` returns all log lines.
-
----
-
-### Step 7 — Custom Spans — cart-service Checkout Pipeline
-
-Inject `io.micrometer.tracing.Tracer` into `CartCheckoutService` and wrap the two phases:
-
-```java
-// Initiate phase
-Span validateSpan = tracer.nextSpan().name("checkout.validate").start();
-try (Tracer.SpanInScope ws = tracer.withSpan(validateSpan)) {
-    // validate cart, resolve user, call order-service
-} finally {
-    validateSpan.end();
-}
-
-// Confirm phase
-Span confirmSpan = tracer.nextSpan().name("checkout.confirm").start();
-try (Tracer.SpanInScope ws = tracer.withSpan(confirmSpan)) {
-    // confirm with order-service, clear cart
-} finally {
-    confirmSpan.end();
-}
-```
-
-**Validates:** Tempo flame graph for a checkout request shows `checkout.validate` and `checkout.confirm` sub-spans with their individual durations.
-
----
-
-### Step 8 — Custom Span — user-service sub→userId Resolution
-
-Inject `Tracer` into `UserIdResolverService`. Wrap the cache-miss DB lookup:
-
-```java
-Span span = tracer.nextSpan().name("user.resolve.idp_subject").start();
-try (Tracer.SpanInScope ws = tracer.withSpan(span)) {
-    span.tag("cache.hit", "false");
-    UUID id = userRepository.findByIdpSubject(idpSubject)
-        .orElseThrow(() -> new ResourceNotFoundException("User", idpSubject))
-        .getId();
-    span.tag("user.id", id.toString());
-    return id;
-} finally {
-    span.end();
-}
-```
-
-For cache hits, add only the `span.tag("cache.hit", "true")` call (no DB span is emitted).
-
----
-
-### Step 9 — Structured Log Conventions (incremental)
-
-As each service's service-layer classes are touched during the steps above, replace ad-hoc log strings with parameterised key=value style:
-
-```java
-// Before
-log.info("Order created for user {}", userId);
-
-// After
-log.info("Order created orderId={} userId={} totalAmount={} itemCount={}",
-    order.getId(), userId, order.getTotalAmount(), order.getItemCount());
-```
-
-Use the field names defined in [Section 2.7](#27-structured-log-conventions-to-be) consistently across all services so Loki label queries work uniformly.
-
----
-
-## 5. Signal Reference — Metrics Catalogue
-
-| Metric Name | Type | Tags | Unit | Emitting Service |
-|-------------|------|------|------|-----------------|
-| `orders.created` | Counter | `status` | — | order-service |
-| `orders.status.changed` | Counter | `from`, `to` | — | order-service |
-| `order.value.amount` | DistributionSummary | — | currency units | order-service |
-| `cart.items.added` | Counter | — | — | cart-service |
-| `cart.checkout.initiated` | Counter | — | — | cart-service |
-| `cart.checkout.confirmed` | Counter | `result` (success/failure) | — | cart-service |
-| `cache.gets` | Counter | `cache`, `result` (hit/miss) | — | cart-service (Caffeine) |
-| `cache.evictions` | Counter | `cache` | — | cart-service (Caffeine) |
-| `products.created` | Counter | `category` | — | product-service |
-| `product.search.results` | DistributionSummary | — | items | product-service |
-| `reviews.submitted` | Counter | — | — | reviews-service |
-| `review.rating` | DistributionSummary | — | rating (1–5) | reviews-service |
-| `users.registered` | Counter | — | — | user-service |
-| `users.idp.resolved` | Counter | `cache` (hit/miss) | — | user-service |
-| `notifications.sent` | Counter | `type`, `status` | — | notification-service |
-
-All standard JVM, HTTP, DB, and Kafka metrics continue to be emitted automatically.
-
----
-
-## 6. Signal Reference — Custom Spans Catalogue
-
-| Span Name | Service | Parent Span | Key Tags |
-|-----------|---------|-------------|----------|
-| `checkout.validate` | cart-service | `POST /api/v1/checkout/initiate` | `user.id` |
-| `checkout.reserve` | cart-service | `POST /api/v1/checkout/initiate` | `order.id` |
-| `checkout.confirm` | cart-service | `POST /api/v1/checkout/confirm` | `order.id`, `result` |
-| `order.persist` | order-service | Kafka `order.created.v1` consumer | `order.id`, `user.id` |
-| `user.resolve.idp_subject` | user-service | any HTTP span | `cache.hit`, `user.id` |
-
-All standard HTTP, DB (JDBC + MongoDB), and Kafka spans continue to be emitted automatically.
+1. Start from an ERROR log in Loki.
+2. Open linked trace in Tempo.
+3. Inspect slow/error child spans.
+4. Pivot back to logs for that `trace_id` and service.
+5. Confirm root cause with domain identifiers (`orderId`, `productId`, `user.id`).

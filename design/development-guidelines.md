@@ -1658,11 +1658,17 @@ if (currentSpan != null) {
 
 #### Custom spans catalogue (implemented)
 
-| Span name | Service | Key tags |
-|-----------|---------|----------|
-| `checkout.validate` | cart-service | `cart.item.count` |
-| `checkout.reserve` | cart-service | `order.id` |
-| `user.resolve.idp_subject` | cart-service, order-service, reviews-service | `cache.hit`, `user.id` |
+| Span name | Service | Trigger point | Key tags |
+|-----------|---------|---------------|----------|
+| `cart.checkout` | cart-service | `CartService.checkout` parent flow span | `user.id` |
+| `checkout.validate` | cart-service | cart validation + item mapping before order call | `cart.item.count` |
+| `checkout.reserve` | cart-service | order creation call to order-service | `order.id` |
+| `checkout.confirm` | cart-service | checkout completion/failure branch | `order.id`, `result` |
+| `order.confirm` | order-service | `OrderService.confirmOrder` parent flow span | `order.id`, `user.id` |
+| `order.confirm.reserve_stock` | order-service | stock reservation call to product-service | `order.id`, `result` |
+| `order.confirm.persist_status` | order-service | status transition persist (`PENDING` -> `CONFIRMED`) | `order.id`, `from_status`, `to_status` |
+| `order.confirm.publish_event` | order-service | Kafka publish `order.confirmed.v1` | `order.id`, `result` |
+| `user.resolve.idp_subject` | cart-service, order-service, reviews-service | internal user resolution from JWT `sub` | `cache.hit`, `user.id` |
 
 #### Unit testing with Tracer
 

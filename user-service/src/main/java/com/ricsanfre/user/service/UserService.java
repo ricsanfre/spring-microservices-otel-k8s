@@ -35,15 +35,17 @@ public class UserService {
     @Transactional
     public UserResponse getOrCreateCurrentUser(Authentication authentication) {
         String idpSubject = JwtUtils.getSubject(authentication);
-        log.debug("getOrCreateCurrentUser idpSubject={}", idpSubject);
+        log.debug("operation=user.get_or_create outcome=start idpSubject={}", idpSubject);
         User user = userRepository.findByIdpSubject(idpSubject)
                 .orElseGet(() -> {
                     String email = JwtUtils.getEmail(authentication);
                     return userRepository.findByEmail(email)
                             .map(existing -> {
-                                log.info("Re-linking user profile email={} to new idp_subject={}", email, idpSubject);
+                                log.info("operation=user.relink outcome=start email={} idpSubject={}", email, idpSubject);
                                 existing.setIdpSubject(idpSubject);
-                                return userRepository.save(existing);
+                                User relinked = userRepository.save(existing);
+                                log.info("operation=user.relink outcome=success userId={} email={}", relinked.getId(), relinked.getEmail());
+                                return relinked;
                             })
                             .orElseGet(() -> lazyRegister(authentication, idpSubject));
                 });
@@ -52,6 +54,7 @@ public class UserService {
         if (currentSpan != null) currentSpan.tag("user.id", user.getId().toString());
         MDC.put("user.id", user.getId().toString());
         try {
+            log.debug("operation=user.get_or_create outcome=success userId={}", user.getId());
             return toResponse(user);
         } finally {
             MDC.remove("user.id");
@@ -83,7 +86,7 @@ public class UserService {
 
     @Transactional
     public UserResponse update(UUID id, UpdateUserRequest request, Authentication authentication) {
-        log.info("Updating user profile id={} with data={}", id, request);
+        log.info("operation=user.update outcome=start userId={}", id);
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User", id));
 
@@ -115,12 +118,12 @@ public class UserService {
         }
 
         User saved = userRepository.save(user);
-        log.info("User profile updated id={}", id);
+        log.info("operation=user.update outcome=success userId={}", id);
         return toResponse(saved);
     }
 
     private User lazyRegister(Authentication authentication, String idpSubject) {
-        log.info("Lazy-registering new user profile for idp_subject={}", idpSubject);
+        log.info("operation=user.register_lazy outcome=start idpSubject={}", idpSubject);
         User newUser = User.builder()
                 .idpSubject(idpSubject)
                 .email(JwtUtils.getEmail(authentication))
@@ -130,6 +133,7 @@ public class UserService {
                 .build();
         User saved = userRepository.save(newUser);
         Counter.builder("users.registered").register(meterRegistry).increment();
+            log.info("operation=user.register_lazy outcome=success userId={} idpSubject={}", saved.getId(), idpSubject);
         return saved;
     }
 

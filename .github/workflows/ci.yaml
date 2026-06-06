@@ -38,6 +38,15 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  observability-config-check:
+    name: Observability config check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate trace/log correlation wiring
+        run: make obs-correlation-check
+
   # ── Change detection ──────────────────────────────────────────────────────
   detect-changes:
     name: Detect changed services

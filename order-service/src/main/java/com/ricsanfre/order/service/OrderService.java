@@ -17,6 +17,7 @@ import com.ricsanfre.order.repository.OrderRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,7 +51,7 @@ public class OrderService {
     // ── Create ────────────────────────────────────────────────────────────────
 
     public OrderResponse createOrder(CreateOrderRequest request, Authentication auth) {
-        log.debug("createOrder itemCount={}", request.getItems().size());
+        log.debug("operation=order.create outcome=start itemCount={}", request.getItems().size());
         UUID userId = resolveUserId(request, auth);
 
         io.micrometer.tracing.Span currentSpan = tracer.currentSpan();
@@ -90,8 +91,8 @@ public class OrderService {
                     .register(meterRegistry)
                     .record(saved.getTotalAmount());
 
-            log.info("Created PENDING order orderId={} userId={} itemCount={} totalAmount={}",
-                    saved.getId(), saved.getUserId(), saved.getItems().size(), saved.getTotalAmount());
+                log.info("operation=order.create outcome=success orderId={} userId={} itemCount={} totalAmount={} status={}",
+                    saved.getId(), saved.getUserId(), saved.getItems().size(), saved.getTotalAmount(), saved.getStatus());
             return toResponse(saved);
         } finally {
             MDC.remove("user.id");
@@ -101,7 +102,7 @@ public class OrderService {
     // ── Confirm ───────────────────────────────────────────────────────────────
 
     public OrderResponse confirmOrder(UUID id, Authentication auth) {
-        log.debug("confirmOrder orderId={}", id);
+        log.debug("operation=order.confirm outcome=start orderId={}", id);
         Order order = findOrderById(id);
 
         if (order.getStatus() != OrderStatus.PENDING) {
@@ -115,34 +116,79 @@ public class OrderService {
                 .map(i -> new ProductServiceClient.StockReserveItem(i.getProductId(), i.getQuantity()))
                 .toList();
 
-        try {
-            productServiceClient.reserveStock(new ProductServiceClient.StockReserveRequest(items));
-        } catch (HttpClientErrorException.Conflict ex) {
-            throw new BusinessRuleException("Insufficient stock for one or more items in order " + id);
-        } catch (NoFallbackAvailableException ex) {
-            throw new BusinessRuleException(
-                    "Product service is temporarily unavailable — please retry confirming order " + id);
+        Span confirmSpan = tracer.nextSpan().name("order.confirm").start();
+        try (Tracer.SpanInScope confirmScope = tracer.withSpan(confirmSpan)) {
+            confirmSpan.tag("order.id", id.toString());
+            confirmSpan.tag("user.id", order.getUserId().toString());
+
+            Span reserveSpan = tracer.nextSpan().name("order.confirm.reserve_stock").start();
+            try (Tracer.SpanInScope reserveScope = tracer.withSpan(reserveSpan)) {
+                reserveSpan.tag("order.id", id.toString());
+                productServiceClient.reserveStock(new ProductServiceClient.StockReserveRequest(items));
+                reserveSpan.tag("result", "success");
+            } catch (HttpClientErrorException.Conflict ex) {
+                reserveSpan.error(ex);
+                reserveSpan.tag("result", "failure");
+                throw new BusinessRuleException("Insufficient stock for one or more items in order " + id);
+            } catch (NoFallbackAvailableException ex) {
+                reserveSpan.error(ex);
+                reserveSpan.tag("result", "failure");
+                throw new BusinessRuleException(
+                        "Product service is temporarily unavailable — please retry confirming order " + id);
+            } finally {
+                reserveSpan.end();
+            }
+
+            Span persistSpan = tracer.nextSpan().name("order.confirm.persist_status").start();
+            Order saved;
+            try (Tracer.SpanInScope persistScope = tracer.withSpan(persistSpan)) {
+                persistSpan.tag("order.id", id.toString());
+                persistSpan.tag("from_status", OrderStatus.PENDING.name());
+                persistSpan.tag("to_status", OrderStatus.CONFIRMED.name());
+                order.setStatus(OrderStatus.CONFIRMED);
+                saved = orderRepository.save(order);
+            } catch (RuntimeException e) {
+                persistSpan.error(e);
+                throw e;
+            } finally {
+                persistSpan.end();
+            }
+
+            Counter.builder("orders.status.changed")
+                    .tag("from", OrderStatus.PENDING.name())
+                    .tag("to", OrderStatus.CONFIRMED.name())
+                    .register(meterRegistry)
+                    .increment();
+
+            Span publishSpan = tracer.nextSpan().name("order.confirm.publish_event").start();
+            try (Tracer.SpanInScope publishScope = tracer.withSpan(publishSpan)) {
+                publishSpan.tag("order.id", saved.getId().toString());
+                eventPublisher.publishOrderConfirmed(new OrderConfirmedEvent(
+                        saved.getId(),
+                        saved.getUserId(),
+                        saved.getTotalAmount(),
+                        saved.getItems().size(),
+                        Instant.now()));
+                publishSpan.tag("result", "success");
+            } catch (RuntimeException e) {
+                publishSpan.error(e);
+                publishSpan.tag("result", "failure");
+                throw e;
+            } finally {
+                publishSpan.end();
+            }
+
+            log.info("operation=order.confirm outcome=success orderId={} userId={} status={}",
+                    saved.getId(), saved.getUserId(), saved.getStatus());
+
+            return toResponse(saved);
+        } catch (RuntimeException e) {
+            confirmSpan.error(e);
+            log.warn("operation=order.confirm outcome=failure orderId={} reason={}", id, e.toString());
+            throw e;
+        } finally {
+            confirmSpan.end();
         }
-
-        order.setStatus(OrderStatus.CONFIRMED);
-        Order saved = orderRepository.save(order);
-
-        Counter.builder("orders.status.changed")
-                .tag("from", OrderStatus.PENDING.name())
-                .tag("to", OrderStatus.CONFIRMED.name())
-                .register(meterRegistry)
-                .increment();
-
-        log.info("Confirmed order orderId={} userId={}", saved.getId(), saved.getUserId());
-
-        eventPublisher.publishOrderConfirmed(new OrderConfirmedEvent(
-                saved.getId(),
-                saved.getUserId(),
-                saved.getTotalAmount(),
-                saved.getItems().size(),
-                Instant.now()));
-
-        return toResponse(saved);
     }
 
     // ── Read ──────────────────────────────────────────────────────────────────
@@ -174,7 +220,7 @@ public class OrderService {
     // ── Update ────────────────────────────────────────────────────────────────
 
     public OrderResponse updateStatus(UUID id, UpdateOrderStatusRequest request) {
-        log.debug("updateStatus orderId={}", id);
+        log.debug("operation=order.update_status outcome=start orderId={}", id);
         Order order = findOrderById(id);
         OrderStatus previousStatus = order.getStatus();
         OrderStatus newStatus = OrderStatus.valueOf(request.getStatus().getValue());
@@ -185,7 +231,7 @@ public class OrderService {
                 .tag("to", newStatus.name())
                 .register(meterRegistry)
                 .increment();
-        log.info("Order status updated orderId={} from={} to={}", id, previousStatus, newStatus);
+        log.info("operation=order.update_status outcome=success orderId={} from={} to={}", id, previousStatus, newStatus);
         return toResponse(saved);
     }
 

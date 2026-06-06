@@ -45,7 +45,8 @@ public class ReviewService {
     }
 
     public ReviewResponse createReview(String idpSubject, CreateReviewRequest request) {
-        log.debug("createReview productId={} orderId={}", request.getProductId(), request.getOrderId());
+        log.debug("operation=review.create outcome=start productId={} orderId={}",
+            request.getProductId(), request.getOrderId());
         // 1. Resolve JWT sub → internal userId (ADR-004 lazy resolution)
         UUID userId = userIdResolverService.resolveInternalId(idpSubject);
 
@@ -101,16 +102,20 @@ public class ReviewService {
         Counter.builder("reviews.submitted").register(meterRegistry).increment();
         DistributionSummary.builder("review.rating").register(meterRegistry).record(request.getRating());
 
-        log.info("Review created id={} productId={} orderId={} userId={}",
-                saved.getId(), saved.getProductId(), saved.getOrderId(), saved.getUserId());
-        return toResponse(saved);
+            log.info("operation=review.create outcome=success reviewId={} productId={} orderId={} userId={}",
+                    saved.getId(), saved.getProductId(), saved.getOrderId(), saved.getUserId());
+            return toResponse(saved);
+        } catch (RuntimeException e) {
+            log.warn("operation=review.create outcome=failure productId={} orderId={} reason={}",
+                    request.getProductId(), request.getOrderId(), e.toString());
+            throw e;
         } finally {
             MDC.remove("user.id");
         }
     }
 
     public void deleteReview(String reviewId, String idpSubject) {
-        log.debug("deleteReview reviewId={}", reviewId);
+        log.debug("operation=review.delete outcome=start reviewId={}", reviewId);
         Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new ResourceNotFoundException("Review", reviewId));
 
@@ -120,7 +125,7 @@ public class ReviewService {
         }
 
         reviewRepository.deleteById(reviewId);
-        log.info("Review deleted id={}", reviewId);
+        log.info("operation=review.delete outcome=success reviewId={}", reviewId);
     }
 
     private ReviewResponse toResponse(Review review) {

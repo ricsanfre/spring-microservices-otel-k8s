@@ -14,6 +14,7 @@ import com.ricsanfre.order.kafka.OrderEventPublisher;
 import com.ricsanfre.order.repository.OrderRepository;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,8 +27,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -64,6 +63,12 @@ class OrderServiceTest {
     @Mock
     private Tracer tracer;
 
+    @Mock
+    private Span mockSpan;
+
+    @Mock
+    private Tracer.SpanInScope mockSpanInScope;
+
     @InjectMocks
     private OrderService orderService;
 
@@ -79,6 +84,12 @@ class OrderServiceTest {
     void setUp() {
         ownerAuth = jwtAuth(SUB);
         otherAuth = jwtAuth("other-sub");
+
+        lenient().when(tracer.nextSpan()).thenReturn(mockSpan);
+        lenient().when(mockSpan.name(anyString())).thenReturn(mockSpan);
+        lenient().when(mockSpan.start()).thenReturn(mockSpan);
+        lenient().when(mockSpan.tag(anyString(), anyString())).thenReturn(mockSpan);
+        lenient().when(tracer.withSpan(any())).thenReturn(mockSpanInScope);
     }
 
     // ── createOrder ───────────────────────────────────────────────────────────
