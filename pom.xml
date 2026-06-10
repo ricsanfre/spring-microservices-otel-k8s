@@ -157,6 +157,21 @@
                         <from>
                             <!-- Slim JRE matching java.version property -->
                             <image>eclipse-temurin:25-jre-alpine</image>
+                            <!-- Multi-arch: build for both AMD64 and ARM64.
+                                 Java bytecode is platform-agnostic; Jib pulls the
+                                 base image for each platform and creates a shared
+                                 set of application layers, producing an OCI image
+                                 index (manifest list) that works on both architectures. -->
+                            <platforms>
+                                <platform>
+                                    <architecture>amd64</architecture>
+                                    <os>linux</os>
+                                </platform>
+                                <platform>
+                                    <architecture>arm64</architecture>
+                                    <os>linux</os>
+                                </platform>
+                            </platforms>
                         </from>
                         <to>
                             <image>${docker.registry}/${project.artifactId}:${project.version}</image>

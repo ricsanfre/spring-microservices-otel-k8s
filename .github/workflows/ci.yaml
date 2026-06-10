@@ -206,12 +206,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push frontend-service image
+      - name: Set up QEMU for multi-arch emulation
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build and push frontend-service image (multi-arch)
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: docker/build-push-action@v7
         with:
           context: frontend-service
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository }}/frontend-service:${{ github.sha }}
             ghcr.io/${{ github.repository }}/frontend-service:latest
