@@ -113,7 +113,7 @@ services:
   #
   # SCRAM users are created by the kafka-init service after the broker is healthy.
   kafka:
-    image: apache/kafka:4.2.0
+    image: apache/kafka:4.3.1
     profiles: [infra]
     ports:
       - "9092:9092"   # APP — SASL_PLAINTEXT for microservices / host JARs
@@ -156,7 +156,7 @@ services:
   # Connects via the INTERNAL (PLAINTEXT) listener — no credentials required.
   # Set *_KAFKA_PASSWORD env vars to override dev-default passwords.
   kafka-init:
-    image: apache/kafka:4.2.0
+    image: apache/kafka:4.3.1
     profiles: [infra]
     depends_on:
       kafka:
