@@ -7,7 +7,7 @@
 
 [tools]
 # Language runtimes
-java    = "temurin-25"
+java    = "temurin-25.0.4+101.0.LTS"
 maven   = "3.9"
 node    = "24"
 
