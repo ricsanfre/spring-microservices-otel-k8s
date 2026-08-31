@@ -16,7 +16,7 @@ kubectl   = "1.36"
 helm      = "latest"
 k3d       = "latest"
 kustomize = "latest"
-flux2     = "2.8.1"
+flux2     = "2.9.5"
 
 # Utilities
 jq      = "latest"
